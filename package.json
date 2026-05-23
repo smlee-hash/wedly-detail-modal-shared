@@ -1,0 +1,37 @@
+{
+  "name": "@wedly/detail-modal-shared",
+  "version": "0.1.0",
+  "description": "WEDLY 하이브·ERP 공용 DB 상세모달 부품 모음 (DetailModal, MeetingsTab, SettlementInfoTab, CustomSelect 등)",
+  "private": false,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles": "./src/styles.css"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "lint": "echo 'lint pending'"
+  },
+  "peerDependencies": {
+    "next": ">=15.0.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smlee-hash/wedly-detail-modal-shared.git"
+  }
+}
