@@ -1,6 +1,6 @@
 {
   "name": "@wedly/detail-modal-shared",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "WEDLY 하이브·일루아·ERP 공용 DB 상세모달 부품 모음 (DetailModal, MeetingsTab, SettlementInfoTab, FilesTab, CustomSelect, SelectDropdownBody 등)",
   "private": false,
   "type": "module",
