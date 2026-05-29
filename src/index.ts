@@ -10,6 +10,9 @@ export { default as MeetingsTab } from "./components/MeetingsTab";
 
 export { default as SettlementInfoTab } from "./components/SettlementInfoTab";
 
+export { FilesTab, detectFileTag } from "./components/FilesTab";
+export type { FileMeta } from "./components/FilesTab";
+
 export { default as SelectDropdownBody } from "./components/SelectDropdown";
 export type {
   SelectDropdownBodyProps,
