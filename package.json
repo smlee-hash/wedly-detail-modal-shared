@@ -1,6 +1,6 @@
 {
   "name": "@wedly/detail-modal-shared",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "WEDLY 하이브·일루아·ERP 공용 DB 상세모달 부품 모음 (DetailModal, MeetingsTab, SettlementInfoTab, FilesTab, CustomSelect, SelectDropdownBody 등)",
   "private": false,
   "type": "module",
@@ -20,7 +20,8 @@
   "peerDependencies": {
     "next": ">=15.0.0",
     "react": ">=18.0.0",
-    "react-dom": ">=18.0.0"
+    "react-dom": ">=18.0.0",
+    "@wedly/ui-shared": "*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
