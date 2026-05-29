@@ -5,12 +5,80 @@
 // 캘린더 뷰는 이 _meetings 를 펼쳐서 모든 방문 일정을 표시.
 // 공용 부품(하이브 등). 앱-내부 헬퍼에 의존하지 않음(cn 은 패키지 내부, 삭제확인은 자체 모달).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 
 const ORDINAL_KO = ["1차", "2차", "3차", "4차", "5차", "6차", "7차", "8차", "9차", "10차"];
 
 type Meeting = { datetime: string; memo?: string; assignee?: string };
+
+// 담당 사무장 선택 — WEDLY 커스텀 드롭다운 (native <select> 대신 디자인 통일)
+function AssigneeSelect({
+  value,
+  options,
+  disabled = false,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  disabled?: boolean;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative mt-1">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setOpen((v) => !v)}
+        className={`flex w-full items-center justify-between px-2 py-1.5 text-[13px] border border-wedly-bd rounded-lg bg-white text-left focus:outline-none focus:ring-1 focus:ring-wedly-accent ${disabled ? "opacity-60 cursor-not-allowed" : "hover:border-wedly-accent/40"}`}
+      >
+        <span className={value ? "text-wedly-t1" : "text-wedly-muted"}>{value || "선택 안 함"}</span>
+        <svg className="w-3.5 h-3.5 text-wedly-muted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && !disabled && (
+        <div className="absolute left-0 top-full mt-1 w-full max-h-[220px] overflow-y-auto bg-white border border-wedly-bd rounded-xl shadow-lg z-50 py-1">
+          <button
+            type="button"
+            onClick={() => { onChange(""); setOpen(false); }}
+            className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-wedly-bg-gray flex items-center gap-2 ${!value ? "bg-wedly-bg-blue" : ""}`}
+          >
+            <span className="text-wedly-muted">선택 안 함</span>
+            {!value && <span className="ml-auto text-wedly-accent text-xs">✓</span>}
+          </button>
+          {options.map((n) => {
+            const active = n === value;
+            return (
+              <button
+                key={n}
+                type="button"
+                onClick={() => { onChange(n); setOpen(false); }}
+                className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-wedly-bg-gray flex items-center gap-2 ${active ? "bg-wedly-bg-blue" : ""}`}
+              >
+                <span className="text-wedly-t1">{n}</span>
+                {active && <span className="ml-auto text-wedly-accent text-xs">✓</span>}
+              </button>
+            );
+          })}
+          {options.length === 0 && (
+            <p className="px-3 py-2 text-[12px] text-wedly-muted">등록된 담당자가 없습니다.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function parseRaw(raw: unknown): Meeting[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
@@ -38,6 +106,7 @@ export default function MeetingsTab({
   userNames = [],
   fieldLabels,
   onFieldLabelsChange,
+  showAssignee = false,
 }: {
   rawValue: unknown;
   onSave: (jsonValue: string) => void;
@@ -47,6 +116,8 @@ export default function MeetingsTab({
   fieldLabels?: { datetime: string; assignee: string; memo: string };
   /** 어드민이 라벨 변경 시 호출 — 모든 사용자에게 즉시 반영 */
   onFieldLabelsChange?: (next: { datetime: string; assignee: string; memo: string }) => void;
+  /** true면 방문 일시 옆에 담당자 선택 칸 노출 (ERP용). 기본 false=하이브 동작 보존 */
+  showAssignee?: boolean;
 }) {
   const labels = fieldLabels || { datetime: "방문 일시", assignee: "담당 팀장", memo: "메모" };
   const [editingLabel, setEditingLabel] = useState<keyof typeof labels | null>(null);
@@ -196,8 +267,8 @@ export default function MeetingsTab({
               )}
             </div>
 
-            {/* 담당자 칸은 사용자 요청으로 제거 — 미팅 카드에는 방문 일시 + 메모만 노출 */}
-            <div>
+            {/* 방문 일시 (+ showAssignee 면 담당 사무장 칸) */}
+            <div className={showAssignee ? "grid grid-cols-1 md:grid-cols-2 gap-2.5" : undefined}>
               <label className="block">
                 {editingLabel === "datetime" ? (
                   <input
@@ -225,6 +296,34 @@ export default function MeetingsTab({
                   className="mt-1 block w-full px-3 py-2.5 sm:py-2 text-[15px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent hover:border-wedly-accent/50 transition-colors disabled:bg-wedly-bg-gray disabled:text-wedly-muted disabled:cursor-not-allowed"
                 />
               </label>
+              {showAssignee && (
+                <div className="block">
+                  {editingLabel === "assignee" ? (
+                    <input
+                      autoFocus
+                      value={labelDraft}
+                      onChange={(e) => setLabelDraft(e.target.value)}
+                      onBlur={commitLabel}
+                      onKeyDown={(e) => { if (e.key === "Enter") commitLabel(); if (e.key === "Escape") setEditingLabel(null); }}
+                      className="text-[11px] font-semibold text-wedly-t2 border border-wedly-accent rounded px-1 py-0.5 outline-none focus:ring-2 focus:ring-wedly-accent/20 w-32"
+                    />
+                  ) : (
+                    <span
+                      className={`text-[11px] font-semibold text-wedly-t2 ${onFieldLabelsChange ? "cursor-pointer hover:text-wedly-accent" : ""}`}
+                      onClick={() => startEditLabel("assignee")}
+                      title={onFieldLabelsChange ? "클릭하여 컬럼명 수정" : undefined}
+                    >
+                      {labels.assignee}{onFieldLabelsChange && <span className="ml-0.5 text-wedly-muted/60">✎</span>}
+                    </span>
+                  )}
+                  <AssigneeSelect
+                    value={m.assignee || ""}
+                    options={userNames}
+                    disabled={readOnly}
+                    onChange={(v) => updateField(idx, "assignee", v)}
+                  />
+                </div>
+              )}
             </div>
 
             <label className="block">
