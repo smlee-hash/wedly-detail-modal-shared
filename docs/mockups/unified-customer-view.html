@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>통합 고객 보기 — 미리보기</title>
+<style>
+  :root{
+    --navy:#1f2a44; --ink:#243044; --muted:#6b7686;
+    --bd:#e3e8ef; --bg:#f6f8fb; --accent:#2563eb; --accent-bg:#eaf1ff;
+    --green:#15a34a; --green-bg:#e8f7ee; --orange:#d97706; --orange-bg:#fdf2e3;
+    --gray-bg:#eef1f5; --red:#dc2626;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#dfe4ec;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:var(--ink);padding:28px}
+  .note{max-width:900px;margin:0 auto 16px;color:#475063;font-size:13px;line-height:1.6}
+  .note b{color:var(--navy)}
+  .card{max-width:900px;margin:0 auto;background:#fff;border:1px solid var(--bd);border-radius:14px;box-shadow:0 8px 30px rgba(20,30,50,.08);overflow:hidden}
+  .titlebar{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--bd)}
+  .titlebar .t{font-weight:800;color:var(--navy);font-size:16px}
+  .titlebar .x{color:#9aa3b2;font-size:18px}
+
+  /* 1단계 탭 */
+  .tabs1{display:flex;gap:6px;padding:10px 14px 0;flex-wrap:wrap;background:var(--bg);border-bottom:1px solid var(--bd)}
+  .tab{display:flex;align-items:center;gap:7px;padding:9px 14px;border:1px solid var(--bd);border-bottom:none;border-radius:10px 10px 0 0;background:#fff;color:#566; font-size:13.5px;font-weight:600;cursor:default;position:relative;top:1px}
+  .tab .dot{width:8px;height:8px;border-radius:50%}
+  .tab.active{color:var(--navy);font-weight:800;border-color:var(--bd);box-shadow:0 -2px 0 var(--accent) inset}
+  .tab.fixed{background:#f0f3f8;color:var(--navy);font-weight:800}
+  .tab .pin{font-size:11px}
+  .tab .grip{color:#c2c9d4;font-size:12px;margin-left:2px}
+  .dot.g{background:var(--green)} .dot.o{background:var(--orange)} .dot.x{background:#cbd3df}
+
+  .body{padding:22px 22px 24px}
+  .sec-title{font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.04em;margin:0 0 10px}
+
+  /* 기본정보 grid */
+  .info{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 28px;margin-bottom:22px}
+  .info .row{display:flex;justify-content:space-between;border-bottom:1px dashed var(--bd);padding:9px 2px}
+  .info .k{color:var(--muted);font-size:13px}
+  .info .v{color:var(--navy);font-weight:700;font-size:13.5px}
+
+  /* 전체 현황 요약 */
+  .sum{border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{background:var(--bg);color:var(--muted);font-weight:700;text-align:left;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:12px}
+  tbody td{padding:11px 14px;border-bottom:1px solid #eef1f5}
+  tbody tr:last-child td{border-bottom:none}
+  .dom{font-weight:800;color:var(--navy)}
+  .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:700}
+  .b-green{background:var(--green-bg);color:var(--green)}
+  .b-blue{background:var(--accent-bg);color:var(--accent)}
+  .b-orange{background:var(--orange-bg);color:var(--orange)}
+  .b-gray{background:var(--gray-bg);color:#7a8597}
+  .ptn{color:var(--ink);font-weight:600}
+  .muted{color:#9aa3b2}
+  .open{color:var(--accent);font-weight:700;font-size:12.5px}
+
+  .hint{margin-top:18px;padding:12px 14px;background:var(--accent-bg);border:1px solid #d6e3ff;border-radius:10px;color:#2b4a86;font-size:12.5px;line-height:1.6}
+  .hint b{color:var(--accent)}
+</style>
+</head>
+<body>
+  <div class="note">
+    아래는 <b>“고객 한 명”을 열었을 때</b>의 통합 보기 미리보기입니다. 맨 윗줄이 <b>1단계(영역) 탭</b>이고,
+    지금은 <b>[기본정보]</b> 탭이 선택된 모습입니다. <b>기본정보 탭 안에 “전체 영역 현황 요약”</b>이 어떻게 들어가는지 보여줍니다.
+  </div>
+
+  <div class="card">
+    <div class="titlebar">
+      <div class="t">(주)가나다전자 · 통합 보기</div>
+      <div class="x">✕</div>
+    </div>
+
+    <!-- 1단계 영역 탭 -->
+    <div class="tabs1">
+      <div class="tab active fixed"><span class="pin">📌</span> 기본정보</div>
+      <div class="tab"><span class="dot g"></span> 경정청구 <span class="grip">⋮⋮</span></div>
+      <div class="tab"><span class="dot g"></span> 정책자금 <span class="grip">⋮⋮</span></div>
+      <div class="tab"><span class="dot o"></span> 무상지원금 <span class="grip">⋮⋮</span></div>
+      <div class="tab"><span class="dot g"></span> 노무 <span class="grip">⋮⋮</span></div>
+      <div class="tab"><span class="dot x"></span> 기업인증 <span class="grip">⋮⋮</span></div>
+      <div class="tab"><span class="dot x"></span> 특허 <span class="grip">⋮⋮</span></div>
+    </div>
+
+    <div class="body">
+      <!-- 기본정보 -->
+      <div class="sec-title">기본정보</div>
+      <div class="info">
+        <div class="row"><span class="k">상호명</span><span class="v">(주)가나다전자</span></div>
+        <div class="row"><span class="k">대표자</span><span class="v">홍길동</span></div>
+        <div class="row"><span class="k">사업자등록번호</span><span class="v">123-45-67890</span></div>
+        <div class="row"><span class="k">대표 연락처</span><span class="v">010-1234-5678</span></div>
+      </div>
+
+      <!-- 전체 영역 현황 요약 (← 이게 '한 줄 요약') -->
+      <div class="sec-title">전체 영역 현황 &nbsp;<span class="muted" style="font-weight:600">— 한눈에 보기</span></div>
+      <div class="sum">
+        <table>
+          <thead>
+            <tr><th style="width:22%">영역</th><th style="width:20%">담당 파트너</th><th style="width:26%">진행상태</th><th style="width:18%">핵심 날짜</th><th style="width:14%"></th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="dom">경정청구</td><td class="ptn">하이브</td><td><span class="badge b-green">인용완료</span></td><td>2026-04-12</td><td><span class="open">탭 열기 →</span></td></tr>
+            <tr><td class="dom">정책자금</td><td class="ptn">일루아</td><td><span class="badge b-blue">계약완료</span></td><td>2026-03-30</td><td><span class="open">탭 열기 →</span></td></tr>
+            <tr><td class="dom">무상지원금</td><td class="ptn">애드스파크</td><td><span class="badge b-orange">상담완료</span></td><td>2026-05-02</td><td><span class="open">탭 열기 →</span></td></tr>
+            <tr><td class="dom">노무</td><td class="ptn">하이브</td><td><span class="badge b-green">신청완료</span></td><td>2026-05-18</td><td><span class="open">탭 열기 →</span></td></tr>
+            <tr><td class="dom muted">기업인증</td><td class="muted">—</td><td><span class="badge b-gray">진행 없음</span></td><td class="muted">—</td><td><span class="muted">＋ 추가</span></td></tr>
+            <tr><td class="dom muted">특허</td><td class="muted">—</td><td><span class="badge b-gray">진행 없음</span></td><td class="muted">—</td><td><span class="muted">＋ 추가</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="hint">
+        ① 윗줄 <b>영역 탭</b>은 <b>기본정보가 맨 왼쪽 고정</b>, 나머지는 <b>⋮⋮ 끌어서 자리 바꾸기</b> 가능 ·
+        탭의 <b>색 점</b>은 진행 상태 표시.<br>
+        ② <b>영역 탭(예: 경정청구)</b>을 누르면 → 그 자리에서 <b>2단계 세부 섹션</b>
+        [히스토리(고정) · 미팅정보 · 계약정보 · 정산정보 · 환불정보 · 파일]이 끼워져 나옵니다(팝업 아님).
+      </div>
+    </div>
+  </div>
+</body>
+</html>
