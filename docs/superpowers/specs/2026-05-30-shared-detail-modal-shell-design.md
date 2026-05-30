@@ -106,8 +106,8 @@
 | `lib/expired-url.ts` | 순수 함수 | 그대로 복사 (lib/) | ✅ 1단계-A 완료 |
 | `_components/options.ts` | 데이터 헬퍼 | 공용에 이미 동일본 존재 → 등록 | ✅ 1단계-A 완료 |
 | `_components/utils.ts` | 데이터 헬퍼 | 공용본에 날짜 가드 3줄만 동기화 | ✅ 1단계-A 완료 |
-| `lib/open-file-with-refresh.ts` | 파일 열기 | 서버주소 2개(`/api/entries/${id}`·`/api/files/notion-refresh`)를 주입식으로 | ⏳ 1단계-B |
-| `_components/FieldEditors.tsx` | 셀·필드 편집기 | 권한·확인창·파일열기·드롭다운을 주입식으로 | ⏳ 1단계-B |
+| `lib/open-file-with-refresh.ts` | 파일 열기 | 서버주소 2개를 `refetchEntryUrl`·`notionRefreshUrl` 입력값으로(미지정 시 하이브/ERP 기본 경로), 안내문구 `expiredMessage` | ✅ 1단계-B 완료 |
+| `_components/FieldEditors.tsx` | 셀·필드 편집기 | 박힌 4가지를 입력값으로: 권한(`isAdmin`)·확인창(`dialog`=ShellDialog 묶음 모양)·파일열기(`openFile`)·드롭다운(`SelectDropdownBody`) | ✅ 1단계-B 완료 |
 | `_components/DetailModal.tsx` | 본체 | 공용 틀(DetailModalShell)로 일반화 — config.ts 약속대로 | ⏳ 1단계-C |
 | `_components/HistoryPanel.tsx` | 댓글·이력 | **옮기지 않음** — `renderHistoryPanel`로 통째 주입 | (주입) |
 
@@ -125,3 +125,32 @@
 모든 작업은 **공용 폴더 안에서만**(복사·신규) 한다. 하이브 원본 파일은 4단계(감싸개 교체)
 전까지 **건드리지 않는다** → 그때까지 운영 위험 0. 공용 폴더의 미등록 보조파일(options/utils)은
 실제 쓰이는 공용 부품(정산·미팅·파일·드롭다운 탭)이 부르지 않으므로 운영 영향 없음(조사 확인).
+
+### 10-6. 1단계-B 결과 — 편집기 주입 약속 + 1단계-D(하이브 감싸개)가 맞춰줄 것
+
+공용 `EditableFieldRow` 가 새로 받는 입력값(예전엔 하이브에 박혀 있던 것):
+
+| 입력값 | 타입 | 하이브 감싸개가 넘길 것 |
+|---|---|---|
+| `isAdmin?` | boolean | `useAccess().isAdmin` (없으면 false) |
+| `dialog` (필수) | `ShellDialog` | 하이브 `useWedlyDialog()` 를 **묶음 모양으로 변환**해서 |
+| `openFile` (필수) | `OpenFileFn` | `openFileWithRefresh` (기본 경로 그대로면 그대로 전달) |
+| `SelectDropdownBody` (필수) | 컴포넌트 | 하이브 `HiveSelectDropdownBody` 그대로 |
+
+**⚠️ 확인창 모양 차이 (1단계-D 에서 반드시 변환):** 하이브 `useWedlyDialog()` 는
+`confirm(메시지, {title, danger})` / `alert(메시지, {title})` 처럼 **메시지를 앞**에 받지만,
+공용 `ShellDialog` 는 `confirm({title, message, danger})` / `alert({title, message})` 처럼 **묶음**으로 받는다.
+→ 하이브 감싸개에서 얇은 어댑터로 변환:
+```ts
+const dialog: ShellDialog = {
+  confirm: ({ title, message, danger }) => hiveDialog.confirm(message ?? "", { title, danger }),
+  alert:   ({ title, message })         => hiveDialog.alert(message ?? "", { title }),
+};
+```
+이 변환만 해주면 파일 제거 확인·만료 안내가 예전과 100% 동일하게 뜬다(동작 0 변화).
+
+**`dialog` 를 필수로 둔 이유:** 파일 제거는 확인 없이 삭제하면 안 되므로(브라우저 기본 confirm 금지 규칙),
+편집기가 확인창을 반드시 받도록 강제 → 본체(1단계-C)는 파일 컬럼이 있으면 dialog 를 항상 넘겨야 함.
+
+**블라스트 반경(1단계-D 주의):** 하이브에서 `EditableFieldRow`·`SelectEditor` 는 상세 모달뿐 아니라
+**표 셀**도 같이 쓴다(AGENTS.md §5-4). 갈아끼울 때 두 호출 지점 모두 위 입력값을 넘겨야 한다(컴파일러가 누락을 잡아줌 — 그래서 props 주입 채택, context 아님).
