@@ -55,10 +55,13 @@ export type ShellPanel = {
 // ---------------------------------------------------------------------------
 
 export type ShellDataSource = {
-  /** 한 칸 값 저장. (기존 onUpdate 역할 — 행 1건의 한 컬럼을 서버에 반영) */
+  /** 한 칸 값을 서버 DB 에 저장 (예전 본체 안에 박혀 있던 직접 저장 호출).
+   *  ⚠️ 주의(증거 기반): 이것은 "사용자가 고친 그 값의 DB 저장"만 담당한다.
+   *  목록 화면 갱신·자동입력 규칙 실행은 별도 콜백 onFieldChange 가 맡는다(역할 분리). */
   patchField: (pageId: string, key: string, value: string | number | boolean | null) => void | Promise<void>;
-  /** 신규 행 생성. 미지정 시 "신규 등록" 동작 숨김. */
-  createRow?: (newRow: ShellRowData) => void | Promise<void>;
+  /** 신규 행 생성 — 입력값(밑줄키 제외)과 등록 시 함께 남길 코멘트를 받아 서버에 만들고,
+   *  서버가 만든 실제 행을 돌려준다(없으면 null). 미지정 시 "신규 등록" 동작 숨김. */
+  createRow?: (newRow: ShellRowData, comments?: string[]) => Promise<ShellRowData | null> | void;
   /** 파일 업로드 → 저장된 접근 주소(url) 반환. 미지정 시 업로드 비활성. */
   uploadFile?: (file: File) => Promise<{ url: string } | null>;
   /** 파일 다운로드 경로(앞부분). 예: "/api/files/download" */
@@ -70,6 +73,13 @@ export type ShellDataSource = {
    *  scope = 페이지 구분 키(예: "tax-amendment"). */
   readSectionMapping?: (scope: string) => Promise<Record<string, string>>;
   writeSectionMapping?: (scope: string, columnKey: string, sectionId: string) => Promise<void>;
+  /** 어드민이 컬럼을 차수 카드로 일괄 이전할 때(예전 /api/entries/bulk-migrate-tier).
+   *  미지정 시 일괄 이전 단계 건너뜀. 반환: 이전된 행 수 등 결과 요약(없으면 null). */
+  bulkMigrateTier?: (payload: { columnKey: string; prefix: string; sectionId: string }) => Promise<{ migrated?: number } | null> | void;
+  /** 파일 안전 열기에 쓰는 두 서버 주소 생성기(만료 링크 회복용). 미지정 시 하이브/ERP 기본 경로.
+   *  open-file-with-refresh 의 refetchEntryUrl·notionRefreshUrl 로 그대로 전달된다. */
+  refetchEntryUrl?: (entryId: string) => string | null | undefined;
+  notionRefreshUrl?: (entryId: string, fileName: string) => string | null | undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -78,15 +88,59 @@ export type ShellDataSource = {
 //    → 틀(겉)은 같게, 댓글 저장 방식은 앱별로.
 // ---------------------------------------------------------------------------
 
+/** 히스토리 카테고리 색상 이름 — 카테고리 탭/추가 모달이 쓰는 공통 색 이름. */
+export type ShellHistoryColor = "blue" | "green" | "purple" | "orange" | "red" | "gold" | "gray";
+
+/** 한 히스토리 카테고리 정의(앱·틀 공통). 예전 하이브 HistoryCategoryDef 와 동일 형태. */
+export type ShellHistoryCategory = { id: string; label: string; color?: ShellHistoryColor; panelId?: string };
+
+/** 댓글·이력 패널이 한 번 그려질 때 틀이 넘겨주는 모든 것.
+ *  ⚠️ 카테고리 목록·추가모달은 "틀"이 소유(어드민 동작 콜백은 SharedDetailModalProps 로 받음)하고,
+ *  실제 댓글 목록·저장소(노션/REST/자체DB)만 앱이 만든 패널이 책임진다.
+ *  → 틀은 이 args 를 계산해 넘기고, 앱의 renderHistoryPanel 은 자기 패널에 그대로 꽂으면 된다(하이브 동작 0 변화). */
 export type ShellHistoryRenderArgs = {
   pageId: string;
   isAdmin: boolean;
+  /** 사용자 정의 history 상위 패널일 때 그 패널 id (코멘트를 패널별로 분리). 기본 패널이면 없음. */
+  scopePanelId?: string;
   focusCommentId?: string;
   onFocusHandled?: () => void;
-  /** 댓글 개수 변동을 바깥(목록 배지 등)에 알릴 때 */
-  onCommentCount?: (pageId: string, count: number) => void;
+  /** 댓글 개수 변동 알림 — 틀이 목록 배지·패널별 카운트를 갱신하도록 이미 감싸서 넘김. */
+  onCountChange?: (count: number) => void;
+  /** 이 패널에 노출할 카테고리 목록(틀이 panelId 기준으로 걸러서 넘김). */
+  categories?: ShellHistoryCategory[];
+  /** 카테고리 탭 옆 "+ 카테고리" — 틀의 추가 모달을 연다. */
+  onAddCategory?: () => void;
+  /** 카테고리 삭제 — 틀이 확인창까지 감싸서 넘김. */
+  onDeleteCategory?: (categoryId: string) => void | Promise<void>;
+  onRenameCategory?: (categoryId: string, newLabel: string) => void;
+  onReorderCategories?: (nextOrder: string[]) => void;
+  /** 옛 기본 카테고리(코드 박힌 fallback) 중 숨긴 id 목록. */
+  hiddenFallbackIds?: string[];
+  onHideFallback?: (categoryId: string) => void;
+  onUnhideFallback?: (categoryId: string) => void;
 };
 export type RenderHistoryPanel = (args: ShellHistoryRenderArgs) => ReactNode;
+
+// ---------------------------------------------------------------------------
+// 3-b) 정산/차수 카드 탭 — 앱마다 저장 필드키·서버주소가 달라(예: "정산정보" vs ERP 키)
+//    틀이 직접 만들지 않고, 앱이 만든 정산탭을 통째로 끼운다(render-prop). renderHistoryPanel 과 같은 방식.
+// ---------------------------------------------------------------------------
+
+export type ShellSettlementRenderArgs = {
+  /** 어떤 카드인지: 일반 정산 / 차수별 계약 / 차수별 환불. 앱이 이걸로 저장 필드키·서버주소를 고른다. */
+  variant: "settlement" | "tiered-contract" | "tiered-refund";
+  row: ShellRowData;
+  readOnly: boolean;
+  isAdmin: boolean;
+  /** 차수 카드 강제 새로고침 토큰(차수 일괄 이전 후 다시 읽기). */
+  reloadToken: number;
+  /** 정산탭이 값을 저장할 때 부르는 함수 = 틀의 한 칸 저장(handleFieldSave). 앱이 자기 필드키로 호출. */
+  onSaveField: (key: string, value: string | number | boolean | null) => void;
+  subSections?: Array<{ id: string; label: string }>;
+  onUpdateSubSections?: (list: Array<{ id: string; label: string }>) => void;
+};
+export type RenderSettlementTab = (args: ShellSettlementRenderArgs) => ReactNode;
 
 // ---------------------------------------------------------------------------
 // 4) 앱별 보조 부품 — 사람(담당자) 후보 명단, 확인/알림창.
@@ -114,7 +168,7 @@ export type SharedDetailModalProps = {
   onClose: () => void;
 
   // ── 새로 빼낸 4가지(앱별) ──
-  /** ① 컬럼 정의(이름·형식) — 예전 하이브의 CONTRACT_FIELDS 가 입력값이 됨. */
+  /** ① 컬럼 정의(이름·형식) — 예전 하이브의 CONTRACT_FIELDS(상세창에 그릴 필드)가 입력값이 됨. */
   fields: ShellFieldDef[];
   /** ② 권한 — 예전엔 useAccess() 직접 호출. 이제 앱이 넘겨줌. */
   isAdmin: boolean;
@@ -122,6 +176,28 @@ export type SharedDetailModalProps = {
   dataSource: ShellDataSource;
   /** ④ 댓글·이력 패널(앱이 만든 것을 끼움). */
   renderHistoryPanel: RenderHistoryPanel;
+
+  // ── 정산/차수 카드 패널(앱이 만든 것을 끼움) ──
+  /** 정산·차수 카드 탭. 미지정 시 그 종류 섹션은 빈 화면. (저장 필드키·서버주소가 앱별이라 주입) */
+  renderSettlementTab?: RenderSettlementTab;
+
+  // ── 컬럼 전체 등록부(라벨 보충·기타 자동수집용) ──
+  /** 앱의 전체 컬럼 목록(예전 하이브 COLUMNS). fields 에 없는 컬럼의 라벨/형식을 찾고,
+   *  어느 섹션에도 안 든 컬럼을 "기타" 로 자동 수집할 때 쓴다. 미지정 시 fields 로 간주. */
+  columns?: ShellFieldDef[];
+
+  // ── 값 변경을 부모에 알림(예전 onUpdate) — 저장(dataSource.patchField)과 역할 분리 ──
+  /** 한 칸이 바뀔 때 부모(목록 화면·자동입력 규칙)에 알림. 저장 자체는 dataSource.patchField 가 함.
+   *  ⚠️ 증거 기반 분리: 예전 하이브는 onUpdate(부모 알림+규칙)와 직접 저장 호출을 둘 다 했음. */
+  onFieldChange?: (pageId: string, key: string, value: string | number | boolean | null) => void;
+
+  // ── 제목·신규 등록 검증(앱별 이름 컬럼/문구) ──
+  /** 제목 표시·신규 등록 필수값 검증에 쓰는 "이름" 컬럼 키. 예전 하이브 "02상호명". 미지정 시 검증 생략. */
+  primaryFieldKey?: string;
+  /** 신규 등록 모드 제목. 기본 "새 항목 등록". (하이브 "새 업체 등록") */
+  newRowTitle?: string;
+  /** 이름이 비었을 때 제목 대체 문구. 기본 "상세". (하이브 "업체 상세") */
+  untitledLabel?: string;
 
   // ── 보조 주입 ──
   userDirectory?: ShellUserDirectory;
@@ -168,8 +244,8 @@ export type SharedDetailModalProps = {
   onChangeMeetingLabels?: (next: { datetime: string; assignee: string; memo: string }) => void;
 
   // ── 어드민: 히스토리 카테고리 ──
-  historyCategories?: Array<{ id: string; label: string; color?: string; panelId?: string }>;
-  onAddHistoryCategory?: (payload: { id: string; label: string; color?: string; panelId?: string }) => void;
+  historyCategories?: ShellHistoryCategory[];
+  onAddHistoryCategory?: (payload: { id: string; label: string; color?: ShellHistoryColor; panelId?: string }) => void;
   onDeleteHistoryCategory?: (categoryId: string) => void;
   hiddenHistoryCategoryIds?: string[];
   onHideHistoryCategory?: (categoryId: string) => void;

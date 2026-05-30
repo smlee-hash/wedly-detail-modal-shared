@@ -154,3 +154,49 @@ const dialog: ShellDialog = {
 
 **블라스트 반경(1단계-D 주의):** 하이브에서 `EditableFieldRow`·`SelectEditor` 는 상세 모달뿐 아니라
 **표 셀**도 같이 쓴다(AGENTS.md §5-4). 갈아끼울 때 두 호출 지점 모두 위 입력값을 넘겨야 한다(컴파일러가 누락을 잡아줌 — 그래서 props 주입 채택, context 아님).
+
+### 10-7. 1단계-C 본체 정밀 조사 결과 + 변환 지도 (2026-05-30, 본체 착수 직전 — 증거 기반)
+
+하이브 `DetailModal.tsx`(3,225줄)를 끝까지 따라가 **하이브 전용 결합 지점**을 전수조사했다.
+핵심 발견 4가지(설계서 §3·§10-3 의 가정을 증거로 보정):
+
+**발견 1 — 본체 안 직접 서버호출이 ~20곳.** 저장·업로드·생성·섹션매핑·차수이전이 본체에 박혀 있다.
+모두 `dataSource` 통로로 빼야 진짜 공용이 된다(아래 표). 가장 큰 덩어리는 `moveColumnToSection`(693–1025, 약 330줄, fetch 6곳).
+
+**발견 2 — 저장과 부모알림은 역할이 다르다(둘 다 필요).** `handleFieldSave` 는
+`onUpdate(pageId,key,value)`(부모 `SubsidyClient.handleDetailUpdate`: **목록 화면 갱신 + 자동입력 규칙 실행·그 결과 저장**)와
+직접 저장 호출(`PATCH /api/entries/{id} {key,value}` — **사용자가 고친 그 값 저장**)을 **둘 다** 호출한다.
+서로 다른 것을 저장하므로 이중저장 아님. → config 가 둘을 `patchField` 하나로 합친 건 부정확 →
+**분리:** 저장 = `dataSource.patchField`, 부모알림 = 신규 prop `onFieldChange`(예전 onUpdate). (config 보정 완료)
+
+**발견 3 — 정산/차수 카드는 하이브 전용 필드키·서버주소를 쓴다.** 3곳 렌더(`정산정보`·`계약정보_차수`·`환불정보_차수`,
+`fieldsApiPath=/api/entries/tiered-fields/...`). → `renderHistoryPanel` 과 같은 **render-prop**(`renderSettlementTab`)로 주입. (config 추가 완료)
+
+**발견 4 — 이력패널은 통째 주입하되 카테고리 목록·추가모달은 틀이 소유.** 하이브 `HistoryPanel` 은 댓글목록 + 카테고리탭을 함께 묶고 있어 통째 주입(`renderHistoryPanel`).
+단 카테고리 추가 모달(색 선택, `CATEGORY_COLOR_CLASS` 사용)은 본체에 남으므로, 색상표·색타입을 공용으로 옮기고 `ShellHistoryRenderArgs` 를 카테고리 배선까지 넓힘. (config 확장 완료)
+
+부수 발견: 제목·신규검증이 하이브 키(`02상호명`)·문구(`새 업체 등록`/`업체 상세`)에 의존 → `primaryFieldKey`·`newRowTitle`·`untitledLabel` 주입. (config 추가 완료)
+
+#### 변환 지도 — 하이브 `DetailModal.tsx` → 공용 `DetailModalShell.tsx` (faithful copy 후 외과적 치환)
+
+| 구역(하이브 줄) | 무엇 | 공용에서 치환 |
+|---|---|---|
+| import 블록(1–55) | 하이브 경로 | `@/lib/utils/cn`→`../../lib/cn`, `@/lib/person-id`·`./utils`·`./options`·`./detail-types`·`./FieldEditors`→공용 상대경로, `@wedly/ui-shared`·`@wedly/detail-modal-shared`(→`../`)는 유지. `useUserDirectory`·`useAccess`·`useWedlyDialog`·`HiveSelectDropdownBody`·`openFileWithRefresh`(직접)·`HistoryPanel`·`SettlementInfoTab`·`COLUMNS`/`ColumnDef`/`FormulaSpec` 의 직접 import 제거 → 주입/공용화 |
+| `CONTRACT_FIELDS`(69–103) | 상세 필드 | 모듈 const 삭제 → `fields` prop. 본문 `CONTRACT_FIELDS`→`fields` 전부 치환 |
+| `COLUMNS`(전 ~10곳) | 전체 컬럼 | `columns` prop(미지정 시 `fields`). 본문 `COLUMNS`→`columns` 치환. `ColumnDef`→`ShellFieldDef`, `FormulaSpec`→`unknown` |
+| `columnToDetailField`·`resolveFieldValue`(104–162) | 순수 헬퍼 | 거의 그대로(타입만 Shell* 로) |
+| `Props`(311–390) | 입력값 | `SharedDetailModalProps` 로 교체. 구조분해(392–436)도 새 이름으로(`onUpdate`→없음/`onFieldChange`, +`dataSource`·`fields`·`columns`·`renderHistoryPanel`·`renderSettlementTab`·`dialog`·`userDirectory`·`primaryFieldKey` 등) |
+| 훅 3개(604·605·621) | 권한·확인창·명단 | `useAccess`/`useWedlyDialog`/`useUserDirectory` 삭제 → `isAdmin`·`userDirectory` prop. **내부 dialog 어댑터**: 주입된 `ShellDialog`(묶음형)를 본문이 쓰는 하이브 위치형(`confirm(msg,{title,danger})`/`alert(msg,{title})`)으로 감싸 본문 호출부 전부 무변경 (§10-6 의 반대 방향) |
+| `handleOpenFile`(609–620) | 파일 열기 | 공용 `openFileWithRefresh` 호출. `dataSource.refetchEntryUrl`/`notionRefreshUrl` 있으면 전달, 없으면 기본 경로 |
+| 섹션매핑 로드(631) | GET | `dataSource.readSectionMapping(scope)` |
+| `moveColumnToSection`(693–1025) | 차수이전 | fetch 6곳→ `readTieredFields`/`writeTieredFields`/`patchField`/`readSectionMapping`/`writeSectionMapping`/`bulkMigrateTier`. 구조·확인창·알림 전부 유지 |
+| `handleFieldSave`(1681–1760) | 저장 | `onUpdate(...)`→`onFieldChange?.(...)`(3곳: 본값·팀장팀원정리·수식), 직접 `PATCH`→`dataSource.patchField`(3곳) |
+| 업로드/제거/파일갱신(1764–1887) | 파일 | `/api/upload`→`dataSource.uploadFile`, `PATCH _files`→`patchField` |
+| `handleCreate`(1888–1927) | 생성 | `POST /api/entries`→`dataSource.createRow(rowData, pendingComments)`(서버행 반환). `onCreate?` 는 부모 알림으로 유지. 이름검증 `02상호명`→`primaryFieldKey` |
+| 정산탭 3곳(2349·2365·2382) | 차수카드 | `renderSettlementTab?.({variant, row, readOnly, isAdmin, reloadToken, onSaveField:handleFieldSave, subSections, onUpdateSubSections})` |
+| 파일탭(2406·2680) | 파일 | `downloadApiPath`→`dataSource.fileDownloadPath`, `onOpenFile`=`handleOpenFile` 유지 |
+| 이력패널 2곳(2499·2632) | 댓글 | `renderHistoryPanel(args)` — args 에 카테고리 배선·`onCountChange`·확인창 감싼 `onDeleteCategory` 등 틀이 계산해 전달 |
+| `CATEGORY_COLOR_CLASS`(3012)·색타입 | 색 | 공용으로 이동(셸 내부 또는 공용 lib). `HistoryCategoryDef["color"]`→`ShellHistoryColor` |
+| `DraggableFieldsSection`(194–302)·인라인 계약렌더(2318) | 편집기 | 공용 `EditableFieldRow` 필수 입력값(`dialog`·`openFile`·`SelectDropdownBody`·`isAdmin`)을 renderRow 에서 넘기도록 배선 추가 |
+
+검증: 공용 폴더 단독 타입검사 불가(소스 소비형) → 최종 검증은 1단계-D 하이브 빌드. 그 전까지 운영 위험 0(미연결).
