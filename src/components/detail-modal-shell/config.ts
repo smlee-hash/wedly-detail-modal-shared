@@ -61,7 +61,21 @@ export type ShellPanel = {
 // ---------------------------------------------------------------------------
 // 2) 앱별 서버 연결 — 앱마다 주소가 달라 "함수"로 주입한다.
 //    틀은 이 함수들만 부른다. (어느 서버에 어떻게 저장하는지는 앱이 책임)
+//    ⚠️ 실패 처리 계약(중요): 저장·이동·생성·매핑이 실패하면(서버 4xx·5xx 포함) 이 함수들은
+//       반드시 "예외를 던지거나(reject)" 거부해야 한다. 그래야 틀이 예전 하이브처럼 화면을
+//       원래대로 되돌리고(낙관적 반영 취소) 오류 안내창을 띄운다.
+//       → 실패인데 조용히 resolve 하면, 옛 "되돌리기·안내" 동작이 사라져 회귀가 된다.
+//       (특히 writeSectionMapping·writeTieredFields·patchField·createRow·bulkMigrateTier)
 // ---------------------------------------------------------------------------
+
+/** 업로드 결과 — 예전 하이브 /api/upload 응답과 같은 모양. files(여러 개, ZIP 해제) 또는 data(단건). */
+export type ShellUploadResult = {
+  success?: boolean;
+  files?: Array<{ id?: number | string; fileName?: string; url?: string; mimeType?: string }>;
+  data?: { id?: number | string; fileName?: string; url?: string; mimeType?: string };
+  skipped?: number;
+  error?: string;
+};
 
 export type ShellDataSource = {
   /** 한 칸 값을 서버 DB 에 저장 (예전 본체 안에 박혀 있던 직접 저장 호출).
@@ -71,8 +85,9 @@ export type ShellDataSource = {
   /** 신규 행 생성 — 입력값(밑줄키 제외)과 등록 시 함께 남길 코멘트를 받아 서버에 만들고,
    *  서버가 만든 실제 행을 돌려준다(없으면 null). 미지정 시 "신규 등록" 동작 숨김. */
   createRow?: (newRow: ShellRowData, comments?: string[]) => Promise<ShellRowData | null> | void;
-  /** 파일 업로드 → 저장된 접근 주소(url) 반환. 미지정 시 업로드 비활성. */
-  uploadFile?: (file: File) => Promise<{ url: string } | null>;
+  /** 파일 업로드 → 업로드 결과 반환(예전 /api/upload 응답 모양 그대로: 파일목록·단건·skipped).
+   *  미지정 시 업로드 비활성. ZIP 자동 해제·제외 건수까지 본체가 예전과 동일하게 처리한다. */
+  uploadFile?: (file: File) => Promise<ShellUploadResult | null>;
   /** 파일 다운로드 경로(앞부분). 예: "/api/files/download" */
   fileDownloadPath?: string;
   /** 차수 카드(차수별 계약·환불·정산) 묶음 읽기/쓰기. prefix = "contract"|"refund"|"settlement" */
@@ -82,9 +97,10 @@ export type ShellDataSource = {
    *  scope = 페이지 구분 키(예: "tax-amendment"). */
   readSectionMapping?: (scope: string) => Promise<Record<string, string>>;
   writeSectionMapping?: (scope: string, columnKey: string, sectionId: string) => Promise<void>;
-  /** 어드민이 컬럼을 차수 카드로 일괄 이전할 때(예전 /api/entries/bulk-migrate-tier).
-   *  미지정 시 일괄 이전 단계 건너뜀. 반환: 이전된 행 수 등 결과 요약(없으면 null). */
-  bulkMigrateTier?: (payload: { columnKey: string; prefix: string; sectionId: string }) => Promise<{ migrated?: number } | null> | void;
+  /** 어드민이 컬럼을 차수 카드로 일괄 이전할 때(예전 POST /api/entries/bulk-migrate-tier).
+   *  ⚠️ 실제 호출 모양에 맞춤(증거 기반): 보내는 값 = { columnKey, containerKey, aliasKeys },
+   *  받는 값 = { total, migrated, skipped, failed } (없으면 null). 미지정 시 일괄 이전 단계 건너뜀. */
+  bulkMigrateTier?: (payload: { columnKey: string; containerKey: string; aliasKeys: string[] }) => Promise<{ total?: number; migrated?: number; skipped?: number; failed?: number } | null> | void;
   /** 파일 안전 열기에 쓰는 두 서버 주소 생성기(만료 링크 회복용). 미지정 시 하이브/ERP 기본 경로.
    *  open-file-with-refresh 의 refetchEntryUrl·notionRefreshUrl 로 그대로 전달된다. */
   refetchEntryUrl?: (entryId: string) => string | null | undefined;

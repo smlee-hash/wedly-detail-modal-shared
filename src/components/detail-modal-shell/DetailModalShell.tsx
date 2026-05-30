@@ -34,13 +34,15 @@ import {
 // 공용 타입 — FieldEditors 와 공유 (순환 의존 방지).
 import type { RowData, FileMeta, DetailField } from "./detail-types";
 // 필드/셀 편집 부품(주입식 공용판, 1단계-B) + 그 입력값 타입.
-import { SelectEditor, EditableFieldRow } from "./FieldEditors";
+import { EditableFieldRow } from "./FieldEditors";
 // 파일 패널 — 공용 부품.
 import { FilesTab } from "../FilesTab";
 // 설정 약속(앱이 넘겨주는 입력값) + 보조 타입.
 import type {
   SharedDetailModalProps,
+  ShellRowData,
   ShellDialog,
+  ShellFieldDef,
   ShellHistoryColor,
   SelectDropdownBodyComponent,
   OpenFileFn,
@@ -65,40 +67,8 @@ const CATEGORY_COLOR_CLASS: Record<ShellHistoryColor, string> = {
 // Field definitions
 // ---------------------------------------------------------------------------
 
-// HIVE 데이터 소스 = ERP 의 TaxAmendmentEntry (경정청구).
-// 정책자금 시절 키(01업체명/05진행상태/06계약일 등) 는 사용 안 함 — 경정청구 키로 재매핑.
-const CONTRACT_FIELDS: DetailField[] = [
-  { key: "02상호명", label: "상호명", type: "text" },
-  { key: "03대표자명", label: "대표자명", type: "text" },
-  { key: "04연락처", label: "연락처", type: "phone_number" },
-  { key: "15사업자번호", label: "사업자번호", type: "text" },
-  { key: "14사업자유형", label: "사업자유형", type: "select" },
-  { key: "05경정계약진행상태", label: "진행상태", type: "select" },
-  { key: "19계약서작성일", label: "계약서작성일", type: "date" },
-  { key: "06국세환급액", label: "국세환급액", type: "number", format: "currency" },
-  { key: "07지방세환급액", label: "지방세환급액", type: "number", format: "currency" },
-  { key: "10총환급금", label: "총환급금", type: "number", format: "currency" },
-  { key: "20확정수수료", label: "확정수수료", type: "number", format: "currency" },
-  { key: "29예상수수료", label: "예상수수료", type: "number", format: "currency" },
-  { key: "21경정청구신청일", label: "경정청구신청일", type: "date" },
-  { key: "22인용확인일", label: "인용확인일", type: "date" },
-  { key: "12환급금승인완료일", label: "환급금승인완료일", type: "date" },
-  { key: "32선정산 날짜", label: "선정산 날짜", type: "date" },
-  { key: "33후정산 날짜", label: "후정산 날짜", type: "date" },
-  { key: "40수금완료일", label: "수금완료일", type: "date" },
-  { key: "13세무업체", label: "세무업체", type: "select" },
-  { key: "16조회통화자", label: "조회통화자", type: "select" },
-  { key: "17최초컨택자", label: "최초컨택자", type: "person" },
-  { key: "1차 담당자", label: "1차 담당자", type: "person" },
-  { key: "18계약담당자", label: "계약담당자", type: "person" },
-  { key: "11통합관리코드", label: "통합관리코드", type: "text" },
-  { key: "54DB분류", label: "DB 분류", type: "multi_select" },
-  { key: "52사업장주소지", label: "사업장주소지", type: "text" },
-  { key: "53이메일", label: "이메일", type: "email" },
-  { key: "58업종", label: "업종", type: "text" },
-  { key: "23최종업데이트일시", label: "최종 업데이트", type: "last_edited_time" },
-  { key: "_createdTime", label: "등록일시", type: "last_edited_time" },
-];
+// 상세창에 그릴 컬럼 정의(예전 하이브 CONTRACT_FIELDS 모듈 상수)는 이제 입력값(fields)으로 받는다(1단계-C).
+// 본문은 컴포넌트 안에서 옛 이름(CONTRACT_FIELDS = fields, COLUMNS = columns)으로 별칭해 그대로 참조한다.
 
 // [removed] FIELD_ORDER_STORAGE_KEY — 컬럼 순서는 useFieldOrder hook 으로 server 저장.
 
@@ -106,7 +76,7 @@ const CONTRACT_FIELDS: DetailField[] = [
 // 상세모달 "기타" 섹션에서 표시하기 위함.
 // 호환 안 되는 type(formula, file, status, checkbox, auto_increment_id 등)은
 // last_edited_time 으로 매핑해 readonly 로 표시 — EditableFieldRow 가 편집 진입을 막아준다.
-function columnToDetailField(c: ColumnDef): DetailField {
+function columnToDetailField(c: ShellFieldDef): DetailField {
   const editableTypes: ReadonlyArray<DetailField["type"]> = [
     "text", "number", "date", "select", "multi_select", "person",
     "email", "phone_number", "file",
@@ -214,6 +184,9 @@ function DraggableFieldsSection({
   onJumpToFiles,
   onUploadFiles,
   onRemoveFile,
+  dialog,
+  openFile,
+  selectDropdownBody: SelectDropdownBody,
 }: {
   sectionId: string;
   sectionLabel?: string;
@@ -236,6 +209,9 @@ function DraggableFieldsSection({
   onJumpToFiles?: (category: string) => void;
   onUploadFiles?: (files: FileList, category: string) => Promise<void> | void;
   onRemoveFile?: (fileId: string) => void;
+  dialog: ShellDialog;
+  openFile: OpenFileFn;
+  selectDropdownBody: SelectDropdownBodyComponent;
 }) {
   const {
     orderedFields,
@@ -278,6 +254,10 @@ function DraggableFieldsSection({
           onUploadFiles={onUploadFiles}
           onRemoveFile={onRemoveFile}
           onRenameColumn={editMode ? onRenameColumn : undefined}
+          isAdmin={isAdmin}
+          dialog={dialog}
+          openFile={openFile}
+          SelectDropdownBody={SelectDropdownBody}
         />
       )}
       renderAdminMenu={
@@ -372,6 +352,9 @@ export default function DetailModalShell({
   detailSubSections,
   onUpdateDetailSubSections,
 }: Props) {
+  // 예전 하이브 모듈 상수(CONTRACT_FIELDS/COLUMNS)를 입력값으로 별칭 — 본문 참조를 한 줄도 안 바꾸고 그대로 둔다(1단계-C).
+  const CONTRACT_FIELDS = fields;
+  const COLUMNS = columns;
   // ─── 컬럼-섹션 매핑 — 어드민이 컬럼의 위치(섹션)를 변경할 수 있게 함 ───
   // visibleFields 가 차수 카드로 옮긴 키를 제외하려고 sectionMapping 을 참조하므로 위쪽에 선언.
   const [sectionMapping, setSectionMapping] = useState<Record<string, string>>({});
@@ -563,6 +546,10 @@ export default function DetailModalShell({
       injectedDialog?.alert ? injectedDialog.alert({ title: opts?.title ?? "", message }) : undefined,
   }), [injectedDialog]);
 
+  // EditableFieldRow·SelectEditor 는 "묶음형" ShellDialog 를 직접 받는다(파일 제거 확인 필수 — 브라우저 기본창 금지).
+  // 미주입 시 안전 기본 — 확인은 취소(false), 알림은 무동작(절대 window.* 안 씀).
+  const shellDialog: ShellDialog = injectedDialog ?? { confirm: () => Promise.resolve(false), alert: () => {} };
+
   // 공용 FilesTab 에 주입 — 노션 임시 보관함 링크가 만료됐으면 행을 다시 받아 새 링크로 자동 재시도.
   // 회복용 서버주소는 dataSource 로 주입(미지정 시 open-file-with-refresh 의 하이브/ERP 기본 경로).
   const handleOpenFile = (args: { href: string; entryId: string; fileName: string; category?: string }) => {
@@ -597,27 +584,29 @@ export default function DetailModalShell({
   const userNames = userDirectory.all;
   const pickUserOpts = (label: string | undefined): string[] => pickUserCandidates(label, userDirectory);
 
-  // sectionMapping fetch — 위에서 state 선언했고 여기서 서버 값 동기화 (변경 시 PUT)
+  // sectionMapping 동기화 — 앱별 서버 연결(dataSource.readSectionMapping)로 읽는다(예전 GET /api/detail-section-mapping).
   useEffect(() => {
     let canceled = false;
     setSectionMapping({}); // scope 변경 시 즉시 빈 상태로 — 이전 scope 매핑이 잔존하지 않게
-    fetch(`/api/detail-section-mapping/${scope}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => {
+    if (!dataSource.readSectionMapping) return;
+    Promise.resolve(dataSource.readSectionMapping(scope))
+      .then((data) => {
         if (canceled) return;
-        if (j?.success && j.data && typeof j.data === "object") {
-          setSectionMapping(j.data as Record<string, string>);
+        if (data && typeof data === "object") {
+          setSectionMapping(data as Record<string, string>);
         }
       })
       .catch(() => { /* fail-safe: empty mapping */ });
     return () => { canceled = true; };
+    // deps 는 예전과 동일하게 scope 만 — 매핑은 scope 가 바뀔 때만 다시 읽는다(매 렌더 재조회 방지).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope]);
 
   // 섹션 컬럼 추가 모달 (어드민 전용)
   const [addColumnModal, setAddColumnModal] = useState<{ sectionId: string; sectionLabel: string } | null>(null);
   // 데이터 형식 변경 모달 — 어드민 전용. 사용자 정의 컬럼의 type 을 사후에 바꾼다.
   const [changeTypeModal, setChangeTypeModal] = useState<{ key: string; label: string; currentType: string } | null>(null);
-  const [draftChangeType, setDraftChangeType] = useState<ColumnDef["type"]>("text");
+  const [draftChangeType, setDraftChangeType] = useState<ShellFieldDef["type"]>("text");
   // 수식 형식 선택 시 입력하는 세부 정보 — 참조 컬럼 + 연산자 + 숫자
   const [draftFormulaRefKey, setDraftFormulaRefKey] = useState<string>("");
   const [draftFormulaOp, setDraftFormulaOp] = useState<"*" | "+" | "-" | "/">("*");
@@ -635,15 +624,15 @@ export default function DetailModalShell({
   // 히스토리 카테고리 추가 모달 — 어드민이 카테고리 탭 옆 "+ 카테고리" 클릭 시
   const [showAddHistoryCategoryModal, setShowAddHistoryCategoryModal] = useState(false);
   const [newCategoryLabel, setNewCategoryLabel] = useState("");
-  const [newCategoryColor, setNewCategoryColor] = useState<HistoryCategoryDef["color"]>("blue");
+  const [newCategoryColor, setNewCategoryColor] = useState<ShellHistoryColor>("blue");
   const [draftAddLabel, setDraftAddLabel] = useState("");
-  const [draftAddType, setDraftAddType] = useState<ColumnDef["type"]>("text");
+  const [draftAddType, setDraftAddType] = useState<ShellFieldDef["type"]>("text");
   // 새 컬럼 추가 모달의 "어느 섹션에 추가할지" 선택값. 모달 열릴 때 클릭한 섹션 id 로 초기화.
   const [draftAddSectionId, setDraftAddSectionId] = useState<string>("");
   // changeTypeModal 열릴 때 draft 초기화 (현재 type + 기존 수식 정보 가져오기)
   useEffect(() => {
     if (changeTypeModal) {
-      setDraftChangeType(changeTypeModal.currentType as ColumnDef["type"]);
+      setDraftChangeType(changeTypeModal.currentType as ShellFieldDef["type"]);
       const existing = customColumns.find((c) => c.key === changeTypeModal.key);
       if (existing?.formula) {
         setDraftFormulaRefKey(existing.formula.refKey);
@@ -751,29 +740,19 @@ export default function DetailModalShell({
       }
 
       try {
-        // 1) 차수 카드 컬럼 정의 조회 + 새 컬럼 추가 (key 중복 시 건너뜀)
-        const getRes = await fetch(`/api/entries/tiered-fields/${prefix}`, { cache: "no-store" });
-        const getJson = await getRes.json();
-        const fields = Array.isArray(getJson?.data) ? [...(getJson.data as Array<{ key: string; label: string; type: string }>)] : [];
-        if (!fields.some((f) => f.key === columnKey)) {
+        // 1) 차수 카드 컬럼 정의 조회 + 새 컬럼 추가 (key 중복 시 건너뜀) — 앱별 서버 연결로 읽기/쓰기.
+        const tieredRaw = await dataSource.readTieredFields?.(prefix);
+        const tieredFields = Array.isArray(tieredRaw) ? [...(tieredRaw as Array<{ key: string; label: string; type: string }>)] : [];
+        if (!tieredFields.some((f) => f.key === columnKey)) {
           // 옛 컬럼 type → 차수 카드 type 매핑 (text/date/number/percent 만 허용)
           const origType = visibleFields.find((f) => f.key === columnKey)?.type;
           const newType: "text" | "date" | "number" | "percent" =
             origType === "date" ? "date"
               : origType === "number" ? "number"
               : "text";
-          fields.push({ key: columnKey, label: fieldLabel, type: newType });
-          const putRes = await fetch(`/api/entries/tiered-fields/${prefix}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fields }),
-          });
-          if (!putRes.ok) {
-            // 상세 에러 메시지 — 서버 응답 그대로 노출 (사용자가 원인 알 수 있게)
-            const errJson = await putRes.json().catch(() => null);
-            const errMsg = errJson?.error || `HTTP ${putRes.status}`;
-            throw new Error(`컬럼 정의 저장 실패: ${errMsg}`);
-          }
+          tieredFields.push({ key: columnKey, label: fieldLabel, type: newType });
+          // 저장 실패 시 writeTieredFields 가 예외를 던지면 아래 catch 가 안내창을 띄운다(예전 컬럼 정의 저장 실패 처리).
+          await dataSource.writeTieredFields?.(prefix, tieredFields);
         }
 
         // 2) 1차 카드 데이터에 기존 값 매핑 — 컨테이너 JSON 의 첫 차수 객체에 새 키 적용
@@ -791,32 +770,17 @@ export default function DetailModalShell({
           tiers[0] = { ...tiers[0], [columnKey]: existingValue };
           const newContainer = JSON.stringify(tiers);
           setLocalRow((prev) => prev ? { ...prev, [containerKey]: newContainer, [columnKey]: null } : prev);
-          // 컨테이너 + 원본 키 비우기 둘 다 저장
-          await fetch(`/api/entries/${pageId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ key: containerKey, value: newContainer }),
-          }).catch(() => { /* ignore */ });
-          await fetch(`/api/entries/${pageId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ key: columnKey, value: null }),
-          }).catch(() => { /* ignore */ });
+          // 컨테이너 + 원본 키 비우기 둘 다 저장 — 앱별 한 칸 저장 통로(patchField).
+          await Promise.resolve(dataSource.patchField(pageId, containerKey, newContainer)).catch(() => { /* ignore */ });
+          await Promise.resolve(dataSource.patchField(pageId, columnKey, null)).catch(() => { /* ignore */ });
         }
         // sectionMapping 갱신 — 메뉴 동작 일관성 위해 함께 저장 (옛 동작과 호환)
         // 응답 확인: 실패하면 모달 재오픈 시 sectionMapping fetch 가 옛 값 반환 → 차수 카드 컬럼이 일반 칸으로 다시 노출
         setSectionMapping((prev) => ({ ...prev, [columnKey]: targetSectionId }));
-        const mappingRes = await fetch(`/api/detail-section-mapping/${scope}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ columnKey, sectionId: targetSectionId }),
-        }).catch((err) => {
-          console.error("[sectionMapping PUT 네트워크 실패]", err);
-          return null;
-        });
-        if (mappingRes && !mappingRes.ok) {
-          const errMsg = await mappingRes.text().catch(() => `HTTP ${mappingRes.status}`);
-          console.warn(`[sectionMapping PUT 실패] ${errMsg} — 모달 재오픈 시 옛 컬럼이 다시 보일 수 있음`);
+        try {
+          await dataSource.writeSectionMapping?.(scope, columnKey, targetSectionId);
+        } catch (err) {
+          console.warn("[sectionMapping 저장 실패] 모달 재오픈 시 옛 컬럼이 다시 보일 수 있음", err);
         }
 
         // 모든 행의 옛 자리 값을 한 번에 1차 카드로 이동 — 매번 카드 열 때 정리하던 방식 대신.
@@ -851,21 +815,15 @@ export default function DetailModalShell({
         let bulkResultText = "";
         if (!opts?.isNewColumn) {
           try {
-            const bulkRes = await fetch(`/api/entries/bulk-migrate-tier`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ columnKey, containerKey, aliasKeys }),
-            });
-            const bulkJson = await bulkRes.json().catch(() => null);
+            const d = dataSource.bulkMigrateTier
+              ? await Promise.resolve(dataSource.bulkMigrateTier({ columnKey, containerKey, aliasKeys }))
+              : null;
             if (typeof console !== "undefined") {
-              console.log("[bulk-migrate-tier 결과]", bulkJson?.data);
+              console.log("[bulk-migrate-tier 결과]", d);
             }
-            const d = bulkJson?.data;
             if (d) {
               bulkResultText = ` (전체 ${d.total}건 중 ${d.migrated}건 값이 옮겨졌고, ${d.skipped}건은 옮길 값이 없거나 이미 채워져 있었습니다.)`;
-              if (d.failed > 0) bulkResultText += ` (실패 ${d.failed}건은 콘솔 로그 확인)`;
-            } else if (!bulkRes.ok) {
-              bulkResultText = " (일괄 이동 통로 응답 오류 — 어드민 권한 다시 확인 필요)";
+              if ((d.failed ?? 0) > 0) bulkResultText += ` (실패 ${d.failed}건은 콘솔 로그 확인)`;
             }
           } catch (bulkErr) {
             console.warn("[bulk-migrate-tier 호출 실패]", bulkErr);
@@ -923,11 +881,7 @@ export default function DetailModalShell({
                 if (restoredValue != null && restoredValue !== "") {
                   // 원본 키에 값 복원
                   setLocalRow((prev) => prev ? { ...prev, [columnKey]: restoredValue as string | number | boolean | null } : prev);
-                  await fetch(`/api/entries/${pageId}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ key: columnKey, value: restoredValue }),
-                  }).catch(() => { /* ignore */ });
+                  await Promise.resolve(dataSource.patchField(pageId, columnKey, restoredValue as string | number | boolean | null)).catch(() => { /* ignore */ });
                 }
                 // 모든 차수에서 그 키 제거
                 const cleanedTiers = parsed.map((t) => {
@@ -940,26 +894,17 @@ export default function DetailModalShell({
                 });
                 const newContainer = JSON.stringify(cleanedTiers);
                 setLocalRow((prev) => prev ? { ...prev, [sourceContainerKey]: newContainer } : prev);
-                await fetch(`/api/entries/${pageId}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ key: sourceContainerKey, value: newContainer }),
-                }).catch(() => { /* ignore */ });
+                await Promise.resolve(dataSource.patchField(pageId, sourceContainerKey, newContainer)).catch(() => { /* ignore */ });
               }
             } catch { /* 빈 컨테이너 — 무시 */ }
           }
         }
         // 2) 차수 카드 컬럼 정의에서도 제거
-        const getRes = await fetch(`/api/entries/tiered-fields/${prefix}`, { cache: "no-store" });
-        const getJson = await getRes.json();
-        const fields = Array.isArray(getJson?.data) ? (getJson.data as Array<{ key: string; label: string; type: string }>) : [];
-        const filtered = fields.filter((f) => f.key !== columnKey);
-        if (filtered.length !== fields.length) {
-          await fetch(`/api/entries/tiered-fields/${prefix}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fields: filtered }),
-          }).catch(() => { /* ignore */ });
+        const tieredRaw = await dataSource.readTieredFields?.(prefix);
+        const tieredFields = Array.isArray(tieredRaw) ? (tieredRaw as Array<{ key: string; label: string; type: string }>) : [];
+        const filtered = tieredFields.filter((f) => f.key !== columnKey);
+        if (filtered.length !== tieredFields.length) {
+          await Promise.resolve(dataSource.writeTieredFields?.(prefix, filtered)).catch(() => { /* ignore */ });
         }
       } catch (err) {
         console.warn("[moveColumnToSection: 차수 카드 정리 실패]", err);
@@ -972,21 +917,12 @@ export default function DetailModalShell({
       return { ...prev, [columnKey]: targetSectionId };
     });
     try {
-      const res = await fetch(`/api/detail-section-mapping/${scope}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ columnKey, sectionId: targetSectionId }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) {
-        // 실패 시 이전 상태로 되돌림
-        setSectionMapping(prevMapping);
-        void dialog.alert("컬럼 위치 변경에 실패했습니다. 권한과 연결을 확인해주세요.", { title: "변경 실패" });
-      }
+      await dataSource.writeSectionMapping?.(scope, columnKey, targetSectionId);
     } catch (err) {
       console.warn("[moveColumnToSection]", err);
+      // 실패 시 이전 상태로 되돌림
       setSectionMapping(prevMapping);
-      void dialog.alert("컬럼 위치 변경 중 오류가 발생했습니다.", { title: "변경 오류" });
+      void dialog.alert("컬럼 위치 변경에 실패했습니다. 권한과 연결을 확인해주세요.", { title: "변경 실패" });
     }
   // dialog 안정된 클로저
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1658,7 +1594,8 @@ export default function DetailModalShell({
       const cur = localRowRef.current;
       if (!cur?._id || cur._isNew) return;
       const pageId = String(cur._id);
-      onUpdate(pageId, key, value);
+      // 부모(목록 화면·자동입력 규칙)에 값 변경 알림 — 저장 자체는 아래 dataSource.patchField 가 한다(역할 분리).
+      onFieldChange?.(pageId, key, value);
 
       // 같은 행에 공존하는 같은 패턴(팀장/팀원) 다른 키들은 모두 빈 값으로 정리.
       // ── 정책: 단일 진실 원천(SoT) ──
@@ -1678,12 +1615,8 @@ export default function DetailModalShell({
       }
       for (const ck of cleanupKeys) {
         setLocalRow((prev) => (prev ? { ...prev, [ck]: null } : prev));
-        onUpdate(pageId, ck, null);
-        fetch(`/api/entries/${pageId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: ck, value: null }),
-        }).catch((err) => console.warn("[팀장/팀원 옛 키 정리 저장 실패]", ck, err));
+        onFieldChange?.(pageId, ck, null);
+        Promise.resolve(dataSource.patchField(pageId, ck, null)).catch((err) => console.warn("[팀장/팀원 옛 키 정리 저장 실패]", ck, err));
       }
 
       // 수식 컬럼 자동 갱신 — 변경된 키를 참조하는 수식 컬럼이 있으면 그 결과도 같이 계산해 저장
@@ -1704,24 +1637,16 @@ export default function DetailModalShell({
         }
         // 로컬·전역 state 즉시 반영
         setLocalRow((prev) => (prev ? { ...prev, [dep.key]: result } : prev));
-        onUpdate(pageId, dep.key, result);
+        onFieldChange?.(pageId, dep.key, result);
         dependentUpdates.push({ key: dep.key, value: result });
       }
 
       setSaving(key);
       try {
-        await fetch(`/api/entries/${pageId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key, value }),
-        });
+        await dataSource.patchField(pageId, key, value);
         // 수식 결과도 서버에 저장 (순차 — 작은 수라 부담 없음)
         for (const upd of dependentUpdates) {
-          await fetch(`/api/entries/${pageId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ key: upd.key, value: upd.value }),
-          }).catch((err) => console.warn("[formula PATCH]", upd.key, err));
+          await Promise.resolve(dataSource.patchField(pageId, upd.key, upd.value)).catch((err) => console.warn("[formula PATCH]", upd.key, err));
         }
       } catch (err) {
         console.error("Update error:", err);
@@ -1729,7 +1654,7 @@ export default function DetailModalShell({
         setSaving(null);
       }
     },
-    [onUpdate, customColumns]
+    [onFieldChange, customColumns]
   );
 
   // 첨부파일 형식 컬럼 셀에서 직접 업로드 — 그 컬럼 라벨 카테고리로 자동 분류
@@ -1746,12 +1671,10 @@ export default function DetailModalShell({
     const failures: string[] = [];
     let totalSkipped = 0;
     for (const f of Array.from(fileList)) {
-      const fd = new FormData();
-      fd.append("file", f);
       try {
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        const j = await res.json();
-        if (res.ok && j?.success && Array.isArray(j.files)) {
+        // 업로드는 앱별 서버 연결(dataSource.uploadFile)이 담당 — 응답은 예전 /api/upload 와 같은 모양(파일목록·단건·skipped).
+        const j = (await dataSource.uploadFile?.(f)) ?? null;
+        if (j?.success && Array.isArray(j.files)) {
           // ZIP 자동 해제 — 압축 안의 여러 파일을 각각 첨부 목록에 추가
           if (typeof j.skipped === "number") totalSkipped += j.skipped;
           for (const ff of j.files) {
@@ -1763,7 +1686,7 @@ export default function DetailModalShell({
               category,
             });
           }
-        } else if (res.ok && j?.success && j.data) {
+        } else if (j?.success && j.data) {
           next.push({
             id: j.data.id,
             fileName: j.data.fileName,
@@ -1796,18 +1719,14 @@ export default function DetailModalShell({
     // 기존 행이면 부모(표/카드) 반영 + 서버 저장.
     if (!isNewRow) {
       const pid = String(cur._id);
-      onUpdate(pid, "_files", next as unknown as string | number | boolean | null);
+      onFieldChange?.(pid, "_files", next as unknown as string | number | boolean | null);
       try {
-        await fetch(`/api/entries/${pid}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: "_files", value: next }),
-        });
+        await dataSource.patchField(pid, "_files", next as unknown as string | number | boolean | null);
       } catch (err) {
         console.error("[inline upload PATCH]", err);
       }
     }
-  }, [onUpdate]);
+  }, [onFieldChange]);
 
   // handleFieldSave 최신값을 ref 에 보관 — flushMemoDraft 가 호출할 수 있게.
   useEffect(() => { handleFieldSaveRef.current = handleFieldSave; }, [handleFieldSave]);
@@ -1827,17 +1746,13 @@ export default function DetailModalShell({
     const next = existing.filter((f) => f.id !== fileId);
     setLocalRow((prev) => prev ? ({ ...prev, _files: next as unknown as RowData[string] }) : prev);
     const pid = String(cur._id);
-    onUpdate(pid, "_files", next as unknown as string | number | boolean | null);
+    onFieldChange?.(pid, "_files", next as unknown as string | number | boolean | null);
     try {
-      await fetch(`/api/entries/${pid}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "_files", value: next }),
-      });
+      await dataSource.patchField(pid, "_files", next as unknown as string | number | boolean | null);
     } catch (err) {
       console.error("[remove file PATCH]", err);
     }
-  }, [onUpdate]);
+  }, [onFieldChange]);
 
   // 파일 목록(_files) 업데이트 — 파일 패널 업로드·카테고리 변경·삭제 후 호출.
   // 즉시 로컬 + 부모(표/카드) 반영 + 서버 저장.
@@ -1846,23 +1761,20 @@ export default function DetailModalShell({
     const cur = localRowRef.current;
     if (!cur?._id || cur._isNew) return;
     const pid = String(cur._id);
-    onUpdate(pid, "_files", next as unknown as string | number | boolean | null);
+    onFieldChange?.(pid, "_files", next as unknown as string | number | boolean | null);
     try {
-      await fetch(`/api/entries/${pid}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "_files", value: next }),
-      });
+      await dataSource.patchField(pid, "_files", next as unknown as string | number | boolean | null);
     } catch (err) {
       console.error("[Files PATCH]", err);
     }
-  }, [onUpdate]);
+  }, [onFieldChange]);
 
   const handleCreate = useCallback(async () => {
     if (!localRow || creating) return;
-    // 공백만 입력한 상호명은 빈 것으로 간주 — 이름 없는 업체 생성 방지
-    const name = String(localRow["02상호명"] || "").trim();
-    if (!name) return;
+    // 공백만 입력한 이름은 빈 것으로 간주 — 이름 없는 업체 생성 방지.
+    // 이름(상호) 컬럼은 앱이 지정(primaryFieldKey). 미지정 시 이름 필수 검증 생략.
+    const name = primaryFieldKey ? String(localRow[primaryFieldKey] || "").trim() : "";
+    if (primaryFieldKey && !name) return;
     setCreating(true);
 
     const rowData: Record<string, unknown> = {};
@@ -1883,14 +1795,12 @@ export default function DetailModalShell({
     onClose();
 
     try {
-      const res = await fetch("/api/entries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: rowData, comments: pendingComments }),
-      });
-      const json = await res.json();
-      if (json?.success && json.data) {
-        onCreate?.({ ...optimisticRow, ...json.data });
+      // 신규 행 생성은 앱별 서버 연결(dataSource.createRow)이 담당 — 서버가 만든 실제 행을 돌려준다.
+      const created = dataSource.createRow
+        ? await Promise.resolve(dataSource.createRow(rowData as unknown as ShellRowData, pendingComments))
+        : null;
+      if (created) {
+        onCreate?.({ ...optimisticRow, ...created });
       }
     } catch (err) {
       console.error("Create error:", err);
@@ -1929,7 +1839,9 @@ export default function DetailModalShell({
 
   if (!localRow) return null;
 
-  const title = isNew ? "새 업체 등록" : (localRow["02상호명"] || "업체 상세");
+  // 이름(상호) 컬럼 키 — 앱이 지정(primaryFieldKey). 제목 표시·신규 입력칸에 쓰인다.
+  const nameKey = primaryFieldKey ?? "";
+  const title = isNew ? newRowTitle : ((nameKey ? localRow[nameKey] : "") || untitledLabel);
   const pageId = String(localRow._id || "");
 
   // External _files
@@ -1952,13 +1864,13 @@ export default function DetailModalShell({
             )}>
               {isNew ? "+" : "G"}
             </div>
-            {isNew ? (
-              // 새 업체 등록 — 상호명은 title 형식이라 일반 칸으로 안 그려지므로 제목 자리에 직접 입력칸 제공.
-              // 이 칸을 채워야 저장 버튼이 활성화된다 (상호명 필수).
+            {isNew && nameKey ? (
+              // 새 업체 등록 — 이름(상호) 컬럼은 title 형식이라 일반 칸으로 안 그려지므로 제목 자리에 직접 입력칸 제공.
+              // 이 칸을 채워야 저장 버튼이 활성화된다 (이름 필수). primaryFieldKey 미지정 앱은 빈 키 기록 방지 위해 입력칸 대신 제목만 표시.
               <input
                 type="text"
-                value={String(localRow["02상호명"] || "")}
-                onChange={(e) => setLocalRow((prev) => (prev ? { ...prev, "02상호명": e.target.value } : prev))}
+                value={String((nameKey ? localRow[nameKey] : "") || "")}
+                onChange={(e) => setLocalRow((prev) => (prev ? { ...prev, [nameKey]: e.target.value } : prev))}
                 placeholder="새 업체 상호명 입력 (필수)"
                 autoFocus
                 className="flex-1 min-w-0 text-[16px] sm:text-lg font-bold text-wedly-navy bg-transparent border-b border-wedly-bd focus:border-wedly-accent outline-none placeholder:text-wedly-muted placeholder:font-normal"
@@ -1972,7 +1884,7 @@ export default function DetailModalShell({
             {isNew && (
               <button
                 onClick={handleCreate}
-                disabled={creating || !String(localRow["02상호명"] || "").trim()}
+                disabled={creating || (nameKey ? !String(localRow[nameKey] || "").trim() : false)}
                 className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-[13px] font-medium text-white bg-wedly-accent rounded-lg hover:bg-wedly-accent/90 disabled:opacity-40 transition-colors"
               >
                 {creating ? "저장 중..." : "저장"}
@@ -2264,6 +2176,9 @@ export default function DetailModalShell({
                       onJumpToFiles={jumpToFiles}
                       onUploadFiles={handleUploadFilesInline}
                       onRemoveFile={handleRemoveFileInline}
+                      dialog={shellDialog}
+                      openFile={openFileForRow}
+                      selectDropdownBody={SelectDropdownBody}
                     />
                   );
                 })()}
@@ -2298,6 +2213,10 @@ export default function DetailModalShell({
                         onUploadFiles={handleUploadFilesInline}
                         onRemoveFile={handleRemoveFileInline}
                         onRenameColumn={columnEditMode ? onRenameColumn : undefined}
+                        isAdmin={isAdmin}
+                        dialog={shellDialog}
+                        openFile={openFileForRow}
+                        SelectDropdownBody={SelectDropdownBody}
                       />
                     )}
                     renderAdminMenu={(field) => (
@@ -2318,54 +2237,43 @@ export default function DetailModalShell({
                 )}
                 {/* 정산정보 차수 카드 — 활성 섹션의 kind 가 "settlement" 일 때만.
                     탭 식별 이름이 어긋나 있어도 종류 기준으로 정확히 분기 — 기본정보 탭에 정산 화면이 잘못 노출되지 않도록 보호 */}
-                {activeSection?.kind === "settlement" && (
-                  <SettlementInfoTab
-                    rawValue={localRow["정산정보"] ?? null}
-                    row={localRow}
-                    onSave={(json) => handleFieldSave("정산정보", json)}
-                    readOnly={isNew}
-                    isAdmin={isAdmin}
-                    subSections={detailSubSections?.settlement}
-                    onUpdateSubSections={onUpdateDetailSubSections ? (list) => onUpdateDetailSubSections("settlement", list) : undefined}
-                  />
-                )}
+                {activeSection?.kind === "settlement" && renderSettlementTab?.({
+                  variant: "settlement",
+                  row: localRow,
+                  readOnly: isNew,
+                  isAdmin,
+                  reloadToken: tieredReloadToken,
+                  onSaveField: handleFieldSave,
+                  subSections: detailSubSections?.settlement,
+                  onUpdateSubSections: onUpdateDetailSubSections ? (list) => onUpdateDetailSubSections("settlement", list) : undefined,
+                })}
                 {/* 계약정보·환불정보 차수별 카드 — 어드민이 섹션 kind 를 "tiered-contract" / "tiered-refund" 로 설정 */}
                 {(() => {
                   const cur = activeSection;
                   if (!cur) return null;
                   if (cur.kind === "tiered-contract") {
-                    return (
-                      <SettlementInfoTab
-                        key={`tiered-${cur.id}-${tieredReloadToken}`}
-                        rawValue={localRow["계약정보_차수"] ?? null}
-                        row={localRow}
-                        onSave={(json) => handleFieldSave("계약정보_차수", json)}
-                        readOnly={isNew}
-                        isAdmin={isAdmin}
-                        storagePrefix="contract"
-                        fieldsApiPath="/api/entries/tiered-fields/contract"
-                        sectionTitle="계약정보"
-                        subSections={detailSubSections?.contract}
-                        onUpdateSubSections={onUpdateDetailSubSections ? (list) => onUpdateDetailSubSections("contract", list) : undefined}
-                      />
-                    );
+                    return renderSettlementTab?.({
+                      variant: "tiered-contract",
+                      row: localRow,
+                      readOnly: isNew,
+                      isAdmin,
+                      reloadToken: tieredReloadToken,
+                      onSaveField: handleFieldSave,
+                      subSections: detailSubSections?.contract,
+                      onUpdateSubSections: onUpdateDetailSubSections ? (list) => onUpdateDetailSubSections("contract", list) : undefined,
+                    }) ?? null;
                   }
                   if (cur.kind === "tiered-refund") {
-                    return (
-                      <SettlementInfoTab
-                        key={`tiered-${cur.id}-${tieredReloadToken}`}
-                        rawValue={localRow["환불정보_차수"] ?? null}
-                        row={localRow}
-                        onSave={(json) => handleFieldSave("환불정보_차수", json)}
-                        readOnly={isNew}
-                        isAdmin={isAdmin}
-                        storagePrefix="refund"
-                        fieldsApiPath="/api/entries/tiered-fields/refund"
-                        sectionTitle="환불정보"
-                        subSections={detailSubSections?.refund}
-                        onUpdateSubSections={onUpdateDetailSubSections ? (list) => onUpdateDetailSubSections("refund", list) : undefined}
-                      />
-                    );
+                    return renderSettlementTab?.({
+                      variant: "tiered-refund",
+                      row: localRow,
+                      readOnly: isNew,
+                      isAdmin,
+                      reloadToken: tieredReloadToken,
+                      onSaveField: handleFieldSave,
+                      subSections: detailSubSections?.refund,
+                      onUpdateSubSections: onUpdateDetailSubSections ? (list) => onUpdateDetailSubSections("refund", list) : undefined,
+                    }) ?? null;
                   }
                   return null;
                 })()}
@@ -2386,7 +2294,7 @@ export default function DetailModalShell({
                 emptyMessage={fileFilterCategory ? `'${fileFilterCategory}' 분류 파일이 없습니다` : "첨부파일이 없습니다"}
                 disabled={isNew}
                 categoryOptions={fileCategoryOptions}
-                downloadApiPath="/api/files/download"
+                downloadApiPath={dataSource.fileDownloadPath ?? "/api/files/download"}
                 onOpenFile={handleOpenFile}
               />
             </div>
@@ -2469,30 +2377,31 @@ export default function DetailModalShell({
               옛 기본 카테고리(정책자금/무상지원금/인증제도) 는 HistoryPanel 안 fallback 이 항상 자동 노출 — hiddenHistoryCategoryIds 로 숨김 가능. */}
           {activePanel === "history" && !isNew && pageId && (
             <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-              <HistoryPanel
-                pageId={pageId}
-                onCountChange={(count) => {
+              {renderHistoryPanel({
+                pageId,
+                isAdmin,
+                onCountChange: (count) => {
                   onCommentCount?.(pageId, count);
                   setPanelCommentCounts((prev) => prev["default"] === count ? prev : { ...prev, default: count });
-                }}
-                focusCommentId={focusCommentId}
-                onFocusHandled={onFocusHandled}
-                categories={historyCategories?.filter((c) => !c.panelId)}
-                hiddenFallbackIds={hiddenHistoryCategoryIds}
-                onHideFallback={onHideHistoryCategory}
-                onUnhideFallback={onUnhideHistoryCategory}
-                onRenameCategory={onRenameHistoryCategory}
-                onReorderCategories={onReorderHistoryCategories}
-                onAddCategory={onAddHistoryCategory ? () => setShowAddHistoryCategoryModal(true) : undefined}
-                onDeleteCategory={onDeleteHistoryCategory ? async (catId) => {
+                },
+                focusCommentId,
+                onFocusHandled,
+                categories: historyCategories?.filter((c) => !c.panelId),
+                hiddenFallbackIds: hiddenHistoryCategoryIds,
+                onHideFallback: onHideHistoryCategory,
+                onUnhideFallback: onUnhideHistoryCategory,
+                onRenameCategory: onRenameHistoryCategory,
+                onReorderCategories: onReorderHistoryCategories,
+                onAddCategory: onAddHistoryCategory ? () => setShowAddHistoryCategoryModal(true) : undefined,
+                onDeleteCategory: onDeleteHistoryCategory ? async (catId) => {
                   const cat = historyCategories?.find((c) => c.id === catId);
                   const ok = await dialog.confirm(
                     `"${cat?.label || catId}" 히스토리 카테고리를 삭제하시겠습니까? 이 카테고리로 작성된 옛 글은 그대로 남고 "통합" 탭에서 계속 볼 수 있습니다.`,
                     { title: "카테고리 삭제", danger: true }
                   );
                   if (ok) onDeleteHistoryCategory(catId);
-                } : undefined}
-              />
+                } : undefined,
+              })}
             </div>
           )}
           {/* 사용자 정의 상위 패널 본문 — memo / embed 우선 지원, 나머지 종류는 placeholder */}
@@ -2602,31 +2511,32 @@ export default function DetailModalShell({
             if (p.kind === "history" && !isNew && pageId) {
               return (
                 <div key={p.id} className="flex-1 min-w-0 min-h-0 flex flex-col">
-                  <HistoryPanel
-                    pageId={pageId}
-                    onCountChange={(count) => {
+                  {renderHistoryPanel({
+                    pageId,
+                    isAdmin,
+                    scopePanelId: p.id,
+                    onCountChange: (count) => {
                       setPanelCommentCounts((prev) => prev[p.id] === count ? prev : { ...prev, [p.id]: count });
-                    }}
-                    focusCommentId={undefined}
-                    onFocusHandled={undefined}
-                    /* 이 패널 소속 카테고리만 노출 */
-                    categories={historyCategories?.filter((c) => c.panelId === p.id)}
-                    hiddenFallbackIds={hiddenHistoryCategoryIds}
-                    onHideFallback={onHideHistoryCategory}
-                    onUnhideFallback={onUnhideHistoryCategory}
-                    onRenameCategory={onRenameHistoryCategory}
-                    onReorderCategories={onReorderHistoryCategories}
-                    onAddCategory={onAddHistoryCategory ? () => setShowAddHistoryCategoryModal(true) : undefined}
-                    onDeleteCategory={onDeleteHistoryCategory ? async (catId) => {
+                    },
+                    focusCommentId: undefined,
+                    onFocusHandled: undefined,
+                    // 이 패널 소속 카테고리만 노출
+                    categories: historyCategories?.filter((c) => c.panelId === p.id),
+                    hiddenFallbackIds: hiddenHistoryCategoryIds,
+                    onHideFallback: onHideHistoryCategory,
+                    onUnhideFallback: onUnhideHistoryCategory,
+                    onRenameCategory: onRenameHistoryCategory,
+                    onReorderCategories: onReorderHistoryCategories,
+                    onAddCategory: onAddHistoryCategory ? () => setShowAddHistoryCategoryModal(true) : undefined,
+                    onDeleteCategory: onDeleteHistoryCategory ? async (catId) => {
                       const cat = historyCategories?.find((c) => c.id === catId);
                       const ok = await dialog.confirm(
                         `"${cat?.label || catId}" 히스토리 카테고리를 삭제하시겠습니까? 이 카테고리로 작성된 옛 글은 그대로 남고 "통합" 탭에서 계속 볼 수 있습니다.`,
                         { title: "카테고리 삭제", danger: true }
                       );
                       if (ok) onDeleteHistoryCategory(catId);
-                    } : undefined}
-                    scopePanelId={p.id}
-                  />
+                    } : undefined,
+                  })}
                 </div>
               );
             }
@@ -2651,7 +2561,7 @@ export default function DetailModalShell({
                     uploadButtonLabel={`${p.label} 업로드`}
                     emptyMessage={`'${p.label}' 패널에 첨부된 파일이 없습니다`}
                     disabled={isNew}
-                    downloadApiPath="/api/files/download"
+                    downloadApiPath={dataSource.fileDownloadPath ?? "/api/files/download"}
                     onOpenFile={handleOpenFile}
                   />
                 </div>
@@ -2701,7 +2611,7 @@ export default function DetailModalShell({
                 <div className="mt-1">
                   <CustomSelect
                     value={draftAddType}
-                    onChange={(v) => setDraftAddType(v as ColumnDef["type"])}
+                    onChange={(v) => setDraftAddType(v as ShellFieldDef["type"])}
                     options={[
                       { value: "text", label: "텍스트" },
                       { value: "number", label: "숫자" },
@@ -3042,7 +2952,7 @@ export default function DetailModalShell({
                 <div className="mt-1">
                   <CustomSelect
                     value={draftChangeType}
-                    onChange={(v) => setDraftChangeType(v as ColumnDef["type"])}
+                    onChange={(v) => setDraftChangeType(v as ShellFieldDef["type"])}
                     options={[
                       { value: "text", label: "텍스트" },
                       { value: "number", label: "숫자" },

@@ -108,7 +108,7 @@
 | `_components/utils.ts` | 데이터 헬퍼 | 공용본에 날짜 가드 3줄만 동기화 | ✅ 1단계-A 완료 |
 | `lib/open-file-with-refresh.ts` | 파일 열기 | 서버주소 2개를 `refetchEntryUrl`·`notionRefreshUrl` 입력값으로(미지정 시 하이브/ERP 기본 경로), 안내문구 `expiredMessage` | ✅ 1단계-B 완료 |
 | `_components/FieldEditors.tsx` | 셀·필드 편집기 | 박힌 4가지를 입력값으로: 권한(`isAdmin`)·확인창(`dialog`=ShellDialog 묶음 모양)·파일열기(`openFile`)·드롭다운(`SelectDropdownBody`) | ✅ 1단계-B 완료 |
-| `_components/DetailModal.tsx` | 본체 | 공용 틀(DetailModalShell)로 일반화 — config.ts 약속대로 | ⏳ 1단계-C |
+| `_components/DetailModal.tsx` | 본체 | 공용 틀(DetailModalShell)로 일반화 — config.ts 약속대로 | ✅ 1단계-C 완료 (코드) |
 | `_components/HistoryPanel.tsx` | 댓글·이력 | **옮기지 않음** — `renderHistoryPanel`로 통째 주입 | (주입) |
 
 ### 10-3. config.ts(설정 약속)에 보강 필요 — 본체(1단계-C) 작업 시 반영
@@ -200,3 +200,14 @@ const dialog: ShellDialog = {
 | `DraggableFieldsSection`(194–302)·인라인 계약렌더(2318) | 편집기 | 공용 `EditableFieldRow` 필수 입력값(`dialog`·`openFile`·`SelectDropdownBody`·`isAdmin`)을 renderRow 에서 넘기도록 배선 추가 |
 
 검증: 공용 폴더 단독 타입검사 불가(소스 소비형) → 최종 검증은 1단계-D 하이브 빌드. 그 전까지 운영 위험 0(미연결).
+
+### 10-8. 1단계-C 완료 기록 (코드) + 정밀조사로 보정한 약속 (2026-05-30)
+
+본체 변환 완료. `index.ts` 에서 `DetailModalShell` + 설정 타입들을 export 함. 서버 직접호출 약 20곳 → `dataSource.*` 어댑터, 정산탭 3·이력패널 2 → render-prop, `onUpdate`→`onFieldChange?`(부모알림)와 `dataSource.patchField`(저장) **역할 분리**, 상수(`CONTRACT_FIELDS`/`COLUMNS`)→입력값 별칭, `02상호명`→`primaryFieldKey`. code-reviewer 1회 검토 통과(BLOCKER·컴파일차단 0).
+
+**착수 중 실제 코드와 약속이 어긋난 곳을 증거 기반으로 보정(config.ts):**
+1. `bulkMigrateTier` 보냄/받음 모양 — 약속은 `{columnKey,prefix,sectionId}`였으나 실제는 `{columnKey,containerKey,aliasKeys}` 보내고 `{total,migrated,skipped,failed}` 받음 → 실제에 맞춤.
+2. `uploadFile` 반환 — 단순 `{url}` 이 아니라 `ShellUploadResult`(파일목록·단건·skipped). ZIP 자동해제·제외건수 안내를 예전과 동일하게 보존.
+3. **실패 처리 계약 명문화** — 어댑터는 실패 시 반드시 throw/reject 해야 틀의 "되돌리기·오류안내"가 작동(1단계-D 에서 하이브 어댑터가 반드시 지킬 것).
+
+**1단계-D 로 이관(이 환경에선 컴파일 검증 불가):** 단독 타입검사(#3)·미사용 import 정리·중복 타입(FieldEditors↔config) 통합은 하이브 빌드+린트가 정확히 잡아준다.
