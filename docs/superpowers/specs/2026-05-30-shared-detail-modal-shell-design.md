@@ -211,3 +211,21 @@ const dialog: ShellDialog = {
 3. **실패 처리 계약 명문화** — 어댑터는 실패 시 반드시 throw/reject 해야 틀의 "되돌리기·오류안내"가 작동(1단계-D 에서 하이브 어댑터가 반드시 지킬 것).
 
 **1단계-D 로 이관(이 환경에선 컴파일 검증 불가):** 단독 타입검사(#3)·미사용 import 정리·중복 타입(FieldEditors↔config) 통합은 하이브 빌드+린트가 정확히 잡아준다.
+
+### 10-9. 1단계-D 완료 기록 — 하이브 감싸개 교체 + 빌드 검증 (2026-05-30)
+
+하이브 `DetailModal.tsx`(3,225줄) → **얇은 감싸개**(약 330줄)로 교체. 하이브 전용 부분만 만들어 `DetailModalShell` 에 주입:
+- `fields`=CONTRACT_FIELDS(30개)·`columns`=COLUMNS, `isAdmin`=useAccess, `userDirectory`=useUserDirectory, `selectDropdownBody`=HiveSelectDropdownBody.
+- `dataSource` 어댑터 10종(patchField/createRow/uploadFile/fileDownloadPath/readTieredFields/writeTieredFields/readSectionMapping/writeSectionMapping/bulkMigrateTier/refetchEntryUrl·notionRefreshUrl) — 옛 fetch 주소·body·응답형태 1:1, **실패 시 throw**(틀이 되돌리기/안내, 삼킬 자리는 틀이 .catch).
+- `renderHistoryPanel`=HistoryPanel, `renderSettlementTab`=SettlementInfoTab(3종). `dialog`=useWedlyDialog(위치형)→ShellDialog(묶음형) 변환. `onFieldChange`=옛 onUpdate(부모알림, 저장과 역할분리). `primaryFieldKey="02상호명"`·`newRowTitle="새 업체 등록"`·`untitledLabel="업체 상세"`.
+- SubsidyClient 호출부 **무변경**(바깥 입력값 = 옛 Props 1:1, 타입 다리 RowData/ErpDetailSection/HistoryCategoryDef/FormulaSpec 구조 동일 → union↔string 캐스팅 3곳만).
+
+**빌드로 드러나 고친 1단계-A/C 결함:**
+1. **공용 `use-field-order.ts` 가 옛 하이브판의 축약본**이었음 — `isOrderLoaded`(깜빡임 방지) 누락=컴파일차단, 저장실패 시 되돌리기+안내 누락, 순서초기화가 브라우저 `confirm`(위들리 규칙 위반). → 하이브 원본과 동작 동일하게 복원하되 확인창은 **주입식**(`dialog?: FieldOrderDialog` 5번째 인자, 셸 두 호출부에서 `shellDialog` 전달). 미주입 consumer 는 안전 폴백.
+2. **차수 카드 React key 가 섹션 id 를 잃음**(주의-1) — `ShellSettlementRenderArgs` 에 `sectionId?` 추가, 셸 3호출부에서 활성 섹션 id 전달, 감싸개 key 를 옛것과 동일한 `tiered-${sectionId}-${reloadToken}` 로 복원(같은 kind 섹션 여럿일 때 정확 리마운트 — ERP·일루아 대비).
+
+**검증 결과:** 하이브 `tsc --noEmit` 0에러, ESLint 0, 위들리 디자인검사 0위반, **`next build` 성공(BUILD_EXIT=0)**. code-reviewer 1회: BLOCKER 0, 5개 항목(어댑터·render-prop·확인창변환·역할분리·훅복원) 옛것과 일치 확인.
+
+**남은 미세차이(수용·기록):** 일괄이전(bulkMigrateTier) 서버 비-2xx 응답 시 "이동 완료" 알림 **꼬리 문구만** 다름(옛 "응답 오류—어드민 권한" ↔ 새 "연결 실패"). 흐름·결과(컬럼 이동·값 미이동·완료 알림 표시) 동일, 실패·어드민 한정. 기능 회귀 아님.
+
+**운영 안전:** 패키지는 `feature/shared-detail-modal-shell` 가지, 하이브는 `feature/detail-modal-shell-swap` 가지 + package.json dep 를 그 패키지 가지로 지정. **하이브 main 미반영 → 운영 배포 없음.** 최종 운영 반영은 (a) 패키지 가지를 패키지 main 으로 병합 → 하이브 dep 를 일반 `github:...` 로 되돌림, (b) 사용자가 하이브 PR 을 main 에 병합(=즉시 운영 배포) 순으로 진행 예정.

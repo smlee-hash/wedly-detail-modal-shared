@@ -155,6 +155,8 @@ export type RenderHistoryPanel = (args: ShellHistoryRenderArgs) => ReactNode;
 export type ShellSettlementRenderArgs = {
   /** 어떤 카드인지: 일반 정산 / 차수별 계약 / 차수별 환불. 앱이 이걸로 저장 필드키·서버주소를 고른다. */
   variant: "settlement" | "tiered-contract" | "tiered-refund";
+  /** 활성 섹션 id — 차수 카드 React key 에 사용(같은 종류 섹션이 여럿일 때도 옛것처럼 정확히 리마운트). */
+  sectionId?: string;
   row: ShellRowData;
   readOnly: boolean;
   isAdmin: boolean;

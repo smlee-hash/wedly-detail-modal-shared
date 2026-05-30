@@ -223,7 +223,7 @@ function DraggableFieldsSection({
     handleDrop,
     handleDragEnd,
     isOrderLoaded,
-  } = useFieldOrder<DetailField>(scope, sectionId, sectionFields, isAdmin && editMode);
+  } = useFieldOrder<DetailField>(scope, sectionId, sectionFields, isAdmin && editMode, dialog);
 
   return (
     <SharedDraggableFieldsSection<DetailField>
@@ -1373,7 +1373,7 @@ export default function DetailModalShell({
     resetOrder: resetFieldOrder,
     hasCustomOrder: hasCustomFieldOrder,
     isOrderLoaded: isContractOrderLoaded,
-  } = useFieldOrder<DetailField>(scope, "contract", contractFieldsForOrder, isAdmin && columnEditMode);
+  } = useFieldOrder<DetailField>(scope, "contract", contractFieldsForOrder, isAdmin && columnEditMode, shellDialog);
 
   // contract 직접 영역에서 그릴 컬럼 목록 — 사용자 저장 순서(orderedFields) 우선 반영
   // 입력 한 글자마다 재계산되지 않게 묶음. orderedFields/effectiveSections 변경 시만 갱신.
@@ -2239,6 +2239,7 @@ export default function DetailModalShell({
                     탭 식별 이름이 어긋나 있어도 종류 기준으로 정확히 분기 — 기본정보 탭에 정산 화면이 잘못 노출되지 않도록 보호 */}
                 {activeSection?.kind === "settlement" && renderSettlementTab?.({
                   variant: "settlement",
+                  sectionId: activeSection?.id,
                   row: localRow,
                   readOnly: isNew,
                   isAdmin,
@@ -2254,6 +2255,7 @@ export default function DetailModalShell({
                   if (cur.kind === "tiered-contract") {
                     return renderSettlementTab?.({
                       variant: "tiered-contract",
+                      sectionId: cur.id,
                       row: localRow,
                       readOnly: isNew,
                       isAdmin,
@@ -2266,6 +2268,7 @@ export default function DetailModalShell({
                   if (cur.kind === "tiered-refund") {
                     return renderSettlementTab?.({
                       variant: "tiered-refund",
+                      sectionId: cur.id,
                       row: localRow,
                       readOnly: isNew,
                       isAdmin,

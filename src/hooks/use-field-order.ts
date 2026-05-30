@@ -7,6 +7,12 @@ export interface OrderableField {
   key: string;
 }
 
+/** 앱이 넘기는 위들리 확인/알림창(묶음형). 미지정 시 브라우저 기본창으로 대체(주입 권장). */
+export type FieldOrderDialog = {
+  confirm: (opts: { title: string; message?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }) => Promise<boolean>;
+  alert?: (opts: { title: string; message?: string }) => Promise<void> | void;
+};
+
 /**
  * DetailModal 의 섹션별 컬럼 순서를 server (JsonCache) 에 저장 + 드래그앤드롭으로 변경.
  *
@@ -17,6 +23,8 @@ export interface OrderableField {
  * @param visibleFields - 현재 노출되는 필드 배열 (CONTRACT_FIELDS 등)
  * @param canEdit - 관리자 여부. false 면 drag-drop 핸들러가 no-op 으로 동작 (UI 만 readonly).
  *                  서버는 별도로 ADMIN 권한 체크 — 우회 시도해도 403 반환.
+ * @param dialog - 위들리 확인/알림창(묶음형). 저장 실패 안내·순서 초기화 확인에 사용.
+ *                 미지정 시 브라우저 기본창으로 대체(앱에서는 반드시 주입 권장).
  *
  * 저장 형태:
  *   GET  /api/detail-field-order/{scope}    → { contract: [...], refund: [...], ... }
@@ -24,7 +32,7 @@ export interface OrderableField {
  *
  * 동작:
  *   - 마운트 시 GET 한 번 호출, 응답이 오기 전까지는 visibleFields 원본 순서 사용
- *   - drag-drop 으로 순서 변경 시 즉시 PUT (낙관적 업데이트: 응답 기다리지 않고 UI 반영)
+ *   - drag-drop 으로 순서 변경 시 즉시 PUT (낙관적 업데이트). 실패하면 마지막 저장 성공 순서로 되돌리고 안내.
  *   - 신규 필드(서버 저장 순서에 없는 키)는 원본 순서대로 뒤에 붙임
  */
 export function useFieldOrder<T extends OrderableField>(
@@ -32,16 +40,26 @@ export function useFieldOrder<T extends OrderableField>(
   tabKey: string,
   visibleFields: T[],
   canEdit: boolean = false,
+  dialog?: FieldOrderDialog,
 ) {
   const [fieldOrder, setFieldOrder] = useState<string[]>([]);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const apiUrlRef = useRef<string>(`/api/detail-field-order/${scope}`);
   apiUrlRef.current = `/api/detail-field-order/${scope}`;
+  // 마지막으로 저장 성공한 순서 — 빠른 연속 드래그에서 꼬임 방지용(실패 시 이 값으로 복원)
+  const lastSavedOrderRef = useRef<string[]>([]);
+  // dialog 최신값을 ref 로 — persistOrder/resetOrder 의 useCallback 의존성을 안정화
+  const dialogRef = useRef<FieldOrderDialog | undefined>(dialog);
+  dialogRef.current = dialog;
+
+  // 서버에서 컬럼 순서를 받아오는 단계인지 — 응답 전엔 화면 그리기를 보류해 깜빡임 차단용
+  const [isOrderLoaded, setIsOrderLoaded] = useState(false);
 
   // 마운트 시 서버에서 fetch
   useEffect(() => {
     let canceled = false;
+    setIsOrderLoaded(false);
     fetch(apiUrlRef.current, { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => {
@@ -49,11 +67,16 @@ export function useFieldOrder<T extends OrderableField>(
         if (j?.success && j.data && typeof j.data === "object") {
           const arr = j.data[tabKey];
           if (Array.isArray(arr)) {
-            setFieldOrder(arr.filter((k): k is string => typeof k === "string"));
+            const cleaned = arr.filter((k): k is string => typeof k === "string");
+            setFieldOrder(cleaned);
+            lastSavedOrderRef.current = cleaned; // 서버에 저장된 값이 last-known-good
           }
         }
       })
-      .catch(() => { /* 네트워크 실패 → 원본 순서 사용 */ });
+      .catch(() => { /* 네트워크 실패 → 원본 순서 사용 */ })
+      .finally(() => {
+        if (!canceled) setIsOrderLoaded(true);
+      });
     return () => { canceled = true; };
   }, [scope, tabKey]);
 
@@ -77,13 +100,34 @@ export function useFieldOrder<T extends OrderableField>(
 
   const persistOrder = useCallback(
     (next: string[]) => {
-      setFieldOrder(next); // 낙관적 업데이트
-      // 비동기 PUT — 실패해도 UI 는 유지 (다음 새로고침 시 서버 값으로 정렬)
-      fetch(apiUrlRef.current, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tab: tabKey, order: next }),
-      }).catch((err) => console.warn("[useFieldOrder PUT]", err));
+      // 마지막 저장 성공 순서 보존 — 두 번째 드래그 후 첫 번째 실패해도 두 번째 적용 순서가 유지
+      const lastKnownGood = lastSavedOrderRef.current;
+      setFieldOrder(next); // 낙관적 업데이트 (UI 즉시 반영)
+      // 응답 검사 — 200 이 아니면 마지막 저장 성공 순서로 복원 + 사용자에게 안내
+      (async () => {
+        try {
+          const res = await fetch(apiUrlRef.current, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tab: tabKey, order: next }),
+          });
+          if (!res.ok) {
+            const errJson = await res.json().catch(() => null);
+            const errMsg = errJson?.error || `HTTP ${res.status}`;
+            if (typeof console !== "undefined") console.error("[useFieldOrder persistOrder] PUT 실패 — 옛 순서 복원", errMsg);
+            setFieldOrder(lastKnownGood);
+            void dialogRef.current?.alert?.({ title: "저장 실패", message: `컬럼 위치를 저장하지 못했습니다. 원인: ${errMsg}` });
+            return;
+          }
+          // 저장 성공 — 이 순서를 새로운 last-known-good 으로
+          lastSavedOrderRef.current = next;
+        } catch (err) {
+          setFieldOrder(lastKnownGood);
+          const msg = err instanceof Error ? err.message : "연결 실패";
+          console.warn("[useFieldOrder PUT]", err);
+          void dialogRef.current?.alert?.({ title: "저장 오류", message: `컬럼 위치 저장 중 오류: ${msg}` });
+        }
+      })();
     },
     [tabKey],
   );
@@ -142,9 +186,13 @@ export function useFieldOrder<T extends OrderableField>(
     setDragOverKey(null);
   }, []);
 
-  const resetOrder = useCallback(() => {
+  const resetOrder = useCallback(async () => {
     if (!canEdit) return;
-    if (!confirm("컬럼 순서를 초기 상태로 되돌리시겠습니까? (모든 사용자에게 적용됩니다.)")) return;
+    const d = dialogRef.current;
+    const ok = d
+      ? await d.confirm({ title: "순서 초기화", message: "컬럼 순서를 초기 상태로 되돌리시겠습니까? (모든 사용자에게 적용됩니다.)" })
+      : (typeof window !== "undefined" ? window.confirm("컬럼 순서를 초기 상태로 되돌리시겠습니까? (모든 사용자에게 적용됩니다.)") : false);
+    if (!ok) return;
     persistOrder([]);
   }, [canEdit, persistOrder]);
 
@@ -160,5 +208,6 @@ export function useFieldOrder<T extends OrderableField>(
     handleDragEnd,
     resetOrder,
     hasCustomOrder: fieldOrder.length > 0,
+    isOrderLoaded,
   };
 }
