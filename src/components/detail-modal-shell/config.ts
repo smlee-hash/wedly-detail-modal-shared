@@ -10,7 +10,7 @@
 // 설계 근거: 하이브 현재 DetailModal 의 입력값(약 40개)을 그대로 따르고, 지금까지
 // 하이브 안에 "박혀 있던" 4가지만 입력값으로 추가로 빼낸다.
 
-import type { ReactNode } from "react";
+import type { ReactNode, ComponentType } from "react";
 
 // ---------------------------------------------------------------------------
 // 1) 기본 데이터 형태
@@ -19,13 +19,22 @@ import type { ReactNode } from "react";
 /** 한 행(업체 1건)의 값 모음. 키=컬럼키, 값=문자열/숫자/불리언/빈값. */
 export type ShellRowData = Record<string, string | number | boolean | null>;
 
+/** 수식 컬럼 정의 — 참조 컬럼 × 연산자 × 숫자 (예: 예상수수료 × 0.3). 예전 하이브 FormulaSpec 과 동일. */
+export type ShellFormula = {
+  refKey: string;
+  op: "*" | "+" | "-" | "/";
+  operand: number;
+};
+
 /** 한 컬럼(필드) 정의 — 앱이 넘겨주는 "컬럼 이름·형식". (앱별로 다른 부분) */
 export type ShellFieldDef = {
   key: string;
   label: string;
-  /** text/number/date/select/multi_select/person/email/phone_number/file/last_edited_time 등 공통 형식 이름 */
+  /** text/number/date/select/multi_select/person/email/phone_number/file/last_edited_time/formula 등 공통 형식 이름 */
   type: string;
   format?: "currency";
+  /** type === "formula" 인 사용자 정의 컬럼에서만 사용 — 자동 계산 규칙. */
+  formula?: ShellFormula;
 };
 
 /** 한 섹션(탭) 정의 — 순서·위치·종류. 하이브의 ErpDetailSection 과 동일 형태.
@@ -152,9 +161,30 @@ export type ShellUserDirectory = { all: string[]; leaders: string[]; members: st
 
 /** 위들리 디자인 확인/알림창 — 브라우저 기본 창(confirm/alert) 금지 규칙 준수용. */
 export type ShellDialog = {
-  confirm: (opts: { title: string; message?: string; confirmLabel?: string; danger?: boolean }) => Promise<boolean>;
+  confirm: (opts: { title: string; message?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }) => Promise<boolean>;
   alert?: (opts: { title: string; message?: string }) => Promise<void> | void;
 };
+
+/** 옵션 드롭다운 본문 — 앱별 옵션 시스템(추가/삭제/색상)에 연결된 부품. 예전 하이브 HiveSelectDropdownBody.
+ *  편집기(SelectEditor)가 이 부품을 받아 옵션 선택 UI 를 그린다. (FieldEditors 의 동일 타입과 구조 호환) */
+export type SelectDropdownBodyComponent = ComponentType<{
+  value: string;
+  options: string[];
+  fieldKey: string;
+  onSave: (next: string) => void;
+  onClose: () => void;
+  allowDelete?: boolean;
+}>;
+
+/** 파일 안전 열기 함수 — 만료 링크 자동 회복(예전 하이브 openFileWithRefresh).
+ *  본체가 만들어 편집기·파일탭에 넘긴다(회복용 서버주소는 dataSource 로 주입). */
+export type OpenFileFn = (opts: {
+  url: string;
+  entryId: string;
+  fileName: string;
+  category?: string;
+  onWarn?: (message: string) => void;
+}) => void;
 
 // ---------------------------------------------------------------------------
 // 5) 공용 틀이 받는 전체 입력값 = 기존 하이브 입력값 + 새로 빼낸 4가지(+보조).
@@ -176,6 +206,10 @@ export type SharedDetailModalProps = {
   dataSource: ShellDataSource;
   /** ④ 댓글·이력 패널(앱이 만든 것을 끼움). */
   renderHistoryPanel: RenderHistoryPanel;
+
+  // ── 옵션 드롭다운(앱별 옵션 시스템 연결) — 예전 하이브 HiveSelectDropdownBody ──
+  /** 선택·파일 컬럼 편집의 옵션 드롭다운 본문. 앱별 옵션 저장소에 연결된 부품을 넘긴다. */
+  selectDropdownBody: SelectDropdownBodyComponent;
 
   // ── 정산/차수 카드 패널(앱이 만든 것을 끼움) ──
   /** 정산·차수 카드 탭. 미지정 시 그 종류 섹션은 빈 화면. (저장 필드키·서버주소가 앱별이라 주입) */
@@ -229,7 +263,7 @@ export type SharedDetailModalProps = {
   /** 어드민이 테이블에 추가한 사용자 정의 컬럼 — 형식 정보 보강용. (앱별 컬럼 타입 그대로 전달) */
   customColumns?: ShellFieldDef[];
   onAddColumnToSection?: (column: { key: string; label: string; type: string }, sectionId: string) => void;
-  onChangeColumnType?: (key: string, newType: string, formula?: unknown) => void;
+  onChangeColumnType?: (key: string, newType: string, formula?: ShellFormula) => void;
   onRenameColumn?: (key: string, newLabel: string) => void;
 
   // ── 어드민: 섹션 추가/삭제/순서 ──
