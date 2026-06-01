@@ -145,7 +145,8 @@ export default function SettlementInfoTab({
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
   //   1개 이상이면 "통합" + 각 세부 섹션 탭 줄. 활성 탭만 본문 노출.
-  const subSectionsSafe = useMemo(() => Array.isArray(subSections) ? subSections : [], [subSections]);
+  // 세부 섹션(선택 줄) 미사용 — 항상 빈 배열로 두어 selector·영역별 합계·분기 블록을 전부 숨긴다(통합 표시).
+  const subSectionsSafe = useMemo<Array<{ id: string; label: string }>>(() => [], [subSections]);
   // 활성 탭 — "__all" 은 통합 탭, 그 외는 세부 섹션 id.
   const [activeSubSectionId, setActiveSubSectionId] = useState<string>("__all");
   // 활성 탭이 옛 세부 섹션을 가리키는 상태가 안 되도록 — subSections 변경 시 가드.
@@ -980,6 +981,25 @@ export default function SettlementInfoTab({
 
   return (
     <div className="space-y-4">
+      {/* ── 어드민 통합 편집 버튼 (카드 편집 + 컬럼 편집을 한 번에 ON/OFF) — 섹션 제목 줄 위치 ── */}
+      {canEditColumns && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => { const next = !(editCards || editFields); setEditCards(next); setEditFields(next); }}
+            className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border transition-colors whitespace-nowrap ${
+              (editCards || editFields)
+                ? "border-wedly-accent text-wedly-accent bg-wedly-bg-blue/40"
+                : "border-wedly-bd text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1"
+            }`}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+              <path d="M11.5 2L14 4.5L5.5 13L2 14L3 10.5L11.5 2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+            </svg>
+            {(editCards || editFields) ? "편집 종료" : "편집"}
+          </button>
+        </div>
+      )}
       {/* ── 세부 섹션 선택 영역 ──
           박스로 감싸 "여기서 영역을 선택한다" 는 신호를 강하게.
           상단 안내 라벨 + 알약 모양 활성 탭으로 시각 위계 분명히. */}
@@ -1130,21 +1150,6 @@ export default function SettlementInfoTab({
           <p className="text-[12px] font-semibold text-wedly-muted uppercase tracking-wider">{activeSubLabel}</p>
           <div className="flex items-center gap-2">
             <p className="text-[11px] text-wedly-muted">{tiersInActive.length}개 차수 · {scoreCards.length}개 카드</p>
-            {canEditColumns && (
-              <button
-                onClick={() => setEditCards(!editCards)}
-                className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border transition-colors whitespace-nowrap ${
-                  editCards
-                    ? "border-wedly-accent text-wedly-accent bg-wedly-bg-blue/40"
-                    : "border-wedly-bd text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1"
-                }`}
-              >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                  <path d="M11.5 2L14 4.5L5.5 13L2 14L3 10.5L11.5 2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-                </svg>
-                {editCards ? "카드 편집 종료" : "카드 편집"}
-              </button>
-            )}
           </div>
         </div>
         <div className={`grid gap-3 ${scoreCards.length <= 2 ? "grid-cols-1 md:grid-cols-2" : scoreCards.length === 3 ? "grid-cols-2 md:grid-cols-3" : "grid-cols-2 md:grid-cols-4"}`}>
@@ -1461,22 +1466,9 @@ export default function SettlementInfoTab({
         </div>
       )}
 
-      {canEditColumns && (
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setEditFields(!editFields)}
-            className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border transition-colors whitespace-nowrap ${
-              editFields
-                ? "border-wedly-accent text-wedly-accent bg-wedly-bg-blue/40"
-                : "border-wedly-bd text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1"
-            }`}
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-              <path d="M11.5 2L14 4.5L5.5 13L2 14L3 10.5L11.5 2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-            </svg>
-            {editFields ? "컬럼 편집 종료" : "컬럼 편집"}
-          </button>
-          {savingFields && <span className="text-[11px] text-wedly-muted">저장 중...</span>}
+      {savingFields && canEditColumns && (
+        <div className="flex justify-end">
+          <span className="text-[11px] text-wedly-muted">저장 중...</span>
         </div>
       )}
 
