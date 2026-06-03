@@ -1955,7 +1955,7 @@ export default function SettlementInfoTab({
                         />
                         <span className="text-[11px] font-bold text-wedly-orange">값에 따라 다른 식 쓰기</span>
                       </label>
-                      <p className="text-[10px] text-wedly-muted px-0.5">기준 필드 값이 규칙과 맞으면 그 식으로, 안 맞으면 위의 기본 식으로 계산합니다.</p>
+                      <p className="text-[10px] text-wedly-muted px-0.5">기준 필드 값이 규칙의 값과 같으면(여러 값을 가진 칸이면 그 중 하나라도 맞으면) 그 식으로, 어디에도 안 맞으면 위의 기본 식으로 계산합니다.</p>
 
                       {draftConditional && (
                         <div className="space-y-2.5">
