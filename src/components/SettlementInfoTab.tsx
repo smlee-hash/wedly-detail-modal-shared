@@ -126,6 +126,7 @@ export default function SettlementInfoTab({
   defaultScoreCards,
   seedDefaultCardsForAllPrefixes = false,
   addButtonSuffixOverride,
+  conditionFieldOptions,
 }: {
   rawValue: unknown;
   row?: RowData | null;
@@ -153,6 +154,9 @@ export default function SettlementInfoTab({
   seedDefaultCardsForAllPrefixes?: boolean;
   // 차수추가 버튼 꼬리표 고정값 (하이브 "정산" 고정, 일루아 미지정→tierSuffix 사용)
   addButtonSuffixOverride?: string;
+  // 조건별 수식의 "기준 필드" 후보 (기본정보 평면 필드). ERP만 주입 → 주입될 때만 조건 UI 노출.
+  //   미주입(파트너 앱)이면 조건 UI 자체가 안 보이고 기존과 100% 동일.
+  conditionFieldOptions?: Array<{ key: string; label: string }>;
 }) {
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
@@ -591,6 +595,10 @@ export default function SettlementInfoTab({
   const [draftFormula, setDraftFormula] = useState<FormulaTerm[]>([]);
   const [draftFormulaResult, setDraftFormulaResult] = useState<FormulaResultFormat>("number");
   const [formulaError, setFormulaError] = useState<string>("");
+  // 조건별 수식 편집 상태. null = 조건 안 씀(기본 식만). 객체면 "값에 따라 다른 식" 켠 상태.
+  const [draftConditional, setDraftConditional] = useState<
+    { conditionFieldKey: string; rules: Array<{ whenValue: string; formula: FormulaTerm[] }> } | null
+  >(null);
 
   const openAddField = useCallback(() => {
     setDraftLabel("");
@@ -598,6 +606,7 @@ export default function SettlementInfoTab({
     setDraftFormula([]);
     setDraftFormulaResult("number");
     setFormulaError("");
+    setDraftConditional(null);
     setFieldEditModal({ mode: "add" });
   }, []);
   const openRenameField = useCallback((key: string) => {
@@ -613,6 +622,7 @@ export default function SettlementInfoTab({
     setDraftFormula(cur.type === "formula" ? parseFormulaTerms(cur.formula) : []);
     setDraftFormulaResult(cur.formulaResult === "percent" ? "percent" : "number");
     setFormulaError("");
+    setDraftConditional(cur.conditional ?? null);
     setFieldEditModal({ mode: "changeType", key, type: cur.type });
   }, [fields]);
 
