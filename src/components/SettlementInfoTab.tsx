@@ -965,12 +965,12 @@ export default function SettlementInfoTab({
     const field = fields.find((f) => f.key === k);
     if (field?.type === "formula") {
       return target.reduce((a, t) => {
-        const r = evalFormulaForTier(field, t, fields);
+        const r = evalFormulaForTier(field, t, fields, undefined, row ?? undefined);
         return a + (typeof r === "number" && Number.isFinite(r) ? r : 0);
       }, 0);
     }
     return target.reduce((a, t) => a + (typeof t[k] === "number" ? (t[k] as number) : 0), 0);
-  }, [tiersInSubSection, fields]);
+  }, [tiersInSubSection, fields, row]);
   // 옛 호출 호환 — 인자 1개. 항상 전체 합산.
   const sumColumn = useCallback((k: string) => sumColumnIn(k), [sumColumnIn]);
   // 직접 수식 항목 배열을 base 에 순차 적용 — 합산/차감/전체 3 곳에서 공통 사용
@@ -1666,6 +1666,7 @@ export default function SettlementInfoTab({
               }).catch(() => { /* ignore */ });
             } : undefined}
             rowLayout={rowLayout}
+            conditionValues={row ?? undefined}
           />
         );
 
@@ -2161,7 +2162,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [],
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2181,6 +2182,8 @@ function TierCard({
   onTierSuffixChange?: (next: string) => void;
   /** 줄별 가로 칸 수 배열 (예: [3,2,1]) — 비어 있으면 모두 한 줄 1칸(세로). 위에서부터 순서대로 채움 */
   rowLayout?: number[];
+  /** 조건별 수식의 기준값 — 이 행의 평면 값(row). 없으면 기존(조건 미적용)과 동일 */
+  conditionValues?: RowData | null;
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2278,7 +2281,7 @@ function TierCard({
                       key={f.key}
                       label={f.label}
                       type={f.type}
-                      value={isFormula ? evalFormulaForTier(f, tier, fields) : (tier[f.key] ?? null)}
+                      value={isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null)}
                       readOnly={readOnly}
                       isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       formulaResult={f.formulaResult}
