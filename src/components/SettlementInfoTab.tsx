@@ -1502,10 +1502,12 @@ export default function SettlementInfoTab({
           {/* 칸 배치 선택 — 한 줄에 몇 칸을 가로로 둘지 관리자가 직접 고른다(1·2·3). 분야별로 저장. */}
           <div className="flex items-center gap-2 mb-3">
             <span className="text-[12px] text-wedly-t2">한 줄에 표시할 칸 수</span>
-            <select
-              value={fieldsPerRow}
-              onChange={(e) => {
-                const n = Number(e.target.value);
+            {/* 위들리 디자인 커스텀 드롭다운 — native <select> 는 열린 목록 스타일을 못 줘서 CustomSelect 사용.
+                한 줄에 가로로 몇 칸(1·2·3)을 둘지 직접 고른다. 저장 동작은 종전과 동일. */}
+            <CustomSelect
+              value={String(fieldsPerRow)}
+              onChange={(next) => {
+                const n = Number(next);
                 const v = (n === 2 ? 2 : n === 3 ? 3 : 1) as 1 | 2 | 3;
                 setFieldsPerRow(v);
                 fetch(configApiPath, {
@@ -1514,12 +1516,15 @@ export default function SettlementInfoTab({
                   body: JSON.stringify({ [fieldsPerRowKey]: v }),
                 }).catch(() => { /* ignore */ });
               }}
-              className="wedly-select text-[12px] border border-wedly-bd rounded-md px-2 py-1 bg-white"
-            >
-              <option value={1}>1개씩 (세로로 한 줄)</option>
-              <option value={2}>2개씩 (가로 2칸)</option>
-              <option value={3}>3개씩 (가로 3칸)</option>
-            </select>
+              options={[
+                { value: "1", label: "1개씩 (한 줄에 1칸)" },
+                { value: "2", label: "2개씩 (한 줄에 2칸)" },
+                { value: "3", label: "3개씩 (한 줄에 3칸)" },
+              ]}
+              size="sm"
+              fullWidth={false}
+              className="min-w-[176px]"
+            />
           </div>
           {fields.map((f, idx) => {
             const isDragging = dragIdx === idx;
