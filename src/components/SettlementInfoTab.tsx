@@ -719,38 +719,7 @@ export default function SettlementInfoTab({
         })),
     [fields, editingFieldKey],
   );
-  const addFormulaTerm = useCallback(() => {
-    setFormulaError("");
-    setDraftFormula((prev) => {
-      const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
-      const term: FormulaTerm = firstCol
-        ? { op: "+", unit: "column", columnKey: firstCol.key, value: 0 }
-        : { op: "+", unit: "number", value: 0 };
-      return [...prev, term];
-    });
-  }, [fields, editingFieldKey]);
-  const updateFormulaTerm = useCallback((idx: number, patch: Partial<FormulaTerm>) => {
-    setFormulaError("");
-    setDraftFormula((prev) =>
-      prev.map((t, i) => {
-        if (i !== idx) return t;
-        const merged: FormulaTerm = { ...t, ...patch };
-        if (patch.unit === "column" && !merged.columnKey) {
-          const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
-          merged.columnKey = firstCol?.key;
-        }
-        if (patch.unit === "number" || patch.unit === "percent") {
-          delete merged.columnKey;
-          if (typeof merged.value !== "number") merged.value = 0;
-        }
-        return merged;
-      }),
-    );
-  }, [fields, editingFieldKey]);
-  const removeFormulaTerm = useCallback((idx: number) => {
-    setFormulaError("");
-    setDraftFormula((prev) => prev.filter((_, i) => i !== idx));
-  }, []);
+  // (수식 항목 추가·수정·삭제는 FormulaTermsEditor 컴포넌트로 이동 — 기본 식·조건 규칙별 식 공용)
   // 특정 컬럼(key)을 항으로 참조하는 수식 컬럼들 — 삭제·타입변경 시 영향 경고에 사용
   const formulasReferencing = useCallback((key: string | null): FieldDef[] => {
     if (!key) return [];
@@ -1910,109 +1879,14 @@ export default function SettlementInfoTab({
                     </div>
                   </label>
 
-                  <div className="space-y-2">
-                    {draftFormula.length === 0 ? (
-                      <p className="text-[11px] text-wedly-muted italic px-1">아래 &quot;+ 항목 추가&quot;로 시작하세요.</p>
-                    ) : (
-                      draftFormula.map((t, i) => (
-                        <div key={i} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-1.5">
-                          <div className="flex items-center gap-1.5">
-                            {i > 0 ? (
-                              <div className="w-[92px] flex-shrink-0">
-                                <CustomSelect
-                                  size="sm"
-                                  value={t.op}
-                                  onChange={(v) => updateFormulaTerm(i, { op: v as "+" | "-" | "*" | "/" })}
-                                  options={[
-                                    { value: "+", label: "＋ 더하기" },
-                                    { value: "-", label: "－ 빼기" },
-                                    { value: "*", label: "× 곱하기" },
-                                    { value: "/", label: "÷ 나누기" },
-                                  ]}
-                                />
-                              </div>
-                            ) : (
-                              <span className="w-[92px] flex-shrink-0 text-[10px] text-wedly-muted px-1">시작 값</span>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <CustomSelect
-                                size="sm"
-                                value={t.unit}
-                                onChange={(v) => updateFormulaTerm(i, { unit: v as "column" | "number" | "percent" })}
-                                options={[
-                                  { value: "column", label: "다른 컬럼" },
-                                  { value: "number", label: "숫자" },
-                                  { value: "percent", label: "퍼센트(%)" },
-                                ]}
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => removeFormulaTerm(i)}
-                              className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
-                              title="이 항목 삭제"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                          <div>
-                            {t.unit === "column" ? (
-                              formulaColumnOptions.length === 0 ? (
-                                <p className="text-[10px] text-wedly-orange px-1">고를 숫자·퍼센트 컬럼이 없습니다. 숫자/퍼센트로 바꾸세요.</p>
-                              ) : (
-                                <CustomSelect
-                                  size="sm"
-                                  value={t.columnKey || ""}
-                                  onChange={(v) => updateFormulaTerm(i, { columnKey: v })}
-                                  placeholder="컬럼 선택"
-                                  options={[{ value: "", label: "컬럼 선택" }, ...formulaColumnOptions]}
-                                />
-                              )
-                            ) : (
-                              <div className="relative">
-                                <input
-                                  type="number"
-                                  value={typeof t.value === "number" ? String(t.value) : ""}
-                                  onChange={(e) => updateFormulaTerm(i, { value: e.target.value === "" ? 0 : Number(e.target.value) })}
-                                  placeholder={t.unit === "percent" ? "예: 30" : "예: 12"}
-                                  className={`w-full px-2.5 py-1.5 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${t.unit === "percent" ? "pr-7" : ""}`}
-                                />
-                                {t.unit === "percent" && (
-                                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-wedly-muted text-[12px] pointer-events-none">%</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={addFormulaTerm}
-                    className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
-                  >
-                    + 항목 추가
-                  </button>
-
-                  {draftFormula.length > 0 && (() => {
-                    const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷" };
-                    const text = draftFormula.map((t, i) => {
-                      let operand = "?";
-                      if (t.unit === "number") operand = String(t.value ?? 0);
-                      else if (t.unit === "percent") operand = `${t.value ?? 0}%`;
-                      else operand = fields.find((f) => f.key === t.columnKey)?.label ?? "(컬럼)";
-                      return i === 0 ? operand : `${opSym[t.op] || t.op} ${operand}`;
-                    }).join(" ");
-                    return (
-                      <div className="rounded-lg bg-wedly-bg-gray px-2.5 py-2">
-                        <span className="text-[10px] font-semibold text-wedly-muted">미리보기: </span>
-                        <span className="text-[12px] font-medium text-wedly-t1">{text}</span>
-                        <span className="text-[11px] text-wedly-muted"> = {draftFormulaResult === "percent" ? "%" : "원"}</span>
-                      </div>
-                    );
-                  })()}
+                  <FormulaTermsEditor
+                    terms={draftFormula}
+                    onChange={(next) => { setDraftFormula(next); setFormulaError(""); }}
+                    fields={fields}
+                    editingFieldKey={editingFieldKey}
+                    columnOptions={formulaColumnOptions}
+                    resultFormat={draftFormulaResult}
+                  />
 
                   {formulaError && <p className="text-[11px] text-wedly-red px-1">{formulaError}</p>}
                 </div>
@@ -2273,6 +2147,150 @@ function TierCard({
         </div>
       )}
     </div>
+  );
+}
+
+// 수식 "항목(term) 묶음" 편집 UI — 기본 식과 조건 규칙별 식에서 공용으로 재사용.
+//   terms/onChange 로만 동작(부모의 어떤 배열이든 편집). 계산 자체는 ui-shared(evalFormulaForTier)가 함.
+function FormulaTermsEditor({
+  terms, onChange, fields, editingFieldKey, columnOptions, resultFormat,
+}: {
+  terms: FormulaTerm[];
+  onChange: (next: FormulaTerm[]) => void;
+  fields: FieldDef[];
+  editingFieldKey: string | null;
+  columnOptions: { value: string; label: string }[];
+  resultFormat: FormulaResultFormat;
+}) {
+  const addTerm = () => {
+    const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
+    const term: FormulaTerm = firstCol
+      ? { op: "+", unit: "column", columnKey: firstCol.key, value: 0 }
+      : { op: "+", unit: "number", value: 0 };
+    onChange([...terms, term]);
+  };
+  const updateTerm = (idx: number, patch: Partial<FormulaTerm>) => {
+    onChange(
+      terms.map((t, i) => {
+        if (i !== idx) return t;
+        const merged: FormulaTerm = { ...t, ...patch };
+        if (patch.unit === "column" && !merged.columnKey) {
+          const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
+          merged.columnKey = firstCol?.key;
+        }
+        if (patch.unit === "number" || patch.unit === "percent") {
+          delete merged.columnKey;
+          if (typeof merged.value !== "number") merged.value = 0;
+        }
+        return merged;
+      }),
+    );
+  };
+  const removeTerm = (idx: number) => onChange(terms.filter((_, i) => i !== idx));
+  const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷" };
+  return (
+    <>
+      <div className="space-y-2">
+        {terms.length === 0 ? (
+          <p className="text-[11px] text-wedly-muted italic px-1">아래 &quot;+ 항목 추가&quot;로 시작하세요.</p>
+        ) : (
+          terms.map((t, i) => (
+            <div key={i} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                {i > 0 ? (
+                  <div className="w-[92px] flex-shrink-0">
+                    <CustomSelect
+                      size="sm"
+                      value={t.op}
+                      onChange={(v) => updateTerm(i, { op: v as "+" | "-" | "*" | "/" })}
+                      options={[
+                        { value: "+", label: "＋ 더하기" },
+                        { value: "-", label: "－ 빼기" },
+                        { value: "*", label: "× 곱하기" },
+                        { value: "/", label: "÷ 나누기" },
+                      ]}
+                    />
+                  </div>
+                ) : (
+                  <span className="w-[92px] flex-shrink-0 text-[10px] text-wedly-muted px-1">시작 값</span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <CustomSelect
+                    size="sm"
+                    value={t.unit}
+                    onChange={(v) => updateTerm(i, { unit: v as "column" | "number" | "percent" })}
+                    options={[
+                      { value: "column", label: "다른 컬럼" },
+                      { value: "number", label: "숫자" },
+                      { value: "percent", label: "퍼센트(%)" },
+                    ]}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeTerm(i)}
+                  className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                  title="이 항목 삭제"
+                >
+                  ✕
+                </button>
+              </div>
+              <div>
+                {t.unit === "column" ? (
+                  columnOptions.length === 0 ? (
+                    <p className="text-[10px] text-wedly-orange px-1">고를 숫자·퍼센트 컬럼이 없습니다. 숫자/퍼센트로 바꾸세요.</p>
+                  ) : (
+                    <CustomSelect
+                      size="sm"
+                      value={t.columnKey || ""}
+                      onChange={(v) => updateTerm(i, { columnKey: v })}
+                      placeholder="컬럼 선택"
+                      options={[{ value: "", label: "컬럼 선택" }, ...columnOptions]}
+                    />
+                  )
+                ) : (
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={typeof t.value === "number" ? String(t.value) : ""}
+                      onChange={(e) => updateTerm(i, { value: e.target.value === "" ? 0 : Number(e.target.value) })}
+                      placeholder={t.unit === "percent" ? "예: 30" : "예: 12"}
+                      className={`w-full px-2.5 py-1.5 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${t.unit === "percent" ? "pr-7" : ""}`}
+                    />
+                    {t.unit === "percent" && (
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-wedly-muted text-[12px] pointer-events-none">%</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={addTerm}
+        className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+      >
+        + 항목 추가
+      </button>
+      {terms.length > 0 && (() => {
+        const text = terms.map((t, i) => {
+          let operand = "?";
+          if (t.unit === "number") operand = String(t.value ?? 0);
+          else if (t.unit === "percent") operand = `${t.value ?? 0}%`;
+          else operand = fields.find((f) => f.key === t.columnKey)?.label ?? "(컬럼)";
+          return i === 0 ? operand : `${opSym[t.op] || t.op} ${operand}`;
+        }).join(" ");
+        return (
+          <div className="rounded-lg bg-wedly-bg-gray px-2.5 py-2">
+            <span className="text-[10px] font-semibold text-wedly-muted">미리보기: </span>
+            <span className="text-[12px] font-medium text-wedly-t1">{text}</span>
+            <span className="text-[11px] text-wedly-muted"> = {resultFormat === "percent" ? "%" : "원"}</span>
+          </div>
+        );
+      })()}
+    </>
   );
 }
 
