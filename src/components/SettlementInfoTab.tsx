@@ -1005,7 +1005,7 @@ export default function SettlementInfoTab({
             <span className="text-[10px] text-wedly-muted">탭을 눌러 영역별 합계와 차수를 봅니다</span>
             {/* 어드민 — "세부 섹션 편집" 토글. 켜면 활성 탭에 ⋮ 등장.
                 디자인 통일: 히스토리/상세정보 "탭 편집" 과 같은 작은 테두리 버튼 + 연필 아이콘. */}
-            {isAdmin && !readOnly && onUpdateSubSections && (
+            {canEditColumns && onUpdateSubSections && (
               <button
                 type="button"
                 onClick={() => setEditSubMode((v) => !v)}
@@ -1039,7 +1039,8 @@ export default function SettlementInfoTab({
             </button>
             {subSectionsSafe.map((s) => {
               const isActive = activeSubSectionId === s.id;
-              const canEditSub = isAdmin && !readOnly && onUpdateSubSections;
+              // 세부 섹션 편집(구조)도 본부(ERP) 전용 — canEditColumns(=allowStructureEdit 포함) 로 묶는다.
+              const canEditSub = canEditColumns && onUpdateSubSections;
               const showDots = isActive && canEditSub && editSubMode;
               // 편집 모드에서 활성 탭 — 라벨과 ⋮ 를 한 알약 컨테이너에 넣어 모서리 끊김 방지.
               if (showDots) {
@@ -1086,7 +1087,7 @@ export default function SettlementInfoTab({
               );
             })}
           {/* 어드민용 — 탭 줄 끝의 "+ 세부 섹션 추가" */}
-          {isAdmin && !readOnly && onUpdateSubSections && (
+          {canEditColumns && onUpdateSubSections && (
             <button
               type="button"
               onClick={() => { setSubSectionDraftLabel(""); setSubSectionAddOpen(true); }}
@@ -1554,7 +1555,7 @@ export default function SettlementInfoTab({
             onLabelChange={(label) => updateTierLabel(idx, label)}
             onRemove={() => removeTier(idx)}
             tierSuffix={tierSuffix}
-            onTierSuffixChange={isAdmin ? (next) => {
+            onTierSuffixChange={canEditColumns ? (next) => {
               setTierSuffix(next);
               fetch(configApiPath, {
                 method: "PUT",
@@ -1611,7 +1612,7 @@ export default function SettlementInfoTab({
                 + {ORDINAL_KO[tiers.length] || `${tiers.length + 1}차`} {addButtonSuffixOverride ?? tierSuffix} 추가
               </button>
             )}
-            {isAdmin && !readOnly && onUpdateSubSections && (
+            {canEditColumns && onUpdateSubSections && (
               <button
                 type="button"
                 onClick={() => { setSubSectionDraftLabel(""); setSubSectionAddOpen(true); }}
