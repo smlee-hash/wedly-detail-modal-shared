@@ -1936,6 +1936,104 @@ export default function SettlementInfoTab({
                   />
 
                   {formulaError && <p className="text-[11px] text-wedly-red px-1">{formulaError}</p>}
+
+                  {/* ── 값에 따라 다른 식(조건별 수식) — conditionFieldOptions 주입된 앱(ERP)에서만 ── */}
+                  {conditionFieldOptions && conditionFieldOptions.length > 0 && (
+                    <div className="rounded-lg border border-wedly-gold/40 bg-wedly-bg-yellow/40 p-2.5 space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={!!draftConditional}
+                          onChange={(e) => {
+                            setFormulaError("");
+                            setDraftConditional(e.target.checked
+                              ? { conditionFieldKey: conditionFieldOptions[0]?.key ?? "", rules: [{ whenValue: "", formula: [] }] }
+                              : null);
+                          }}
+                          className="w-4 h-4 accent-wedly-accent"
+                        />
+                        <span className="text-[11px] font-bold text-wedly-orange">값에 따라 다른 식 쓰기</span>
+                      </label>
+                      <p className="text-[10px] text-wedly-muted px-0.5">기준 필드 값이 규칙과 맞으면 그 식으로, 안 맞으면 위의 기본 식으로 계산합니다.</p>
+
+                      {draftConditional && (
+                        <div className="space-y-2.5">
+                          <label className="block">
+                            <span className="text-[10px] font-semibold text-wedly-t2">기준 필드</span>
+                            <div className="mt-1">
+                              <CustomSelect
+                                size="sm"
+                                value={draftConditional.conditionFieldKey}
+                                onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, conditionFieldKey: v } : prev)}
+                                placeholder="기준 필드 선택"
+                                options={conditionFieldOptions.map((o) => ({ value: o.key, label: o.label }))}
+                              />
+                            </div>
+                          </label>
+
+                          {draftConditional.rules.map((rule, ri) => (
+                            <div key={ri} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold text-wedly-t2 flex-shrink-0">이 값일 때</span>
+                                <input
+                                  type="text"
+                                  value={rule.whenValue}
+                                  onChange={(e) => {
+                                    setFormulaError("");
+                                    const val = e.target.value;
+                                    setDraftConditional((prev) => prev
+                                      ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, whenValue: val } : r) }
+                                      : prev);
+                                  }}
+                                  placeholder="예: 하이브"
+                                  className="flex-1 min-w-0 px-2.5 py-1.5 text-[16px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFormulaError("");
+                                    setDraftConditional((prev) => prev
+                                      ? { ...prev, rules: prev.rules.filter((_, i) => i !== ri) }
+                                      : prev);
+                                  }}
+                                  className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                                  title="이 규칙 삭제"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <FormulaTermsEditor
+                                terms={rule.formula}
+                                onChange={(next) => {
+                                  setFormulaError("");
+                                  setDraftConditional((prev) => prev
+                                    ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, formula: next } : r) }
+                                    : prev);
+                                }}
+                                fields={fields}
+                                editingFieldKey={editingFieldKey}
+                                columnOptions={formulaColumnOptions}
+                                resultFormat={draftFormulaResult}
+                              />
+                            </div>
+                          ))}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormulaError("");
+                              setDraftConditional((prev) => prev
+                                ? { ...prev, rules: [...prev.rules, { whenValue: "", formula: [] }] }
+                                : prev);
+                            }}
+                            className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-gold/50 text-[11px] font-bold text-wedly-orange hover:bg-wedly-bg-yellow transition-colors"
+                          >
+                            + 규칙 추가
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
