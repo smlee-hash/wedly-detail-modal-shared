@@ -272,6 +272,9 @@ export default function SettlementInfoTab({
     return "정산";
   });
   const tierSuffixKey = `${storagePrefix}TierSuffix`;
+  // 차수 카드 칸 배치 — 한 줄에 가로로 둘 칸 수(1·2·3). 관리자가 드롭박스로 직접 선택, 분야별로 분리 저장(자동 줄바꿈 아님).
+  const fieldsPerRowKey = `${storagePrefix}FieldsPerRow`;
+  const [fieldsPerRow, setFieldsPerRow] = useState<1 | 2 | 3>(1);
   // 스코어카드 정의 — 하이브 자체 저장이 있으면 그걸 우선, 없으면 ERP 값/기본값 fallback
   const [scoreCards, setScoreCards] = useState<ScoreCardDef[]>(
     (storagePrefix === "settlement" || seedDefaultCardsForAllPrefixes) ? defaultScoreCards : []
@@ -287,6 +290,11 @@ export default function SettlementInfoTab({
       const savedSuffix = j?.data?.[tierSuffixKey];
       if (typeof savedSuffix === "string" && savedSuffix.trim()) {
         setTierSuffix(savedSuffix.trim());
+      }
+      // 칸 배치(한 줄당 칸 수) — 저장값(1·2·3) 있으면 적용
+      const savedFPR = j?.data?.[fieldsPerRowKey];
+      if (savedFPR === 1 || savedFPR === 2 || savedFPR === 3) {
+        setFieldsPerRow(savedFPR);
       }
       const parsed = parseScoreCards(localCards);
       const l = erpL;
@@ -1491,6 +1499,28 @@ export default function SettlementInfoTab({
             컬럼 정의 (전체 차수에 적용됨)
             <span className="ml-2 text-[10px] font-normal text-wedly-muted">⋮⋮ 드래그하여 순서 변경</span>
           </p>
+          {/* 칸 배치 선택 — 한 줄에 몇 칸을 가로로 둘지 관리자가 직접 고른다(1·2·3). 분야별로 저장. */}
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[12px] text-wedly-t2">한 줄에 표시할 칸 수</span>
+            <select
+              value={fieldsPerRow}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                const v = (n === 2 ? 2 : n === 3 ? 3 : 1) as 1 | 2 | 3;
+                setFieldsPerRow(v);
+                fetch(configApiPath, {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ [fieldsPerRowKey]: v }),
+                }).catch(() => { /* ignore */ });
+              }}
+              className="wedly-select text-[12px] border border-wedly-bd rounded-md px-2 py-1 bg-white"
+            >
+              <option value={1}>1개씩 (세로로 한 줄)</option>
+              <option value={2}>2개씩 (가로 2칸)</option>
+              <option value={3}>3개씩 (가로 3칸)</option>
+            </select>
+          </div>
           {fields.map((f, idx) => {
             const isDragging = dragIdx === idx;
             const isDragOver = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;
@@ -1563,6 +1593,7 @@ export default function SettlementInfoTab({
                 body: JSON.stringify({ [tierSuffixKey]: next }),
               }).catch(() => { /* ignore */ });
             } : undefined}
+            fieldsPerRow={fieldsPerRow}
           />
         );
 
@@ -2037,7 +2068,7 @@ export default function SettlementInfoTab({
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange,
+  tierSuffix, onTierSuffixChange, fieldsPerRow = 1,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2055,6 +2086,8 @@ function TierCard({
   tierSuffix?: string;
   /** 어드민이 공통 꼬리표 변경 시 호출 — 한 번 변경하면 모든 차수에 같이 반영 */
   onTierSuffixChange?: (next: string) => void;
+  /** 한 줄에 가로로 둘 칸 수 (1·2·3) — 관리자가 드롭박스로 선택, 기본 1 */
+  fieldsPerRow?: 1 | 2 | 3;
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2132,10 +2165,11 @@ function TierCard({
           )}
         </div>
       </div>
+      {/* 차수 카드 칸 배치 — 관리자가 고른 칸 수(fieldsPerRow: 1·2·3)만큼 가로로 나열(자동 줄바꿈 아님). 옛 세로 한 줄 나열 → 가로 나열. */}
       {open && (
-        <div className="divide-y divide-wedly-bd/30">
+        <div className={`grid ${fieldsPerRow === 3 ? "grid-cols-3" : fieldsPerRow === 2 ? "grid-cols-2" : "grid-cols-1"} gap-2 p-3`}>
           {fields.length === 0 ? (
-            <div className="px-4 py-6 text-center text-[12px] text-wedly-muted">
+            <div className="col-span-full px-4 py-6 text-center text-[12px] text-wedly-muted">
               컬럼이 없습니다. 위의 &quot;컬럼 편집&quot;에서 추가하세요.
             </div>
           ) : (
@@ -2199,13 +2233,13 @@ function FieldRow({
   const isEditable = !readOnly && !isAuto && type !== "formula";
 
   return (
-    <div className="flex items-start gap-3 py-2 px-4 min-h-[40px]">
-      <div className="w-[120px] sm:w-[160px] flex-shrink-0 text-[12px] text-wedly-muted truncate pt-1">
+    <div className="flex flex-col gap-1 rounded-lg border border-wedly-bd/40 bg-wedly-bg-gray/20 px-3 py-2 min-h-[58px]">
+      <div className="text-[11px] text-wedly-muted truncate">
         {label}
         {isAuto && <span className="ml-1 text-[10px] text-wedly-accent">(자동)</span>}
         {type === "formula" && <span className="ml-1 text-[10px] text-wedly-purple">(수식)</span>}
       </div>
-      <div className="flex-1 text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
+      <div className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
         {editing && isEditable ? (
           (type === "number" || type === "percent") ? (
             <div className="relative">
