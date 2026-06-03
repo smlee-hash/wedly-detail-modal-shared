@@ -32,13 +32,19 @@ import CustomSelect from "./CustomSelect";
 type RowData = Record<string, string | number | boolean | null>;
 
 // 설정(config) 모듈 레벨 캐시 + 탭 다시 보기 자동 갱신.
-// configApiPath 는 앱마다 다름(하이브 /api/hive-config, 일루아 /api/illua-config) — prop 으로 주입.
-let _configPromise: Promise<unknown> | null = null;
+// configApiPath 는 앱마다 다름(하이브 /api/hive-config, 일루아 /api/illua-config, ERP 는 분야마다 다름) — prop 으로 주입.
+// ⚠️ 캐시는 반드시 configApiPath(분야) 별로 따로 보관한다.
+//    ERP 처럼 한 화면에서(새로고침 없이 분야 이동) 서로 다른 경로를 쓰는 앱은, 캐시를 하나로만 두면
+//    먼저 연 분야의 설정이 나중에 연 다른 분야에 잘못 적용된다(합계 카드 기준 칸이 뒤바뀜).
+const _configPromiseByPath = new Map<string, Promise<unknown>>();
 function fetchConfigCached(configApiPath: string, forceRefresh = false): Promise<unknown> {
-  if (forceRefresh || !_configPromise) {
-    _configPromise = fetch(configApiPath).then((r) => r.json()).catch(() => null);
+  if (forceRefresh || !_configPromiseByPath.has(configApiPath)) {
+    _configPromiseByPath.set(
+      configApiPath,
+      fetch(configApiPath).then((r) => r.json()).catch(() => null),
+    );
   }
-  return _configPromise;
+  return _configPromiseByPath.get(configApiPath)!;
 }
 
 function fmtCurrency(n: number | null): string {
@@ -95,6 +101,10 @@ export default function SettlementInfoTab({
   onSave,
   readOnly = false,
   isAdmin = false,
+  // 차수 카드/컬럼 "구조 편집"(전체 합계 카드의 '편집' 버튼) 허용 여부 — 기본 false.
+  //   본부(ERP)만 true 로 켠다. 파트너 앱(하이브·일루아)은 값 입력만 하고, 구조는 ERP 에서만 바꾼다.
+  //   기본이 false 라서 파트너 앱이 실수로 isAdmin=true 를 넘겨도 구조 편집 버튼은 안 나온다(안전장치).
+  allowStructureEdit = false,
   // ── 영역 분리 prop (A-1 모듈화) ──
   // 정산정보 외 계약·환불 같은 다른 영역에서도 같은 차수 카드 부품 재사용 가능
   // 기본값은 정산 — 기존 호출 호환
@@ -122,6 +132,8 @@ export default function SettlementInfoTab({
   onSave: (jsonValue: string) => void;
   readOnly?: boolean;
   isAdmin?: boolean;
+  // 구조(차수 카드·컬럼) 편집 허용 — 본부(ERP) 전용. 미지정 시 false (파트너 앱 = 값 입력만).
+  allowStructureEdit?: boolean;
   storagePrefix?: string;
   fieldsApiPath?: string;
   sectionTitle?: string;
@@ -238,7 +250,9 @@ export default function SettlementInfoTab({
   const cardsKey = `${storagePrefix}Cards`;   // settlement → settlementCards, contract → contractCards
   const sectionTitleSafe = sectionTitle; // 변수 placeholder — 추후 헤더 표시에 활용 가능
   void sectionTitleSafe;
-  const canEditColumns = !readOnly && isAdmin;
+  // 구조 편집(전체 합계 카드 '편집' 버튼)은 본부(ERP)에서만 — allowStructureEdit 가 명시적으로 켜져야 한다.
+  // (기본 꺼짐 → 파트너 앱은 isAdmin 이 참이어도 값 입력만 가능.)
+  const canEditColumns = !readOnly && isAdmin && allowStructureEdit;
   // ⚠️ 마운트 시 초기값을 빈 배열로 — 서버 fetch 응답 전까지 옛 기본 컬럼이 잠깐 보이는
   // 깜빡임 방지. 서버 응답이 진실의 원천.
   const [fields, setFields] = useState<FieldDef[]>([]);
