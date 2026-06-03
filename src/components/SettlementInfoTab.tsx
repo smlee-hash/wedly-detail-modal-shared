@@ -272,9 +272,10 @@ export default function SettlementInfoTab({
     return "정산";
   });
   const tierSuffixKey = `${storagePrefix}TierSuffix`;
-  // 차수 카드 칸 배치 — 한 줄에 가로로 둘 칸 수(1·2·3). 관리자가 드롭박스로 직접 선택, 분야별로 분리 저장(자동 줄바꿈 아님).
-  const fieldsPerRowKey = `${storagePrefix}FieldsPerRow`;
-  const [fieldsPerRow, setFieldsPerRow] = useState<1 | 2 | 3>(1);
+  // 차수 카드 칸 배치 — 줄마다 가로 칸 수(1·2·3)를 따로 정한다. 관리자가 줄별로 선택, 분야별로 분리 저장.
+  // 예: [3,2,1] = 첫 줄 3칸, 둘째 줄 2칸, 셋째 줄 1칸. 칸은 위에서부터 순서대로 채우고, 남는 칸은 한 줄 1칸씩.
+  const rowLayoutKey = `${storagePrefix}RowLayout`;
+  const [rowLayout, setRowLayout] = useState<number[]>([]);
   // 스코어카드 정의 — 하이브 자체 저장이 있으면 그걸 우선, 없으면 ERP 값/기본값 fallback
   const [scoreCards, setScoreCards] = useState<ScoreCardDef[]>(
     (storagePrefix === "settlement" || seedDefaultCardsForAllPrefixes) ? defaultScoreCards : []
@@ -291,10 +292,14 @@ export default function SettlementInfoTab({
       if (typeof savedSuffix === "string" && savedSuffix.trim()) {
         setTierSuffix(savedSuffix.trim());
       }
-      // 칸 배치(한 줄당 칸 수) — 저장값(1·2·3) 있으면 적용
-      const savedFPR = j?.data?.[fieldsPerRowKey];
-      if (savedFPR === 1 || savedFPR === 2 || savedFPR === 3) {
-        setFieldsPerRow(savedFPR);
+      // 칸 배치 — 줄별 칸 수 배열(rowLayout) 저장값이 있으면 적용(각 항목을 1·2·3 으로 보정)
+      const savedRL = j?.data?.[rowLayoutKey];
+      if (Array.isArray(savedRL)) {
+        setRowLayout(
+          savedRL
+            .filter((n) => typeof n === "number")
+            .map((n) => (n === 3 ? 3 : n === 2 ? 2 : 1)),
+        );
       }
       const parsed = parseScoreCards(localCards);
       const l = erpL;
@@ -1499,33 +1504,79 @@ export default function SettlementInfoTab({
             컬럼 정의 (전체 차수에 적용됨)
             <span className="ml-2 text-[10px] font-normal text-wedly-muted">⋮⋮ 드래그하여 순서 변경</span>
           </p>
-          {/* 칸 배치 선택 — 한 줄에 몇 칸을 가로로 둘지 관리자가 직접 고른다(1·2·3). 분야별로 저장. */}
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-[12px] text-wedly-t2">한 줄에 표시할 칸 수</span>
-            {/* 위들리 디자인 커스텀 드롭다운 — native <select> 는 열린 목록 스타일을 못 줘서 CustomSelect 사용.
-                한 줄에 가로로 몇 칸(1·2·3)을 둘지 직접 고른다. 저장 동작은 종전과 동일. */}
-            <CustomSelect
-              value={String(fieldsPerRow)}
-              onChange={(next) => {
-                const n = Number(next);
-                const v = (n === 2 ? 2 : n === 3 ? 3 : 1) as 1 | 2 | 3;
-                setFieldsPerRow(v);
-                fetch(configApiPath, {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ [fieldsPerRowKey]: v }),
-                }).catch(() => { /* ignore */ });
-              }}
-              options={[
-                { value: "1", label: "1개씩 (한 줄에 1칸)" },
-                { value: "2", label: "2개씩 (한 줄에 2칸)" },
-                { value: "3", label: "3개씩 (한 줄에 3칸)" },
-              ]}
-              size="sm"
-              fullWidth={false}
-              className="min-w-[176px]"
-            />
-          </div>
+          {/* 줄별 칸 수 — 줄마다 가로 칸 수(1·2·3)를 따로 고른다. 위에서부터 순서대로 칸을 채움. 위들리 디자인 드롭다운 사용. */}
+          {(() => {
+            const saveLayout = (next: number[]) => {
+              setRowLayout(next);
+              fetch(configApiPath, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ [rowLayoutKey]: next }),
+              }).catch(() => { /* ignore */ });
+            };
+            const rowGroups = groupFieldsByRowLayout(fields, rowLayout);
+            return (
+              <div className="mb-3 rounded-lg border border-wedly-bd bg-white p-3 space-y-2">
+                <p className="text-[11px] font-semibold text-wedly-t2">
+                  줄별 칸 수
+                  <span className="ml-1.5 font-normal text-wedly-muted">— 줄마다 가로로 1·2·3칸 중 골라요. 위에서부터 순서대로 채워집니다.</span>
+                </p>
+                {rowLayout.length === 0 ? (
+                  <p className="text-[12px] text-wedly-muted py-1">
+                    지금은 모든 칸이 <b>한 줄에 1칸씩(세로)</b>으로 표시됩니다. 아래 &quot;+ 줄 추가&quot;로 가로 묶음을 만드세요.
+                  </p>
+                ) : (
+                  rowLayout.map((w, ri) => {
+                    const grp = rowGroups[ri];
+                    const names = grp ? grp.items.map((f) => f.label).join(", ") : "";
+                    return (
+                      <div key={ri} className="flex items-center gap-2">
+                        <span className="text-[12px] text-wedly-t2 w-16 flex-shrink-0">{ri + 1}번째 줄</span>
+                        <CustomSelect
+                          value={String(w === 3 ? 3 : w === 2 ? 2 : 1)}
+                          onChange={(next) => {
+                            const n = Number(next);
+                            const v = n === 2 ? 2 : n === 3 ? 3 : 1;
+                            const arr = [...rowLayout];
+                            arr[ri] = v;
+                            saveLayout(arr);
+                          }}
+                          options={[
+                            { value: "1", label: "1칸" },
+                            { value: "2", label: "2칸" },
+                            { value: "3", label: "3칸" },
+                          ]}
+                          size="sm"
+                          fullWidth={false}
+                          className="min-w-[84px]"
+                        />
+                        <span className="text-[11px] text-wedly-muted truncate flex-1 min-w-0" title={names}>
+                          {names ? `→ ${names}` : "→ (이 줄에 들어갈 칸 없음)"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => saveLayout(rowLayout.filter((_, k) => k !== ri))}
+                          className="p-1 rounded-md text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors flex-shrink-0"
+                          title="이 줄 삭제"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+                <button
+                  type="button"
+                  onClick={() => saveLayout([...rowLayout, 1])}
+                  className="w-full py-1.5 text-[11px] font-medium text-wedly-accent border border-dashed border-wedly-accent/40 rounded-md hover:bg-wedly-bg-blue/30 transition-colors"
+                >
+                  + 줄 추가
+                </button>
+              </div>
+            );
+          })()}
           {fields.map((f, idx) => {
             const isDragging = dragIdx === idx;
             const isDragOver = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;
@@ -1598,7 +1649,7 @@ export default function SettlementInfoTab({
                 body: JSON.stringify({ [tierSuffixKey]: next }),
               }).catch(() => { /* ignore */ });
             } : undefined}
-            fieldsPerRow={fieldsPerRow}
+            rowLayout={rowLayout}
           />
         );
 
@@ -2071,9 +2122,27 @@ export default function SettlementInfoTab({
   );
 }
 
+// 줄별 칸 수(rowLayout)에 따라 컬럼을 줄 그룹으로 나눈다.
+// 위에서부터 각 줄의 칸 수만큼 채우고, rowLayout 이 모자라면 남는 칸은 한 줄에 1칸씩.
+function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 | 2 | 3; items: T[] }[] {
+  const groups: { cols: 1 | 2 | 3; items: T[] }[] = [];
+  let i = 0;
+  for (const raw of rowLayout) {
+    if (i >= items.length) break;
+    const cols = (raw === 3 ? 3 : raw === 2 ? 2 : 1) as 1 | 2 | 3;
+    groups.push({ cols, items: items.slice(i, i + cols) });
+    i += cols;
+  }
+  while (i < items.length) {
+    groups.push({ cols: 1, items: [items[i]] });
+    i += 1;
+  }
+  return groups;
+}
+
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, fieldsPerRow = 1,
+  tierSuffix, onTierSuffixChange, rowLayout = [],
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2091,8 +2160,8 @@ function TierCard({
   tierSuffix?: string;
   /** 어드민이 공통 꼬리표 변경 시 호출 — 한 번 변경하면 모든 차수에 같이 반영 */
   onTierSuffixChange?: (next: string) => void;
-  /** 한 줄에 가로로 둘 칸 수 (1·2·3) — 관리자가 드롭박스로 선택, 기본 1 */
-  fieldsPerRow?: 1 | 2 | 3;
+  /** 줄별 가로 칸 수 배열 (예: [3,2,1]) — 비어 있으면 모두 한 줄 1칸(세로). 위에서부터 순서대로 채움 */
+  rowLayout?: number[];
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2170,29 +2239,36 @@ function TierCard({
           )}
         </div>
       </div>
-      {/* 차수 카드 칸 배치 — 관리자가 고른 칸 수(fieldsPerRow: 1·2·3)만큼 가로로 나열(자동 줄바꿈 아님). 옛 세로 한 줄 나열 → 가로 나열. */}
+      {/* 차수 카드 칸 배치 — 줄별 칸 수(rowLayout)대로 가로 묶음. 위에서부터 채우고, 남는 칸은 한 줄 1칸씩. */}
       {open && (
-        <div className={`grid ${fieldsPerRow === 3 ? "grid-cols-3" : fieldsPerRow === 2 ? "grid-cols-2" : "grid-cols-1"} gap-2 p-3`}>
+        <div className="p-3 space-y-2">
           {fields.length === 0 ? (
-            <div className="col-span-full px-4 py-6 text-center text-[12px] text-wedly-muted">
+            <div className="px-4 py-6 text-center text-[12px] text-wedly-muted">
               컬럼이 없습니다. 위의 &quot;컬럼 편집&quot;에서 추가하세요.
             </div>
           ) : (
-            fields.map((f) => {
-              const isFormula = f.type === "formula";
-              return (
-                <FieldRow
-                  key={f.key}
-                  label={f.label}
-                  type={f.type}
-                  value={isFormula ? evalFormulaForTier(f, tier, fields) : (tier[f.key] ?? null)}
-                  readOnly={readOnly}
-                  isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
-                  formulaResult={f.formulaResult}
-                  onChange={(v) => onChange(f.key, v)}
-                />
-              );
-            })
+            groupFieldsByRowLayout(fields, rowLayout).map((grp, gi) => (
+              <div
+                key={gi}
+                className={`grid ${grp.cols === 3 ? "grid-cols-3" : grp.cols === 2 ? "grid-cols-2" : "grid-cols-1"} gap-2`}
+              >
+                {grp.items.map((f) => {
+                  const isFormula = f.type === "formula";
+                  return (
+                    <FieldRow
+                      key={f.key}
+                      label={f.label}
+                      type={f.type}
+                      value={isFormula ? evalFormulaForTier(f, tier, fields) : (tier[f.key] ?? null)}
+                      readOnly={readOnly}
+                      isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
+                      formulaResult={f.formulaResult}
+                      onChange={(v) => onChange(f.key, v)}
+                    />
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
       )}
