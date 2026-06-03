@@ -645,6 +645,34 @@ export default function SettlementInfoTab({
     return { ok: true, terms };
   }, [draftFormula, fields]);
 
+  // 조건 설정 검증 — null 이면 통과(조건 안 씀). 켜져 있으면 기준필드·각 규칙(기준값·식)이 모두 유효해야 함.
+  //   유효 규칙만 추려 돌려준다(빈 규칙 자동 제외). 규칙이 하나도 없으면 conditional 없이 저장(기본식만).
+  const validateDraftConditional = useCallback((): { ok: true; conditional?: FieldDef["conditional"] } | { ok: false; msg: string } => {
+    if (!draftConditional) return { ok: true };
+    const fk = draftConditional.conditionFieldKey.trim();
+    if (!fk) return { ok: false, msg: "조건의 기준 필드를 고르세요." };
+    const cleaned: Array<{ whenValue: string; formula: FormulaTerm[] }> = [];
+    for (const r of draftConditional.rules) {
+      const when = (r.whenValue ?? "").trim();
+      const terms = parseFormulaTerms(r.formula);
+      const hasWhen = when !== "";
+      const hasTerms = terms.length > 0;
+      if (!hasWhen && !hasTerms) continue; // 완전 빈 규칙은 건너뜀
+      if (!hasWhen) return { ok: false, msg: "기준 값이 비어 있는 규칙이 있습니다." };
+      if (!hasTerms) return { ok: false, msg: `"${when}" 규칙의 계산 항목을 한 개 이상 추가하세요.` };
+      for (const t of terms) {
+        if (t.unit === "column") {
+          const ref = fields.find((f) => f.key === t.columnKey);
+          if (!ref) return { ok: false, msg: `"${when}" 규칙에 컬럼을 아직 고르지 않은 항목이 있습니다.` };
+          if (!isNumericFieldType(ref.type)) return { ok: false, msg: `"${when}" 규칙에 글자·날짜 컬럼은 쓸 수 없습니다.` };
+        }
+      }
+      cleaned.push({ whenValue: when, formula: terms });
+    }
+    if (cleaned.length === 0) return { ok: true }; // 켰지만 규칙 없음 → 기본식만(conditional 없이)
+    return { ok: true, conditional: { conditionFieldKey: fk, rules: cleaned } };
+  }, [draftConditional, fields]);
+
   // 모달 confirm 처리
   const confirmFieldEdit = useCallback(() => {
     if (!fieldEditModal) return;
@@ -655,7 +683,10 @@ export default function SettlementInfoTab({
       if (draftType === "formula") {
         const v = validateDraftFormula();
         if (!v.ok) { setFormulaError(v.msg); return; }
+        const vc = validateDraftConditional();
+        if (!vc.ok) { setFormulaError(vc.msg); return; }
         newField = { key: generateFieldKey(label, fields), label, type: "formula", formula: v.terms, formulaResult: draftFormulaResult };
+        if (vc.conditional) newField.conditional = vc.conditional;
       } else {
         newField = { key: generateFieldKey(label, fields), label, type: draftType };
       }
@@ -681,17 +712,23 @@ export default function SettlementInfoTab({
       // 수식이 아니고 타입도 그대로면 변경 없음 (수식은 식 내용이 바뀌었을 수 있어 항상 저장)
       if (newType !== "formula" && newType === fieldEditModal.type) { setFieldEditModal(null); return; }
       let formulaTerms: FormulaTerm[] = [];
+      let formulaConditional: FieldDef["conditional"] | undefined;
       if (newType === "formula") {
         const v = validateDraftFormula();
         if (!v.ok) { setFormulaError(v.msg); return; }
+        const vc = validateDraftConditional();
+        if (!vc.ok) { setFormulaError(vc.msg); return; }
         formulaTerms = v.terms;
+        formulaConditional = vc.conditional;
       }
       const next = fields.map((f) => {
         if (f.key !== key) return f;
         if (newType === "formula") {
-          return { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
+          const nf: FieldDef = { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
+          if (formulaConditional) nf.conditional = formulaConditional;
+          return nf;
         }
-        // 수식이 아닌 타입으로 바꾸면 수식 옵션은 제거
+        // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거
         return { key: f.key, label: f.label, type: newType };
       });
       setFields(next);
@@ -714,7 +751,7 @@ export default function SettlementInfoTab({
       });
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, validateDraftFormula, fields, persistFields, persist]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, validateDraftFormula, validateDraftConditional, fields, persistFields, persist]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
