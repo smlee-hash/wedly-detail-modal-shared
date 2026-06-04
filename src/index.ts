@@ -20,6 +20,9 @@ export type {
   SelectDropdownColorFamily,
 } from "./components/SelectDropdown";
 
+export { default as MultiPersonEditor } from "./components/MultiPersonEditor";
+export type { MultiPersonEditorProps } from "./components/MultiPersonEditor";
+
 // 헬퍼
 export {
   type FieldDef,
@@ -45,3 +48,12 @@ export type { OrderableField } from "./hooks/use-field-order";
 
 // 유틸
 export { cn } from "./lib/cn";
+
+// 사람 항목 유틸 (이름/이메일 파싱·통일) — 사람 선택 칸에서 공용 사용
+export {
+  parsePersonItem,
+  personDisplayName,
+  formatPersonItem,
+  unifyPersonDisplay,
+  splitPersonListSafe,
+} from "./lib/person-helpers";
