@@ -10,6 +10,9 @@ export { default as MeetingsTab } from "./components/MeetingsTab";
 
 export { default as SettlementInfoTab } from "./components/SettlementInfoTab";
 
+// 분야(섹션)별 정산 탭 래퍼 — 앱별 정산 칸/설정 주소(settlementApiBase) 주입.
+export { default as SectionSettlementTab } from "./components/SectionSettlementTab";
+
 export { FilesTab, detectFileTag } from "./components/FilesTab";
 export type { FileMeta } from "./components/FilesTab";
 
