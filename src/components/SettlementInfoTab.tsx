@@ -101,6 +101,8 @@ export default function SettlementInfoTab({
   onSave,
   readOnly = false,
   isAdmin = false,
+  // 합계 스코어카드(전체 합계) 블록을 통째로 숨김 — 작은 임베드 카드(통합협업 정책 섹션)용. 기본 false=기존 동작.
+  hideSummaryCards = false,
   // 차수 카드/컬럼 "구조 편집"(전체 합계 카드의 '편집' 버튼) 허용 여부 — 기본 false.
   //   본부(ERP)만 true 로 켠다. 파트너 앱(하이브·일루아)은 값 입력만 하고, 구조는 ERP 에서만 바꾼다.
   //   기본이 false 라서 파트너 앱이 실수로 isAdmin=true 를 넘겨도 구조 편집 버튼은 안 나온다(안전장치).
@@ -133,6 +135,8 @@ export default function SettlementInfoTab({
   onSave: (jsonValue: string) => void;
   readOnly?: boolean;
   isAdmin?: boolean;
+  // 합계 스코어카드 블록 숨김(임베드용).
+  hideSummaryCards?: boolean;
   // 구조(차수 카드·컬럼) 편집 허용 — 본부(ERP) 전용. 미지정 시 false (파트너 앱 = 값 입력만).
   allowStructureEdit?: boolean;
   storagePrefix?: string;
@@ -1169,7 +1173,8 @@ export default function SettlementInfoTab({
         </div>
       )}
 
-      {/* 합계 카드 — 활성 탭에 맞게 합산. 통합 탭이면 전체 + 세부 섹션별 작은 합계 행 */}
+      {/* 합계 카드 — 활성 탭에 맞게 합산. hideSummaryCards 면 통째로 숨김(작은 임베드 카드용). */}
+      {!hideSummaryCards && (
       <div className="rounded-2xl border border-wedly-bd bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <p className="text-[12px] font-semibold text-wedly-muted uppercase tracking-wider">{activeSubLabel}</p>
@@ -1248,6 +1253,7 @@ export default function SettlementInfoTab({
         )}
         {/* 합계 카드 아래 안내 텍스트 — 사용자 요청으로 모두 제거 (자동 계산 상태/컬럼 식별 안내) */}
       </div>
+      )}
 
       {/* 어드민 카드 편집 패널 */}
       {editCards && canEditColumns && (
