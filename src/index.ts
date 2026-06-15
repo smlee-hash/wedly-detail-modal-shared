@@ -10,6 +10,9 @@ export { default as MeetingsTab } from "./components/MeetingsTab";
 
 export { default as SettlementInfoTab } from "./components/SettlementInfoTab";
 
+// 분야(섹션)별 정산 탭 래퍼 — 앱별 정산 칸/설정 주소(settlementApiBase) 주입.
+export { default as SectionSettlementTab } from "./components/SectionSettlementTab";
+
 export { FilesTab, detectFileTag } from "./components/FilesTab";
 export type { FileMeta } from "./components/FilesTab";
 
@@ -19,6 +22,9 @@ export type {
   SelectDropdownColor,
   SelectDropdownColorFamily,
 } from "./components/SelectDropdown";
+
+export { default as MultiPersonEditor } from "./components/MultiPersonEditor";
+export type { MultiPersonEditorProps } from "./components/MultiPersonEditor";
 
 // 헬퍼
 export {
@@ -45,3 +51,12 @@ export type { OrderableField } from "./hooks/use-field-order";
 
 // 유틸
 export { cn } from "./lib/cn";
+
+// 사람 항목 유틸 (이름/이메일 파싱·통일) — 사람 선택 칸에서 공용 사용
+export {
+  parsePersonItem,
+  personDisplayName,
+  formatPersonItem,
+  unifyPersonDisplay,
+  splitPersonListSafe,
+} from "./lib/person-helpers";

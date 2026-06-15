@@ -32,13 +32,19 @@ import CustomSelect from "./CustomSelect";
 type RowData = Record<string, string | number | boolean | null>;
 
 // 설정(config) 모듈 레벨 캐시 + 탭 다시 보기 자동 갱신.
-// configApiPath 는 앱마다 다름(하이브 /api/hive-config, 일루아 /api/illua-config) — prop 으로 주입.
-let _configPromise: Promise<unknown> | null = null;
+// configApiPath 는 앱마다 다름(하이브 /api/hive-config, 일루아 /api/illua-config, ERP 는 분야마다 다름) — prop 으로 주입.
+// ⚠️ 캐시는 반드시 configApiPath(분야) 별로 따로 보관한다.
+//    ERP 처럼 한 화면에서(새로고침 없이 분야 이동) 서로 다른 경로를 쓰는 앱은, 캐시를 하나로만 두면
+//    먼저 연 분야의 설정이 나중에 연 다른 분야에 잘못 적용된다(합계 카드 기준 칸이 뒤바뀜).
+const _configPromiseByPath = new Map<string, Promise<unknown>>();
 function fetchConfigCached(configApiPath: string, forceRefresh = false): Promise<unknown> {
-  if (forceRefresh || !_configPromise) {
-    _configPromise = fetch(configApiPath).then((r) => r.json()).catch(() => null);
+  if (forceRefresh || !_configPromiseByPath.has(configApiPath)) {
+    _configPromiseByPath.set(
+      configApiPath,
+      fetch(configApiPath).then((r) => r.json()).catch(() => null),
+    );
   }
-  return _configPromise;
+  return _configPromiseByPath.get(configApiPath)!;
 }
 
 function fmtCurrency(n: number | null): string {
@@ -95,6 +101,12 @@ export default function SettlementInfoTab({
   onSave,
   readOnly = false,
   isAdmin = false,
+  // 합계 스코어카드(전체 합계) 블록을 통째로 숨김 — 작은 임베드 카드(통합협업 정책 섹션)용. 기본 false=기존 동작.
+  hideSummaryCards = false,
+  // 차수 카드/컬럼 "구조 편집"(전체 합계 카드의 '편집' 버튼) 허용 여부 — 기본 false.
+  //   본부(ERP)만 true 로 켠다. 파트너 앱(하이브·일루아)은 값 입력만 하고, 구조는 ERP 에서만 바꾼다.
+  //   기본이 false 라서 파트너 앱이 실수로 isAdmin=true 를 넘겨도 구조 편집 버튼은 안 나온다(안전장치).
+  allowStructureEdit = false,
   // ── 영역 분리 prop (A-1 모듈화) ──
   // 정산정보 외 계약·환불 같은 다른 영역에서도 같은 차수 카드 부품 재사용 가능
   // 기본값은 정산 — 기존 호출 호환
@@ -116,12 +128,17 @@ export default function SettlementInfoTab({
   defaultScoreCards,
   seedDefaultCardsForAllPrefixes = false,
   addButtonSuffixOverride,
+  conditionFieldOptions,
 }: {
   rawValue: unknown;
   row?: RowData | null;
   onSave: (jsonValue: string) => void;
   readOnly?: boolean;
   isAdmin?: boolean;
+  // 합계 스코어카드 블록 숨김(임베드용).
+  hideSummaryCards?: boolean;
+  // 구조(차수 카드·컬럼) 편집 허용 — 본부(ERP) 전용. 미지정 시 false (파트너 앱 = 값 입력만).
+  allowStructureEdit?: boolean;
   storagePrefix?: string;
   fieldsApiPath?: string;
   sectionTitle?: string;
@@ -141,6 +158,9 @@ export default function SettlementInfoTab({
   seedDefaultCardsForAllPrefixes?: boolean;
   // 차수추가 버튼 꼬리표 고정값 (하이브 "정산" 고정, 일루아 미지정→tierSuffix 사용)
   addButtonSuffixOverride?: string;
+  // 조건별 수식의 "기준 필드" 후보 (기본정보 평면 필드). ERP만 주입 → 주입될 때만 조건 UI 노출.
+  //   미주입(파트너 앱)이면 조건 UI 자체가 안 보이고 기존과 100% 동일.
+  conditionFieldOptions?: Array<{ key: string; label: string }>;
 }) {
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
@@ -238,7 +258,9 @@ export default function SettlementInfoTab({
   const cardsKey = `${storagePrefix}Cards`;   // settlement → settlementCards, contract → contractCards
   const sectionTitleSafe = sectionTitle; // 변수 placeholder — 추후 헤더 표시에 활용 가능
   void sectionTitleSafe;
-  const canEditColumns = !readOnly && isAdmin;
+  // 구조 편집(전체 합계 카드 '편집' 버튼)은 본부(ERP)에서만 — allowStructureEdit 가 명시적으로 켜져야 한다.
+  // (기본 꺼짐 → 파트너 앱은 isAdmin 이 참이어도 값 입력만 가능.)
+  const canEditColumns = !readOnly && isAdmin && allowStructureEdit;
   // ⚠️ 마운트 시 초기값을 빈 배열로 — 서버 fetch 응답 전까지 옛 기본 컬럼이 잠깐 보이는
   // 깜빡임 방지. 서버 응답이 진실의 원천.
   const [fields, setFields] = useState<FieldDef[]>([]);
@@ -258,6 +280,10 @@ export default function SettlementInfoTab({
     return "정산";
   });
   const tierSuffixKey = `${storagePrefix}TierSuffix`;
+  // 차수 카드 칸 배치 — 줄마다 가로 칸 수(1·2·3)를 따로 정한다. 관리자가 줄별로 선택, 분야별로 분리 저장.
+  // 예: [3,2,1] = 첫 줄 3칸, 둘째 줄 2칸, 셋째 줄 1칸. 칸은 위에서부터 순서대로 채우고, 남는 칸은 한 줄 1칸씩.
+  const rowLayoutKey = `${storagePrefix}RowLayout`;
+  const [rowLayout, setRowLayout] = useState<number[]>([]);
   // 스코어카드 정의 — 하이브 자체 저장이 있으면 그걸 우선, 없으면 ERP 값/기본값 fallback
   const [scoreCards, setScoreCards] = useState<ScoreCardDef[]>(
     (storagePrefix === "settlement" || seedDefaultCardsForAllPrefixes) ? defaultScoreCards : []
@@ -273,6 +299,15 @@ export default function SettlementInfoTab({
       const savedSuffix = j?.data?.[tierSuffixKey];
       if (typeof savedSuffix === "string" && savedSuffix.trim()) {
         setTierSuffix(savedSuffix.trim());
+      }
+      // 칸 배치 — 줄별 칸 수 배열(rowLayout) 저장값이 있으면 적용(각 항목을 1·2·3 으로 보정)
+      const savedRL = j?.data?.[rowLayoutKey];
+      if (Array.isArray(savedRL)) {
+        setRowLayout(
+          savedRL
+            .filter((n) => typeof n === "number")
+            .map((n) => (n === 3 ? 3 : n === 2 ? 2 : 1)),
+        );
       }
       const parsed = parseScoreCards(localCards);
       const l = erpL;
@@ -564,6 +599,10 @@ export default function SettlementInfoTab({
   const [draftFormula, setDraftFormula] = useState<FormulaTerm[]>([]);
   const [draftFormulaResult, setDraftFormulaResult] = useState<FormulaResultFormat>("number");
   const [formulaError, setFormulaError] = useState<string>("");
+  // 조건별 수식 편집 상태. null = 조건 안 씀(기본 식만). 객체면 "값에 따라 다른 식" 켠 상태.
+  const [draftConditional, setDraftConditional] = useState<
+    { conditionFieldKey: string; rules: Array<{ whenValue: string; formula: FormulaTerm[] }> } | null
+  >(null);
 
   const openAddField = useCallback(() => {
     setDraftLabel("");
@@ -571,6 +610,7 @@ export default function SettlementInfoTab({
     setDraftFormula([]);
     setDraftFormulaResult("number");
     setFormulaError("");
+    setDraftConditional(null);
     setFieldEditModal({ mode: "add" });
   }, []);
   const openRenameField = useCallback((key: string) => {
@@ -586,6 +626,7 @@ export default function SettlementInfoTab({
     setDraftFormula(cur.type === "formula" ? parseFormulaTerms(cur.formula) : []);
     setDraftFormulaResult(cur.formulaResult === "percent" ? "percent" : "number");
     setFormulaError("");
+    setDraftConditional(cur.conditional ?? null);
     setFieldEditModal({ mode: "changeType", key, type: cur.type });
   }, [fields]);
 
@@ -608,6 +649,34 @@ export default function SettlementInfoTab({
     return { ok: true, terms };
   }, [draftFormula, fields]);
 
+  // 조건 설정 검증 — null 이면 통과(조건 안 씀). 켜져 있으면 기준필드·각 규칙(기준값·식)이 모두 유효해야 함.
+  //   유효 규칙만 추려 돌려준다(빈 규칙 자동 제외). 규칙이 하나도 없으면 conditional 없이 저장(기본식만).
+  const validateDraftConditional = useCallback((): { ok: true; conditional?: FieldDef["conditional"] } | { ok: false; msg: string } => {
+    if (!draftConditional) return { ok: true };
+    const fk = draftConditional.conditionFieldKey.trim();
+    if (!fk) return { ok: false, msg: "조건의 기준 필드를 고르세요." };
+    const cleaned: Array<{ whenValue: string; formula: FormulaTerm[] }> = [];
+    for (const r of draftConditional.rules) {
+      const when = (r.whenValue ?? "").trim();
+      const terms = parseFormulaTerms(r.formula);
+      const hasWhen = when !== "";
+      const hasTerms = terms.length > 0;
+      if (!hasWhen && !hasTerms) continue; // 완전 빈 규칙은 건너뜀
+      if (!hasWhen) return { ok: false, msg: "기준 값이 비어 있는 규칙이 있습니다." };
+      if (!hasTerms) return { ok: false, msg: `"${when}" 규칙의 계산 항목을 한 개 이상 추가하세요.` };
+      for (const t of terms) {
+        if (t.unit === "column") {
+          const ref = fields.find((f) => f.key === t.columnKey);
+          if (!ref) return { ok: false, msg: `"${when}" 규칙에 컬럼을 아직 고르지 않은 항목이 있습니다.` };
+          if (!isNumericFieldType(ref.type)) return { ok: false, msg: `"${when}" 규칙에 글자·날짜 컬럼은 쓸 수 없습니다.` };
+        }
+      }
+      cleaned.push({ whenValue: when, formula: terms });
+    }
+    if (cleaned.length === 0) return { ok: true }; // 켰지만 규칙 없음 → 기본식만(conditional 없이)
+    return { ok: true, conditional: { conditionFieldKey: fk, rules: cleaned } };
+  }, [draftConditional, fields]);
+
   // 모달 confirm 처리
   const confirmFieldEdit = useCallback(() => {
     if (!fieldEditModal) return;
@@ -618,7 +687,10 @@ export default function SettlementInfoTab({
       if (draftType === "formula") {
         const v = validateDraftFormula();
         if (!v.ok) { setFormulaError(v.msg); return; }
+        const vc = validateDraftConditional();
+        if (!vc.ok) { setFormulaError(vc.msg); return; }
         newField = { key: generateFieldKey(label, fields), label, type: "formula", formula: v.terms, formulaResult: draftFormulaResult };
+        if (vc.conditional) newField.conditional = vc.conditional;
       } else {
         newField = { key: generateFieldKey(label, fields), label, type: draftType };
       }
@@ -644,17 +716,23 @@ export default function SettlementInfoTab({
       // 수식이 아니고 타입도 그대로면 변경 없음 (수식은 식 내용이 바뀌었을 수 있어 항상 저장)
       if (newType !== "formula" && newType === fieldEditModal.type) { setFieldEditModal(null); return; }
       let formulaTerms: FormulaTerm[] = [];
+      let formulaConditional: FieldDef["conditional"] | undefined;
       if (newType === "formula") {
         const v = validateDraftFormula();
         if (!v.ok) { setFormulaError(v.msg); return; }
+        const vc = validateDraftConditional();
+        if (!vc.ok) { setFormulaError(vc.msg); return; }
         formulaTerms = v.terms;
+        formulaConditional = vc.conditional;
       }
       const next = fields.map((f) => {
         if (f.key !== key) return f;
         if (newType === "formula") {
-          return { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
+          const nf: FieldDef = { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
+          if (formulaConditional) nf.conditional = formulaConditional;
+          return nf;
         }
-        // 수식이 아닌 타입으로 바꾸면 수식 옵션은 제거
+        // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거
         return { key: f.key, label: f.label, type: newType };
       });
       setFields(next);
@@ -677,7 +755,7 @@ export default function SettlementInfoTab({
       });
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, validateDraftFormula, fields, persistFields, persist]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, validateDraftFormula, validateDraftConditional, fields, persistFields, persist]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
@@ -692,38 +770,7 @@ export default function SettlementInfoTab({
         })),
     [fields, editingFieldKey],
   );
-  const addFormulaTerm = useCallback(() => {
-    setFormulaError("");
-    setDraftFormula((prev) => {
-      const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
-      const term: FormulaTerm = firstCol
-        ? { op: "+", unit: "column", columnKey: firstCol.key, value: 0 }
-        : { op: "+", unit: "number", value: 0 };
-      return [...prev, term];
-    });
-  }, [fields, editingFieldKey]);
-  const updateFormulaTerm = useCallback((idx: number, patch: Partial<FormulaTerm>) => {
-    setFormulaError("");
-    setDraftFormula((prev) =>
-      prev.map((t, i) => {
-        if (i !== idx) return t;
-        const merged: FormulaTerm = { ...t, ...patch };
-        if (patch.unit === "column" && !merged.columnKey) {
-          const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
-          merged.columnKey = firstCol?.key;
-        }
-        if (patch.unit === "number" || patch.unit === "percent") {
-          delete merged.columnKey;
-          if (typeof merged.value !== "number") merged.value = 0;
-        }
-        return merged;
-      }),
-    );
-  }, [fields, editingFieldKey]);
-  const removeFormulaTerm = useCallback((idx: number) => {
-    setFormulaError("");
-    setDraftFormula((prev) => prev.filter((_, i) => i !== idx));
-  }, []);
+  // (수식 항목 추가·수정·삭제는 FormulaTermsEditor 컴포넌트로 이동 — 기본 식·조건 규칙별 식 공용)
   // 특정 컬럼(key)을 항으로 참조하는 수식 컬럼들 — 삭제·타입변경 시 영향 경고에 사용
   const formulasReferencing = useCallback((key: string | null): FieldDef[] => {
     if (!key) return [];
@@ -922,12 +969,12 @@ export default function SettlementInfoTab({
     const field = fields.find((f) => f.key === k);
     if (field?.type === "formula") {
       return target.reduce((a, t) => {
-        const r = evalFormulaForTier(field, t, fields);
+        const r = evalFormulaForTier(field, t, fields, undefined, row ?? undefined);
         return a + (typeof r === "number" && Number.isFinite(r) ? r : 0);
       }, 0);
     }
     return target.reduce((a, t) => a + (typeof t[k] === "number" ? (t[k] as number) : 0), 0);
-  }, [tiersInSubSection, fields]);
+  }, [tiersInSubSection, fields, row]);
   // 옛 호출 호환 — 인자 1개. 항상 전체 합산.
   const sumColumn = useCallback((k: string) => sumColumnIn(k), [sumColumnIn]);
   // 직접 수식 항목 배열을 base 에 순차 적용 — 합산/차감/전체 3 곳에서 공통 사용
@@ -991,7 +1038,7 @@ export default function SettlementInfoTab({
             <span className="text-[10px] text-wedly-muted">탭을 눌러 영역별 합계와 차수를 봅니다</span>
             {/* 어드민 — "세부 섹션 편집" 토글. 켜면 활성 탭에 ⋮ 등장.
                 디자인 통일: 히스토리/상세정보 "탭 편집" 과 같은 작은 테두리 버튼 + 연필 아이콘. */}
-            {isAdmin && !readOnly && onUpdateSubSections && (
+            {canEditColumns && onUpdateSubSections && (
               <button
                 type="button"
                 onClick={() => setEditSubMode((v) => !v)}
@@ -1025,7 +1072,8 @@ export default function SettlementInfoTab({
             </button>
             {subSectionsSafe.map((s) => {
               const isActive = activeSubSectionId === s.id;
-              const canEditSub = isAdmin && !readOnly && onUpdateSubSections;
+              // 세부 섹션 편집(구조)도 본부(ERP) 전용 — canEditColumns(=allowStructureEdit 포함) 로 묶는다.
+              const canEditSub = canEditColumns && onUpdateSubSections;
               const showDots = isActive && canEditSub && editSubMode;
               // 편집 모드에서 활성 탭 — 라벨과 ⋮ 를 한 알약 컨테이너에 넣어 모서리 끊김 방지.
               if (showDots) {
@@ -1072,7 +1120,7 @@ export default function SettlementInfoTab({
               );
             })}
           {/* 어드민용 — 탭 줄 끝의 "+ 세부 섹션 추가" */}
-          {isAdmin && !readOnly && onUpdateSubSections && (
+          {canEditColumns && onUpdateSubSections && (
             <button
               type="button"
               onClick={() => { setSubSectionDraftLabel(""); setSubSectionAddOpen(true); }}
@@ -1125,7 +1173,8 @@ export default function SettlementInfoTab({
         </div>
       )}
 
-      {/* 합계 카드 — 활성 탭에 맞게 합산. 통합 탭이면 전체 + 세부 섹션별 작은 합계 행 */}
+      {/* 합계 카드 — 활성 탭에 맞게 합산. hideSummaryCards 면 통째로 숨김(작은 임베드 카드용). */}
+      {!hideSummaryCards && (
       <div className="rounded-2xl border border-wedly-bd bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
           <p className="text-[12px] font-semibold text-wedly-muted uppercase tracking-wider">{activeSubLabel}</p>
@@ -1204,6 +1253,7 @@ export default function SettlementInfoTab({
         )}
         {/* 합계 카드 아래 안내 텍스트 — 사용자 요청으로 모두 제거 (자동 계산 상태/컬럼 식별 안내) */}
       </div>
+      )}
 
       {/* 어드민 카드 편집 패널 */}
       {editCards && canEditColumns && (
@@ -1476,6 +1526,79 @@ export default function SettlementInfoTab({
             컬럼 정의 (전체 차수에 적용됨)
             <span className="ml-2 text-[10px] font-normal text-wedly-muted">⋮⋮ 드래그하여 순서 변경</span>
           </p>
+          {/* 줄별 칸 수 — 줄마다 가로 칸 수(1·2·3)를 따로 고른다. 위에서부터 순서대로 칸을 채움. 위들리 디자인 드롭다운 사용. */}
+          {(() => {
+            const saveLayout = (next: number[]) => {
+              setRowLayout(next);
+              fetch(configApiPath, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ [rowLayoutKey]: next }),
+              }).catch(() => { /* ignore */ });
+            };
+            const rowGroups = groupFieldsByRowLayout(fields, rowLayout);
+            return (
+              <div className="mb-3 rounded-lg border border-wedly-bd bg-white p-3 space-y-2">
+                <p className="text-[11px] font-semibold text-wedly-t2">
+                  줄별 칸 수
+                  <span className="ml-1.5 font-normal text-wedly-muted">— 줄마다 가로로 1·2·3칸 중 골라요. 위에서부터 순서대로 채워집니다.</span>
+                </p>
+                {rowLayout.length === 0 ? (
+                  <p className="text-[12px] text-wedly-muted py-1">
+                    지금은 모든 칸이 <b>한 줄에 1칸씩(세로)</b>으로 표시됩니다. 아래 &quot;+ 줄 추가&quot;로 가로 묶음을 만드세요.
+                  </p>
+                ) : (
+                  rowLayout.map((w, ri) => {
+                    const grp = rowGroups[ri];
+                    const names = grp ? grp.items.map((f) => f.label).join(", ") : "";
+                    return (
+                      <div key={ri} className="flex items-center gap-2">
+                        <span className="text-[12px] text-wedly-t2 w-16 flex-shrink-0">{ri + 1}번째 줄</span>
+                        <CustomSelect
+                          value={String(w === 3 ? 3 : w === 2 ? 2 : 1)}
+                          onChange={(next) => {
+                            const n = Number(next);
+                            const v = n === 2 ? 2 : n === 3 ? 3 : 1;
+                            const arr = [...rowLayout];
+                            arr[ri] = v;
+                            saveLayout(arr);
+                          }}
+                          options={[
+                            { value: "1", label: "1칸" },
+                            { value: "2", label: "2칸" },
+                            { value: "3", label: "3칸" },
+                          ]}
+                          size="sm"
+                          fullWidth={false}
+                          className="min-w-[84px]"
+                        />
+                        <span className="text-[11px] text-wedly-muted truncate flex-1 min-w-0" title={names}>
+                          {names ? `→ ${names}` : "→ (이 줄에 들어갈 칸 없음)"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => saveLayout(rowLayout.filter((_, k) => k !== ri))}
+                          className="p-1 rounded-md text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors flex-shrink-0"
+                          title="이 줄 삭제"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+                <button
+                  type="button"
+                  onClick={() => saveLayout([...rowLayout, 1])}
+                  className="w-full py-1.5 text-[11px] font-medium text-wedly-accent border border-dashed border-wedly-accent/40 rounded-md hover:bg-wedly-bg-blue/30 transition-colors"
+                >
+                  + 줄 추가
+                </button>
+              </div>
+            );
+          })()}
           {fields.map((f, idx) => {
             const isDragging = dragIdx === idx;
             const isDragOver = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;
@@ -1540,7 +1663,7 @@ export default function SettlementInfoTab({
             onLabelChange={(label) => updateTierLabel(idx, label)}
             onRemove={() => removeTier(idx)}
             tierSuffix={tierSuffix}
-            onTierSuffixChange={isAdmin ? (next) => {
+            onTierSuffixChange={canEditColumns ? (next) => {
               setTierSuffix(next);
               fetch(configApiPath, {
                 method: "PUT",
@@ -1548,6 +1671,8 @@ export default function SettlementInfoTab({
                 body: JSON.stringify({ [tierSuffixKey]: next }),
               }).catch(() => { /* ignore */ });
             } : undefined}
+            rowLayout={rowLayout}
+            conditionValues={row ?? undefined}
           />
         );
 
@@ -1597,7 +1722,7 @@ export default function SettlementInfoTab({
                 + {ORDINAL_KO[tiers.length] || `${tiers.length + 1}차`} {addButtonSuffixOverride ?? tierSuffix} 추가
               </button>
             )}
-            {isAdmin && !readOnly && onUpdateSubSections && (
+            {canEditColumns && onUpdateSubSections && (
               <button
                 type="button"
                 onClick={() => { setSubSectionDraftLabel(""); setSubSectionAddOpen(true); }}
@@ -1808,111 +1933,114 @@ export default function SettlementInfoTab({
                     </div>
                   </label>
 
-                  <div className="space-y-2">
-                    {draftFormula.length === 0 ? (
-                      <p className="text-[11px] text-wedly-muted italic px-1">아래 &quot;+ 항목 추가&quot;로 시작하세요.</p>
-                    ) : (
-                      draftFormula.map((t, i) => (
-                        <div key={i} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-1.5">
-                          <div className="flex items-center gap-1.5">
-                            {i > 0 ? (
-                              <div className="w-[92px] flex-shrink-0">
-                                <CustomSelect
-                                  size="sm"
-                                  value={t.op}
-                                  onChange={(v) => updateFormulaTerm(i, { op: v as "+" | "-" | "*" | "/" })}
-                                  options={[
-                                    { value: "+", label: "＋ 더하기" },
-                                    { value: "-", label: "－ 빼기" },
-                                    { value: "*", label: "× 곱하기" },
-                                    { value: "/", label: "÷ 나누기" },
-                                  ]}
-                                />
-                              </div>
-                            ) : (
-                              <span className="w-[92px] flex-shrink-0 text-[10px] text-wedly-muted px-1">시작 값</span>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <CustomSelect
-                                size="sm"
-                                value={t.unit}
-                                onChange={(v) => updateFormulaTerm(i, { unit: v as "column" | "number" | "percent" })}
-                                options={[
-                                  { value: "column", label: "다른 컬럼" },
-                                  { value: "number", label: "숫자" },
-                                  { value: "percent", label: "퍼센트(%)" },
-                                ]}
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => removeFormulaTerm(i)}
-                              className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
-                              title="이 항목 삭제"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                          <div>
-                            {t.unit === "column" ? (
-                              formulaColumnOptions.length === 0 ? (
-                                <p className="text-[10px] text-wedly-orange px-1">고를 숫자·퍼센트 컬럼이 없습니다. 숫자/퍼센트로 바꾸세요.</p>
-                              ) : (
-                                <CustomSelect
-                                  size="sm"
-                                  value={t.columnKey || ""}
-                                  onChange={(v) => updateFormulaTerm(i, { columnKey: v })}
-                                  placeholder="컬럼 선택"
-                                  options={[{ value: "", label: "컬럼 선택" }, ...formulaColumnOptions]}
-                                />
-                              )
-                            ) : (
-                              <div className="relative">
-                                <input
-                                  type="number"
-                                  value={typeof t.value === "number" ? String(t.value) : ""}
-                                  onChange={(e) => updateFormulaTerm(i, { value: e.target.value === "" ? 0 : Number(e.target.value) })}
-                                  placeholder={t.unit === "percent" ? "예: 30" : "예: 12"}
-                                  className={`w-full px-2.5 py-1.5 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${t.unit === "percent" ? "pr-7" : ""}`}
-                                />
-                                {t.unit === "percent" && (
-                                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-wedly-muted text-[12px] pointer-events-none">%</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={addFormulaTerm}
-                    className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
-                  >
-                    + 항목 추가
-                  </button>
-
-                  {draftFormula.length > 0 && (() => {
-                    const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷" };
-                    const text = draftFormula.map((t, i) => {
-                      let operand = "?";
-                      if (t.unit === "number") operand = String(t.value ?? 0);
-                      else if (t.unit === "percent") operand = `${t.value ?? 0}%`;
-                      else operand = fields.find((f) => f.key === t.columnKey)?.label ?? "(컬럼)";
-                      return i === 0 ? operand : `${opSym[t.op] || t.op} ${operand}`;
-                    }).join(" ");
-                    return (
-                      <div className="rounded-lg bg-wedly-bg-gray px-2.5 py-2">
-                        <span className="text-[10px] font-semibold text-wedly-muted">미리보기: </span>
-                        <span className="text-[12px] font-medium text-wedly-t1">{text}</span>
-                        <span className="text-[11px] text-wedly-muted"> = {draftFormulaResult === "percent" ? "%" : "원"}</span>
-                      </div>
-                    );
-                  })()}
+                  <FormulaTermsEditor
+                    terms={draftFormula}
+                    onChange={(next) => { setDraftFormula(next); setFormulaError(""); }}
+                    fields={fields}
+                    editingFieldKey={editingFieldKey}
+                    columnOptions={formulaColumnOptions}
+                    resultFormat={draftFormulaResult}
+                  />
 
                   {formulaError && <p className="text-[11px] text-wedly-red px-1">{formulaError}</p>}
+
+                  {/* ── 값에 따라 다른 식(조건별 수식) — conditionFieldOptions 주입된 앱(ERP)에서만 ── */}
+                  {conditionFieldOptions && conditionFieldOptions.length > 0 && (
+                    <div className="rounded-lg border border-wedly-gold/40 bg-wedly-bg-yellow/40 p-2.5 space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={!!draftConditional}
+                          onChange={(e) => {
+                            setFormulaError("");
+                            setDraftConditional(e.target.checked
+                              ? { conditionFieldKey: conditionFieldOptions[0]?.key ?? "", rules: [{ whenValue: "", formula: [] }] }
+                              : null);
+                          }}
+                          className="w-4 h-4 accent-wedly-accent"
+                        />
+                        <span className="text-[11px] font-bold text-wedly-orange">값에 따라 다른 식 쓰기</span>
+                      </label>
+                      <p className="text-[10px] text-wedly-muted px-0.5">기준 필드 값이 규칙의 값과 같으면(여러 값을 가진 칸이면 그 중 하나라도 맞으면) 그 식으로, 어디에도 안 맞으면 위의 기본 식으로 계산합니다.</p>
+
+                      {draftConditional && (
+                        <div className="space-y-2.5">
+                          <label className="block">
+                            <span className="text-[10px] font-semibold text-wedly-t2">기준 필드</span>
+                            <div className="mt-1">
+                              <CustomSelect
+                                size="sm"
+                                value={draftConditional.conditionFieldKey}
+                                onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, conditionFieldKey: v } : prev)}
+                                placeholder="기준 필드 선택"
+                                options={conditionFieldOptions.map((o) => ({ value: o.key, label: o.label }))}
+                              />
+                            </div>
+                          </label>
+
+                          {draftConditional.rules.map((rule, ri) => (
+                            <div key={ri} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold text-wedly-t2 flex-shrink-0">이 값일 때</span>
+                                <input
+                                  type="text"
+                                  value={rule.whenValue}
+                                  onChange={(e) => {
+                                    setFormulaError("");
+                                    const val = e.target.value;
+                                    setDraftConditional((prev) => prev
+                                      ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, whenValue: val } : r) }
+                                      : prev);
+                                  }}
+                                  placeholder="예: 하이브"
+                                  className="flex-1 min-w-0 px-2.5 py-1.5 text-[16px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFormulaError("");
+                                    setDraftConditional((prev) => prev
+                                      ? { ...prev, rules: prev.rules.filter((_, i) => i !== ri) }
+                                      : prev);
+                                  }}
+                                  className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                                  title="이 규칙 삭제"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <FormulaTermsEditor
+                                terms={rule.formula}
+                                onChange={(next) => {
+                                  setFormulaError("");
+                                  setDraftConditional((prev) => prev
+                                    ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, formula: next } : r) }
+                                    : prev);
+                                }}
+                                fields={fields}
+                                editingFieldKey={editingFieldKey}
+                                columnOptions={formulaColumnOptions}
+                                resultFormat={draftFormulaResult}
+                              />
+                            </div>
+                          ))}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormulaError("");
+                              setDraftConditional((prev) => prev
+                                ? { ...prev, rules: [...prev.rules, { whenValue: "", formula: [] }] }
+                                : prev);
+                            }}
+                            className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-gold/50 text-[11px] font-bold text-wedly-orange hover:bg-wedly-bg-yellow transition-colors"
+                          >
+                            + 규칙 추가
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2020,9 +2148,27 @@ export default function SettlementInfoTab({
   );
 }
 
+// 줄별 칸 수(rowLayout)에 따라 컬럼을 줄 그룹으로 나눈다.
+// 위에서부터 각 줄의 칸 수만큼 채우고, rowLayout 이 모자라면 남는 칸은 한 줄에 1칸씩.
+function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 | 2 | 3; items: T[] }[] {
+  const groups: { cols: 1 | 2 | 3; items: T[] }[] = [];
+  let i = 0;
+  for (const raw of rowLayout) {
+    if (i >= items.length) break;
+    const cols = (raw === 3 ? 3 : raw === 2 ? 2 : 1) as 1 | 2 | 3;
+    groups.push({ cols, items: items.slice(i, i + cols) });
+    i += cols;
+  }
+  while (i < items.length) {
+    groups.push({ cols: 1, items: [items[i]] });
+    i += 1;
+  }
+  return groups;
+}
+
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2040,6 +2186,10 @@ function TierCard({
   tierSuffix?: string;
   /** 어드민이 공통 꼬리표 변경 시 호출 — 한 번 변경하면 모든 차수에 같이 반영 */
   onTierSuffixChange?: (next: string) => void;
+  /** 줄별 가로 칸 수 배열 (예: [3,2,1]) — 비어 있으면 모두 한 줄 1칸(세로). 위에서부터 순서대로 채움 */
+  rowLayout?: number[];
+  /** 조건별 수식의 기준값 — 이 행의 평면 값(row). 없으면 기존(조건 미적용)과 동일 */
+  conditionValues?: RowData | null;
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2117,32 +2267,184 @@ function TierCard({
           )}
         </div>
       </div>
+      {/* 차수 카드 칸 배치 — 줄별 칸 수(rowLayout)대로 가로 묶음. 위에서부터 채우고, 남는 칸은 한 줄 1칸씩. */}
       {open && (
-        <div className="divide-y divide-wedly-bd/30">
+        <div className="p-3 space-y-2">
           {fields.length === 0 ? (
             <div className="px-4 py-6 text-center text-[12px] text-wedly-muted">
               컬럼이 없습니다. 위의 &quot;컬럼 편집&quot;에서 추가하세요.
             </div>
           ) : (
-            fields.map((f) => {
-              const isFormula = f.type === "formula";
-              return (
-                <FieldRow
-                  key={f.key}
-                  label={f.label}
-                  type={f.type}
-                  value={isFormula ? evalFormulaForTier(f, tier, fields) : (tier[f.key] ?? null)}
-                  readOnly={readOnly}
-                  isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
-                  formulaResult={f.formulaResult}
-                  onChange={(v) => onChange(f.key, v)}
-                />
-              );
-            })
+            groupFieldsByRowLayout(fields, rowLayout).map((grp, gi) => (
+              <div
+                key={gi}
+                className={`grid ${grp.cols === 3 ? "grid-cols-3" : grp.cols === 2 ? "grid-cols-2" : "grid-cols-1"} gap-2`}
+              >
+                {grp.items.map((f) => {
+                  const isFormula = f.type === "formula";
+                  return (
+                    <FieldRow
+                      key={f.key}
+                      label={f.label}
+                      type={f.type}
+                      value={isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null)}
+                      readOnly={readOnly}
+                      isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
+                      formulaResult={f.formulaResult}
+                      onChange={(v) => onChange(f.key, v)}
+                    />
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
       )}
     </div>
+  );
+}
+
+// 수식 "항목(term) 묶음" 편집 UI — 기본 식과 조건 규칙별 식에서 공용으로 재사용.
+//   terms/onChange 로만 동작(부모의 어떤 배열이든 편집). 계산 자체는 ui-shared(evalFormulaForTier)가 함.
+function FormulaTermsEditor({
+  terms, onChange, fields, editingFieldKey, columnOptions, resultFormat,
+}: {
+  terms: FormulaTerm[];
+  onChange: (next: FormulaTerm[]) => void;
+  fields: FieldDef[];
+  editingFieldKey: string | null;
+  columnOptions: { value: string; label: string }[];
+  resultFormat: FormulaResultFormat;
+}) {
+  const addTerm = () => {
+    const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
+    const term: FormulaTerm = firstCol
+      ? { op: "+", unit: "column", columnKey: firstCol.key, value: 0 }
+      : { op: "+", unit: "number", value: 0 };
+    onChange([...terms, term]);
+  };
+  const updateTerm = (idx: number, patch: Partial<FormulaTerm>) => {
+    onChange(
+      terms.map((t, i) => {
+        if (i !== idx) return t;
+        const merged: FormulaTerm = { ...t, ...patch };
+        if (patch.unit === "column" && !merged.columnKey) {
+          const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
+          merged.columnKey = firstCol?.key;
+        }
+        if (patch.unit === "number" || patch.unit === "percent") {
+          delete merged.columnKey;
+          if (typeof merged.value !== "number") merged.value = 0;
+        }
+        return merged;
+      }),
+    );
+  };
+  const removeTerm = (idx: number) => onChange(terms.filter((_, i) => i !== idx));
+  const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷" };
+  return (
+    <>
+      <div className="space-y-2">
+        {terms.length === 0 ? (
+          <p className="text-[11px] text-wedly-muted italic px-1">아래 &quot;+ 항목 추가&quot;로 시작하세요.</p>
+        ) : (
+          terms.map((t, i) => (
+            <div key={i} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                {i > 0 ? (
+                  <div className="w-[92px] flex-shrink-0">
+                    <CustomSelect
+                      size="sm"
+                      value={t.op}
+                      onChange={(v) => updateTerm(i, { op: v as "+" | "-" | "*" | "/" })}
+                      options={[
+                        { value: "+", label: "＋ 더하기" },
+                        { value: "-", label: "－ 빼기" },
+                        { value: "*", label: "× 곱하기" },
+                        { value: "/", label: "÷ 나누기" },
+                      ]}
+                    />
+                  </div>
+                ) : (
+                  <span className="w-[92px] flex-shrink-0 text-[10px] text-wedly-muted px-1">시작 값</span>
+                )}
+                <div className="flex-1 min-w-0">
+                  <CustomSelect
+                    size="sm"
+                    value={t.unit}
+                    onChange={(v) => updateTerm(i, { unit: v as "column" | "number" | "percent" })}
+                    options={[
+                      { value: "column", label: "다른 컬럼" },
+                      { value: "number", label: "숫자" },
+                      { value: "percent", label: "퍼센트(%)" },
+                    ]}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeTerm(i)}
+                  className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                  title="이 항목 삭제"
+                >
+                  ✕
+                </button>
+              </div>
+              <div>
+                {t.unit === "column" ? (
+                  columnOptions.length === 0 ? (
+                    <p className="text-[10px] text-wedly-orange px-1">고를 숫자·퍼센트 컬럼이 없습니다. 숫자/퍼센트로 바꾸세요.</p>
+                  ) : (
+                    <CustomSelect
+                      size="sm"
+                      value={t.columnKey || ""}
+                      onChange={(v) => updateTerm(i, { columnKey: v })}
+                      placeholder="컬럼 선택"
+                      options={[{ value: "", label: "컬럼 선택" }, ...columnOptions]}
+                    />
+                  )
+                ) : (
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={typeof t.value === "number" ? String(t.value) : ""}
+                      onChange={(e) => updateTerm(i, { value: e.target.value === "" ? 0 : Number(e.target.value) })}
+                      placeholder={t.unit === "percent" ? "예: 30" : "예: 12"}
+                      className={`w-full px-2.5 py-1.5 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${t.unit === "percent" ? "pr-7" : ""}`}
+                    />
+                    {t.unit === "percent" && (
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-wedly-muted text-[12px] pointer-events-none">%</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={addTerm}
+        className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+      >
+        + 항목 추가
+      </button>
+      {terms.length > 0 && (() => {
+        const text = terms.map((t, i) => {
+          let operand = "?";
+          if (t.unit === "number") operand = String(t.value ?? 0);
+          else if (t.unit === "percent") operand = `${t.value ?? 0}%`;
+          else operand = fields.find((f) => f.key === t.columnKey)?.label ?? "(컬럼)";
+          return i === 0 ? operand : `${opSym[t.op] || t.op} ${operand}`;
+        }).join(" ");
+        return (
+          <div className="rounded-lg bg-wedly-bg-gray px-2.5 py-2">
+            <span className="text-[10px] font-semibold text-wedly-muted">미리보기: </span>
+            <span className="text-[12px] font-medium text-wedly-t1">{text}</span>
+            <span className="text-[11px] text-wedly-muted"> = {resultFormat === "percent" ? "%" : "원"}</span>
+          </div>
+        );
+      })()}
+    </>
   );
 }
 
@@ -2184,13 +2486,13 @@ function FieldRow({
   const isEditable = !readOnly && !isAuto && type !== "formula";
 
   return (
-    <div className="flex items-start gap-3 py-2 px-4 min-h-[40px]">
-      <div className="w-[120px] sm:w-[160px] flex-shrink-0 text-[12px] text-wedly-muted truncate pt-1">
+    <div className="flex flex-col gap-1 rounded-lg border border-wedly-bd/40 bg-wedly-bg-gray/20 px-3 py-2 min-h-[58px]">
+      <div className="text-[11px] text-wedly-muted truncate">
         {label}
         {isAuto && <span className="ml-1 text-[10px] text-wedly-accent">(자동)</span>}
         {type === "formula" && <span className="ml-1 text-[10px] text-wedly-purple">(수식)</span>}
       </div>
-      <div className="flex-1 text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
+      <div className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
         {editing && isEditable ? (
           (type === "number" || type === "percent") ? (
             <div className="relative">
