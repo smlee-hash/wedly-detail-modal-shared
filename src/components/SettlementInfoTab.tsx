@@ -106,6 +106,9 @@ export default function SettlementInfoTab({
   //   본부(ERP)만 true 로 켠다. 파트너 앱(하이브·일루아)은 값 입력만 하고, 구조는 ERP 에서만 바꾼다.
   //   기본이 false 라서 파트너 앱이 실수로 isAdmin=true 를 넘겨도 구조 편집 버튼은 안 나온다(안전장치).
   allowStructureEdit = false,
+  // 스코어카드(전체합계 카드)만 편집 허용 — 파트너 앱이 자기 앱 스코어카드를 관리.
+  //   미지정 시 allowStructureEdit 를 따른다(ERP·다른분야 호출부 무변경).
+  allowCardEdit,
   // ── 영역 분리 prop (A-1 모듈화) ──
   // 정산정보 외 계약·환불 같은 다른 영역에서도 같은 차수 카드 부품 재사용 가능
   // 기본값은 정산 — 기존 호출 호환
@@ -136,6 +139,8 @@ export default function SettlementInfoTab({
   isAdmin?: boolean;
   // 구조(차수 카드·컬럼) 편집 허용 — 본부(ERP) 전용. 미지정 시 false (파트너 앱 = 값 입력만).
   allowStructureEdit?: boolean;
+  // 스코어카드 편집만 허용(칸 구조 편집과 분리). 미지정 시 allowStructureEdit 폴백.
+  allowCardEdit?: boolean;
   storagePrefix?: string;
   fieldsApiPath?: string;
   sectionTitle?: string;
@@ -258,6 +263,9 @@ export default function SettlementInfoTab({
   // 구조 편집(전체 합계 카드 '편집' 버튼)은 본부(ERP)에서만 — allowStructureEdit 가 명시적으로 켜져야 한다.
   // (기본 꺼짐 → 파트너 앱은 isAdmin 이 참이어도 값 입력만 가능.)
   const canEditColumns = !readOnly && isAdmin && allowStructureEdit;
+  // 스코어카드 편집 게이트 — 칸 구조와 분리. 파트너 앱은 카드만(allowCardEdit), 칸 구조는 ERP만.
+  //   allowCardEdit 미지정이면 allowStructureEdit 로 폴백 → 기존 호출부(ERP·다른분야) 100% 동일.
+  const canEditCards = !readOnly && isAdmin && (allowCardEdit ?? allowStructureEdit);
   // ⚠️ 마운트 시 초기값을 빈 배열로 — 서버 fetch 응답 전까지 옛 기본 컬럼이 잠깐 보이는
   // 깜빡임 방지. 서버 응답이 진실의 원천.
   const [fields, setFields] = useState<FieldDef[]>([]);
@@ -1177,10 +1185,10 @@ export default function SettlementInfoTab({
           <div className="flex items-center gap-2">
             <p className="text-[11px] text-wedly-muted">{tiersInActive.length}개 차수 · {scoreCards.length}개 카드</p>
             {/* 통합 편집 버튼 (카드 편집 + 컬럼 편집을 한 번에 ON/OFF) — 전체 합계 카드 머리에 배치 */}
-            {canEditColumns && (
+            {(canEditCards || canEditColumns) && (
               <button
                 type="button"
-                onClick={() => { const next = !(editCards || editFields); setEditCards(next); setEditFields(next); }}
+                onClick={() => { const next = !(editCards || editFields); setEditCards(next && canEditCards); setEditFields(next && canEditColumns); }}
                 className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border transition-colors whitespace-nowrap ${
                   (editCards || editFields)
                     ? "border-wedly-accent text-wedly-accent bg-wedly-bg-blue/40"
@@ -1251,7 +1259,7 @@ export default function SettlementInfoTab({
       </div>
 
       {/* 어드민 카드 편집 패널 */}
-      {editCards && canEditColumns && (
+      {editCards && canEditCards && (
         <div className="rounded-2xl border-2 border-wedly-accent/30 bg-wedly-bg-blue/10 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-[12px] font-semibold text-wedly-accent">스코어카드 편집 (전체 사용자에게 적용됨)</p>
