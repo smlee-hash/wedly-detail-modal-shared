@@ -14,6 +14,8 @@ export default function SectionSettlementTab({
   onSave,
   isAdmin = false,
   settlementApiBase,
+  enableConditionalFormula,
+  conditionFieldOptions,
 }: {
   section: string;
   rawValue: unknown;
@@ -21,6 +23,9 @@ export default function SectionSettlementTab({
   isAdmin?: boolean;
   // 앱별 정산 칸/설정 API의 베이스 경로. 예: "/api/unified-collab/section-settlement" (뒤에 /{section} 자동)
   settlementApiBase: string;
+  // 조건별 수식 게이트 + 비교용 기본정보 칸 후보 (ERP만 주입). 미주입이면 기존과 동일.
+  enableConditionalFormula?: boolean;
+  conditionFieldOptions?: Array<{ key: string; label: string }>;
 }) {
   const base = `${settlementApiBase}/${encodeURIComponent(section)}`;
   return (
@@ -36,6 +41,8 @@ export default function SectionSettlementTab({
       ratioBaseLabel="기준"
       ratioFeeLabel="수수료"
       defaultScoreCards={EMPTY_CARDS}
+      enableConditionalFormula={enableConditionalFormula}
+      conditionFieldOptions={conditionFieldOptions}
     />
   );
 }
