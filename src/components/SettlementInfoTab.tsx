@@ -49,7 +49,8 @@ function fetchConfigCached(configApiPath: string, forceRefresh = false): Promise
 
 function fmtCurrency(n: number | null): string {
   if (n === null || !isFinite(n)) return "";
-  return n.toLocaleString("ko-KR");
+  // 돈 표시는 정수로 반올림(소수점 제거) — 스코어카드 합계·돈 칸 가독성. 퍼센트는 별도 경로라 영향 없음.
+  return Math.round(n).toLocaleString("ko-KR");
 }
 
 // 계약정보 기준 비율 — 경정청구 도메인에서는 (10총환급금 : 20확정수수료) 비율의 반대를 적용.
