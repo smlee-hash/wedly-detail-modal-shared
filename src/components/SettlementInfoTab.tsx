@@ -30,6 +30,7 @@ import {
   isNumericFieldType,
 } from "@wedly/ui-shared";
 import CustomSelect from "./CustomSelect";
+import SelectDropdownBody from "./SelectDropdown";
 
 type RowData = Record<string, string | number | boolean | null>;
 
@@ -617,6 +618,7 @@ export default function SettlementInfoTab({
   // 수식 컬럼 편집용 — 항(term)들과 결과 표시 형식, 검증 오류 메시지
   const [draftFormula, setDraftFormula] = useState<FormulaTerm[]>([]);
   const [draftFormulaResult, setDraftFormulaResult] = useState<FormulaResultFormat>("number");
+  const [draftOptions, setDraftOptions] = useState<string[]>([]); // type==="select" 보기 목록 초안
   const [formulaError, setFormulaError] = useState<string>("");
   // 조건별 수식 편집 상태. null = 조건 안 씀(기본 식만). 객체면 "값에 따라 다른 식" 켠 상태.
   //   rules: 규칙별 기준 칸(leftKey) + 비교 대상(right: 글자/다른 칸) + 식.
@@ -629,6 +631,7 @@ export default function SettlementInfoTab({
     setDraftType("text");
     setDraftFormula([]);
     setDraftFormulaResult("number");
+    setDraftOptions([]);
     setFormulaError("");
     setDraftConditional(null);
     setFieldEditModal({ mode: "add" });
@@ -645,6 +648,7 @@ export default function SettlementInfoTab({
     setDraftType(cur.type);
     setDraftFormula(cur.type === "formula" ? parseFormulaTerms(cur.formula) : []);
     setDraftFormulaResult(cur.formulaResult === "percent" ? "percent" : "number");
+    setDraftOptions(cur.type === "select" && Array.isArray(cur.options) ? [...cur.options] : []);
     setFormulaError("");
     setDraftConditional(loadConditionalDraft(cur.conditional));
     setFieldEditModal({ mode: "changeType", key, type: cur.type });
@@ -699,6 +703,7 @@ export default function SettlementInfoTab({
   // 모달 confirm 처리
   const confirmFieldEdit = useCallback(() => {
     if (!fieldEditModal) return;
+    const cleanedOptions = draftOptions.map((o) => o.trim()).filter((o) => o !== "");
     if (fieldEditModal.mode === "add") {
       const label = draftLabel.trim();
       if (!label) return;
@@ -710,6 +715,8 @@ export default function SettlementInfoTab({
         if (!vc.ok) { setFormulaError(vc.msg); return; }
         newField = { key: generateFieldKey(label, fields), label, type: "formula", formula: v.terms, formulaResult: draftFormulaResult };
         if (vc.conditional) newField.conditional = vc.conditional;
+      } else if (draftType === "select") {
+        newField = { key: generateFieldKey(label, fields), label, type: "select", options: cleanedOptions };
       } else {
         newField = { key: generateFieldKey(label, fields), label, type: draftType };
       }
@@ -751,6 +758,10 @@ export default function SettlementInfoTab({
           if (formulaConditional) nf.conditional = formulaConditional;
           return nf;
         }
+        // select 로 바꾸면 보기 목록을 싣는다
+        if (newType === "select") {
+          return { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
+        }
         // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거
         return { key: f.key, label: f.label, type: newType };
       });
@@ -774,7 +785,7 @@ export default function SettlementInfoTab({
       });
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, validateDraftFormula, validateDraftConditional, fields, persistFields, persist]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
@@ -1913,12 +1924,43 @@ export default function SettlementInfoTab({
                         { value: "text", label: "텍스트" },
                         { value: "date", label: "날짜" },
                         { value: "number", label: "숫자" },
+                        { value: "select", label: "드롭다운" },
                         { value: "percent", label: "퍼센트 (%)" },
                         { value: "formula", label: "수식 (자동 계산)" },
                       ]}
                     />
                   </div>
                 </label>
+              )}
+
+              {/* ── 보기 목록 편집기 (type === "select" 일 때) ── */}
+              {fieldEditModal.mode !== "rename" && draftType === "select" && (
+                <div className="rounded-xl border border-wedly-accent/30 bg-wedly-bg-blue/10 p-3 space-y-2">
+                  <span className="text-[11px] font-bold text-wedly-accent">📋 보기 목록 (하나 고르기)</span>
+                  <div className="space-y-1.5">
+                    {draftOptions.map((opt, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={opt}
+                          onChange={(e) => setDraftOptions((prev) => prev.map((o, j) => (j === i ? e.target.value : o)))}
+                          placeholder="예: 진행"
+                          className="flex-1 px-2.5 py-1.5 text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 focus:outline-none focus:ring-2 focus:ring-wedly-accent/30"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setDraftOptions((prev) => prev.filter((_, j) => j !== i))}
+                          className="px-2 py-1.5 text-[12px] text-wedly-red hover:bg-wedly-bg-red/40 rounded-lg"
+                        >삭제</button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDraftOptions((prev) => [...prev, ""])}
+                    className="text-[12px] font-semibold text-wedly-accent hover:underline"
+                  >+ 보기 추가</button>
+                </div>
               )}
 
               {/* 참조 중인 컬럼을 글자·날짜로 바꾸면 그 수식이 깨질 수 있음 — 사전 경고 */}
@@ -2313,6 +2355,8 @@ function TierCard({
                       readOnly={readOnly}
                       isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       formulaResult={f.formulaResult}
+                      options={f.options}
+                      optionColors={f.optionColors}
                       onChange={(v) => onChange(f.key, v)}
                     />
                   );
@@ -2471,7 +2515,7 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, type, value, onChange, readOnly = false, isAuto = false, formulaResult,
+  label, type, value, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
 }: {
   label: string;
   type: FieldType;
@@ -2480,6 +2524,8 @@ function FieldRow({
   readOnly?: boolean;
   isAuto?: boolean;
   formulaResult?: FormulaResultFormat;
+  options?: string[];
+  optionColors?: Record<string, { bg: string; text: string }>;
 }) {
   const [editing, setEditing] = useState(false);
 
@@ -2495,6 +2541,15 @@ function FieldRow({
     if (value === null || value === undefined || value === "") {
       return <span className="text-wedly-muted">{readOnly || isAuto ? "-" : "비어 있음"}</span>;
     }
+    if (type === "select") {
+      const c = optionColors?.[String(value)];
+      return (
+        <span
+          className="inline-block rounded-md px-2 py-0.5 text-[12px] font-medium bg-wedly-bg-gray text-wedly-t1"
+          style={c ? { backgroundColor: c.bg, color: c.text } : undefined}
+        >{String(value)}</span>
+      );
+    }
     if (type === "percent" && typeof value === "number") {
       return <span className="tabular-nums font-medium">{value}%</span>;
     }
@@ -2502,7 +2557,7 @@ function FieldRow({
       return <span className="tabular-nums font-medium">{fmtCurrency(value)}원</span>;
     }
     return <span>{String(value)}</span>;
-  }, [value, type, readOnly, isAuto, formulaResult]);
+  }, [value, type, readOnly, isAuto, formulaResult, optionColors]);
 
   // 수식 컬럼은 사람이 입력하지 않음 (자동 계산 읽기전용)
   const isEditable = !readOnly && !isAuto && type !== "formula";
@@ -2516,7 +2571,17 @@ function FieldRow({
       </div>
       <div className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
         {editing && isEditable ? (
-          (type === "number" || type === "percent") ? (
+          (type === "select") ? (
+            <div className="absolute z-50 mt-1 w-56 rounded-xl border border-wedly-bd bg-white shadow-[0_8px_24px_-4px_rgba(10,34,68,0.18)]">
+              <SelectDropdownBody
+                value={value == null ? "" : String(value)}
+                options={options ?? []}
+                onSave={(next) => { onChange(next); setEditing(false); }}
+                onClose={() => setEditing(false)}
+                getColorClass={() => "bg-wedly-bg-gray text-wedly-t1"}
+              />
+            </div>
+          ) : (type === "number" || type === "percent") ? (
             <div className="relative">
               <input
                 type="number"
