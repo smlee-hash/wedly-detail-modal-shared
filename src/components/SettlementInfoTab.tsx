@@ -14,6 +14,8 @@ import {
   type ScoreCardColor,
   type FormulaTerm,
   type FormulaResultFormat,
+  type ConditionalRule,
+  type ConditionCompare,
   SCORECARD_COLOR_CLASSES,
   ORDINAL_KO,
   makeEmptyTier,
@@ -30,6 +32,19 @@ import {
 import CustomSelect from "./CustomSelect";
 
 type RowData = Record<string, string | number | boolean | null>;
+
+// 저장된 conditional(새/옛 형식) → 편집 초안. 없으면 null. (옛 conditionFieldKey/whenValue 흡수)
+function loadConditionalDraft(
+  cond: FieldDef["conditional"],
+): { rules: Array<{ leftKey: string; right: ConditionCompare; formula: FormulaTerm[] }> } | null {
+  if (!cond || !Array.isArray(cond.rules) || cond.rules.length === 0) return null;
+  const rules = cond.rules.map((r) => ({
+    leftKey: r.leftKey ?? cond.conditionFieldKey ?? "",
+    right: r.right ?? { kind: "text" as const, value: r.whenValue ?? "" },
+    formula: parseFormulaTerms(r.formula),
+  }));
+  return { rules };
+}
 
 // 설정(config) 모듈 레벨 캐시 + 탭 다시 보기 자동 갱신.
 // configApiPath 는 앱마다 다름(하이브 /api/hive-config, 일루아 /api/illua-config, ERP 는 분야마다 다름) — prop 으로 주입.
@@ -129,6 +144,7 @@ export default function SettlementInfoTab({
   seedDefaultCardsForAllPrefixes = false,
   addButtonSuffixOverride,
   conditionFieldOptions,
+  enableConditionalFormula,
 }: {
   rawValue: unknown;
   row?: RowData | null;
@@ -161,6 +177,8 @@ export default function SettlementInfoTab({
   // 조건별 수식의 "기준 필드" 후보 (기본정보 평면 필드). ERP만 주입 → 주입될 때만 조건 UI 노출.
   //   미주입(파트너 앱)이면 조건 UI 자체가 안 보이고 기존과 100% 동일.
   conditionFieldOptions?: Array<{ key: string; label: string }>;
+  /** 조건별 수식 UI 표시 게이트 — ERP만 true. (기본정보 후보가 비어도 정산 칸만으로 조건 작성 가능하게 분리) */
+  enableConditionalFormula?: boolean;
 }) {
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
@@ -600,8 +618,9 @@ export default function SettlementInfoTab({
   const [draftFormulaResult, setDraftFormulaResult] = useState<FormulaResultFormat>("number");
   const [formulaError, setFormulaError] = useState<string>("");
   // 조건별 수식 편집 상태. null = 조건 안 씀(기본 식만). 객체면 "값에 따라 다른 식" 켠 상태.
+  //   rules: 규칙별 기준 칸(leftKey) + 비교 대상(right: 글자/다른 칸) + 식.
   const [draftConditional, setDraftConditional] = useState<
-    { conditionFieldKey: string; rules: Array<{ whenValue: string; formula: FormulaTerm[] }> } | null
+    { rules: Array<{ leftKey: string; right: ConditionCompare; formula: FormulaTerm[] }> } | null
   >(null);
 
   const openAddField = useCallback(() => {
@@ -626,7 +645,7 @@ export default function SettlementInfoTab({
     setDraftFormula(cur.type === "formula" ? parseFormulaTerms(cur.formula) : []);
     setDraftFormulaResult(cur.formulaResult === "percent" ? "percent" : "number");
     setFormulaError("");
-    setDraftConditional(cur.conditional ?? null);
+    setDraftConditional(loadConditionalDraft(cur.conditional));
     setFieldEditModal({ mode: "changeType", key, type: cur.type });
   }, [fields]);
 
@@ -653,28 +672,27 @@ export default function SettlementInfoTab({
   //   유효 규칙만 추려 돌려준다(빈 규칙 자동 제외). 규칙이 하나도 없으면 conditional 없이 저장(기본식만).
   const validateDraftConditional = useCallback((): { ok: true; conditional?: FieldDef["conditional"] } | { ok: false; msg: string } => {
     if (!draftConditional) return { ok: true };
-    const fk = draftConditional.conditionFieldKey.trim();
-    if (!fk) return { ok: false, msg: "조건의 기준 필드를 고르세요." };
-    const cleaned: Array<{ whenValue: string; formula: FormulaTerm[] }> = [];
+    const cleaned: ConditionalRule[] = [];
     for (const r of draftConditional.rules) {
-      const when = (r.whenValue ?? "").trim();
       const terms = parseFormulaTerms(r.formula);
-      const hasWhen = when !== "";
+      const hasLeft = !!r.leftKey;
+      const hasRight = r.right.kind === "field" ? !!r.right.key : r.right.value.trim() !== "";
       const hasTerms = terms.length > 0;
-      if (!hasWhen && !hasTerms) continue; // 완전 빈 규칙은 건너뜀
-      if (!hasWhen) return { ok: false, msg: "기준 값이 비어 있는 규칙이 있습니다." };
-      if (!hasTerms) return { ok: false, msg: `"${when}" 규칙의 계산 항목을 한 개 이상 추가하세요.` };
+      if (!hasLeft && !hasRight && !hasTerms) continue; // 완전 빈 규칙 건너뜀
+      if (!hasLeft) return { ok: false, msg: "조건의 기준 칸을 고르세요." };
+      if (!hasRight) return { ok: false, msg: "조건의 비교 값(글자 또는 다른 칸)을 채우세요." };
+      if (!hasTerms) return { ok: false, msg: "조건이 맞을 때 쓸 계산 항목을 한 개 이상 추가하세요." };
       for (const t of terms) {
         if (t.unit === "column") {
           const ref = fields.find((f) => f.key === t.columnKey);
-          if (!ref) return { ok: false, msg: `"${when}" 규칙에 컬럼을 아직 고르지 않은 항목이 있습니다.` };
-          if (!isNumericFieldType(ref.type)) return { ok: false, msg: `"${when}" 규칙에 글자·날짜 컬럼은 쓸 수 없습니다.` };
+          if (!ref) return { ok: false, msg: "조건 식에 컬럼을 아직 고르지 않은 항목이 있습니다." };
+          if (!isNumericFieldType(ref.type)) return { ok: false, msg: "조건 식에 글자·날짜 컬럼은 쓸 수 없습니다." };
         }
       }
-      cleaned.push({ whenValue: when, formula: terms });
+      cleaned.push({ leftKey: r.leftKey, right: r.right, formula: terms });
     }
     if (cleaned.length === 0) return { ok: true }; // 켰지만 규칙 없음 → 기본식만(conditional 없이)
-    return { ok: true, conditional: { conditionFieldKey: fk, rules: cleaned } };
+    return { ok: true, conditional: { rules: cleaned } };
   }, [draftConditional, fields]);
 
   // 모달 confirm 처리
@@ -1944,8 +1962,16 @@ export default function SettlementInfoTab({
 
                   {formulaError && <p className="text-[11px] text-wedly-red px-1">{formulaError}</p>}
 
-                  {/* ── 값에 따라 다른 식(조건별 수식) — conditionFieldOptions 주입된 앱(ERP)에서만 ── */}
-                  {conditionFieldOptions && conditionFieldOptions.length > 0 && (
+                  {/* ── 값에 따라 다른 식(조건별 수식) — ERP(enableConditionalFormula)에서만 ── */}
+                  {enableConditionalFormula && (() => {
+                    // 비교에 고를 수 있는 칸: 정산정보 칸(this tab) + 기본정보 평면 칸(주입)
+                    const condTargets: Array<{ value: string; label: string }> = [
+                      ...fields.filter((f) => f.key !== editingFieldKey).map((f) => ({ value: f.key, label: f.label })),
+                      ...(conditionFieldOptions ?? []).map((o) => ({ value: o.key, label: o.label })),
+                    ];
+                    const firstTargetKey = condTargets[0]?.value ?? "";
+                    const newRule = () => ({ leftKey: firstTargetKey, right: { kind: "text" as const, value: "" }, formula: [] as FormulaTerm[] });
+                    return (
                     <div className="rounded-lg border border-wedly-gold/40 bg-wedly-bg-yellow/40 p-2.5 space-y-2">
                       <label className="flex items-center gap-2 cursor-pointer select-none">
                         <input
@@ -1953,70 +1979,70 @@ export default function SettlementInfoTab({
                           checked={!!draftConditional}
                           onChange={(e) => {
                             setFormulaError("");
-                            setDraftConditional(e.target.checked
-                              ? { conditionFieldKey: conditionFieldOptions[0]?.key ?? "", rules: [{ whenValue: "", formula: [] }] }
-                              : null);
+                            setDraftConditional(e.target.checked ? { rules: [newRule()] } : null);
                           }}
                           className="w-4 h-4 accent-wedly-accent"
                         />
                         <span className="text-[11px] font-bold text-wedly-orange">값에 따라 다른 식 쓰기</span>
                       </label>
-                      <p className="text-[10px] text-wedly-muted px-0.5">기준 필드 값이 규칙의 값과 같으면(여러 값을 가진 칸이면 그 중 하나라도 맞으면) 그 식으로, 어디에도 안 맞으면 위의 기본 식으로 계산합니다.</p>
+                      <p className="text-[10px] text-wedly-muted px-0.5">조건마다 기준 칸을 고르고, 그 값이 “다른 칸 값” 또는 “직접 입력한 글자”와 같으면 그 식으로, 어디에도 안 맞으면 위의 기본 식으로 계산합니다. 위에서부터 먼저 맞는 조건이 적용됩니다.</p>
 
                       {draftConditional && (
                         <div className="space-y-2.5">
-                          <label className="block">
-                            <span className="text-[10px] font-semibold text-wedly-t2">기준 필드</span>
-                            <div className="mt-1">
-                              <CustomSelect
-                                size="sm"
-                                value={draftConditional.conditionFieldKey}
-                                onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, conditionFieldKey: v } : prev)}
-                                placeholder="기준 필드 선택"
-                                options={conditionFieldOptions.map((o) => ({ value: o.key, label: o.label }))}
-                              />
-                            </div>
-                          </label>
-
                           {draftConditional.rules.map((rule, ri) => (
                             <div key={ri} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-2">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] font-semibold text-wedly-t2 flex-shrink-0">이 값일 때</span>
-                                <input
-                                  type="text"
-                                  value={rule.whenValue}
-                                  onChange={(e) => {
-                                    setFormulaError("");
-                                    const val = e.target.value;
-                                    setDraftConditional((prev) => prev
-                                      ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, whenValue: val } : r) }
-                                      : prev);
-                                  }}
-                                  placeholder="예: 하이브"
-                                  className="flex-1 min-w-0 px-2.5 py-1.5 text-[16px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors"
-                                />
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-[10px] font-semibold text-wedly-t2 flex-shrink-0">만약</span>
+                                <div className="min-w-[110px] flex-1">
+                                  <CustomSelect
+                                    size="sm"
+                                    value={rule.leftKey}
+                                    onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, leftKey: v } : r) } : prev)}
+                                    placeholder="기준 칸"
+                                    options={condTargets}
+                                  />
+                                </div>
+                                <span className="text-[10px] text-wedly-muted flex-shrink-0">이(가)</span>
+                                <div className="w-[84px] flex-shrink-0">
+                                  <CustomSelect
+                                    size="sm"
+                                    value={rule.right.kind}
+                                    onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: v === "field" ? { kind: "field", key: firstTargetKey } : { kind: "text", value: "" } } : r) } : prev)}
+                                    options={[{ value: "text", label: "직접 입력" }, { value: "field", label: "다른 칸" }]}
+                                  />
+                                </div>
+                                {rule.right.kind === "field" ? (
+                                  <div className="min-w-[110px] flex-1">
+                                    <CustomSelect
+                                      size="sm"
+                                      value={rule.right.key}
+                                      onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: { kind: "field", key: v } } : r) } : prev)}
+                                      placeholder="비교할 칸"
+                                      options={condTargets}
+                                    />
+                                  </div>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={rule.right.value}
+                                    onChange={(e) => { setFormulaError(""); const val = e.target.value; setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: { kind: "text", value: val } } : r) } : prev); }}
+                                    placeholder="예: 하이브"
+                                    className="flex-1 min-w-[90px] px-2.5 py-1.5 text-[16px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors"
+                                  />
+                                )}
+                                <span className="text-[10px] text-wedly-muted flex-shrink-0">와 같으면</span>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setFormulaError("");
-                                    setDraftConditional((prev) => prev
-                                      ? { ...prev, rules: prev.rules.filter((_, i) => i !== ri) }
-                                      : prev);
-                                  }}
+                                  onClick={() => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.filter((_, i) => i !== ri) } : prev); }}
                                   className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
-                                  title="이 규칙 삭제"
+                                  title="이 조건 삭제"
                                 >
                                   ✕
                                 </button>
                               </div>
                               <FormulaTermsEditor
                                 terms={rule.formula}
-                                onChange={(next) => {
-                                  setFormulaError("");
-                                  setDraftConditional((prev) => prev
-                                    ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, formula: next } : r) }
-                                    : prev);
-                                }}
+                                onChange={(next) => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, formula: next } : r) } : prev); }}
                                 fields={fields}
                                 editingFieldKey={editingFieldKey}
                                 columnOptions={formulaColumnOptions}
@@ -2024,23 +2050,18 @@ export default function SettlementInfoTab({
                               />
                             </div>
                           ))}
-
                           <button
                             type="button"
-                            onClick={() => {
-                              setFormulaError("");
-                              setDraftConditional((prev) => prev
-                                ? { ...prev, rules: [...prev.rules, { whenValue: "", formula: [] }] }
-                                : prev);
-                            }}
+                            onClick={() => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: [...prev.rules, newRule()] } : prev); }}
                             className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-gold/50 text-[11px] font-bold text-wedly-orange hover:bg-wedly-bg-yellow transition-colors"
                           >
-                            + 규칙 추가
+                            + 조건 추가
                           </button>
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -2060,7 +2081,7 @@ export default function SettlementInfoTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setPendingDeleteCardId(null)} />
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 flex items-start gap-3">
-                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-red flex items-center justify-center">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red">
                     <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                   </svg>
@@ -2094,7 +2115,7 @@ export default function SettlementInfoTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setPendingDeleteFieldKey(null)} />
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 flex items-start gap-3">
-                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-red flex items-center justify-center">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red">
                     <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                   </svg>
