@@ -186,7 +186,12 @@ export default function SettlementInfoTab({
   addButtonSuffixOverride?: string;
   // 조건별 수식의 "기준 필드" 후보 (기본정보 평면 필드). ERP만 주입 → 주입될 때만 조건 UI 노출.
   //   미주입(파트너 앱)이면 조건 UI 자체가 안 보이고 기존과 100% 동일.
-  conditionFieldOptions?: Array<{ key: string; label: string }>;
+  conditionFieldOptions?: Array<{
+    key: string;
+    label: string;
+    /** 이 칸에 설정된 선택지 목록(+색). 있으면 "직접 입력" 자리를 드롭다운으로. 없으면 자유 입력. */
+    options?: Array<{ value: string; badgeClass?: string }>;
+  }>;
   /** 조건별 수식 UI 표시 게이트 — ERP만 true. (기본정보 후보가 비어도 정산 칸만으로 조건 작성 가능하게 분리) */
   enableConditionalFormula?: boolean;
 }) {
@@ -2063,6 +2068,19 @@ export default function SettlementInfoTab({
                     ];
                     const firstTargetKey = condTargets[0]?.value ?? "";
                     const newRule = () => ({ leftKey: firstTargetKey, right: { kind: "text" as const, value: "" }, formula: [] as FormulaTerm[] });
+                    // 기준 칸(leftKey)의 설정 선택지 찾기: 정산 select 칸(this tab) 우선, 없으면 기본정보 주입 칸.
+                    //   선택지가 있으면 "직접 입력" 자리를 드롭다운(색 배지)으로, 없으면 자유 입력 유지.
+                    const optionsForKey = (key: string): Array<{ value: string; badgeClass?: string }> => {
+                      const f = fields.find((x) => x.key === key);
+                      if (f && f.type === "select" && Array.isArray(f.options) && f.options.length > 0) {
+                        return f.options.map((v) => ({
+                          value: v,
+                          badgeClass: f.optionColors?.[v] ? `${f.optionColors[v].bg} ${f.optionColors[v].text}` : undefined,
+                        }));
+                      }
+                      const cf = (conditionFieldOptions ?? []).find((x) => x.key === key);
+                      return cf?.options ?? [];
+                    };
                     return (
                     <div className="rounded-lg border border-wedly-gold/40 bg-wedly-bg-yellow/40 p-2.5 space-y-2">
                       <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -2113,15 +2131,34 @@ export default function SettlementInfoTab({
                                       options={condTargets}
                                     />
                                   </div>
-                                ) : (
-                                  <input
-                                    type="text"
-                                    value={rule.right.value}
-                                    onChange={(e) => { setFormulaError(""); const val = e.target.value; setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: { kind: "text", value: val } } : r) } : prev); }}
-                                    placeholder="예: 하이브"
-                                    className="flex-1 min-w-[90px] px-2.5 py-1.5 text-[16px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors"
-                                  />
-                                )}
+                                ) : (() => {
+                                  const opts = optionsForKey(rule.leftKey);
+                                  const cur = rule.right.kind === "text" ? rule.right.value : "";
+                                  if (opts.length === 0) {
+                                    return (
+                                      <input
+                                        type="text"
+                                        value={rule.right.kind === "text" ? rule.right.value : ""}
+                                        onChange={(e) => { setFormulaError(""); const val = e.target.value; setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: { kind: "text", value: val } } : r) } : prev); }}
+                                        placeholder="예: 하이브"
+                                        className="flex-1 min-w-[90px] px-2.5 py-1.5 text-[16px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors"
+                                      />
+                                    );
+                                  }
+                                  // 기존에 적어둔 값이 목록에 없으면 보존(맨 위에 끼움) — 사라지지 않게.
+                                  const merged = cur && !opts.some((o) => o.value === cur) ? [{ value: cur }, ...opts] : opts;
+                                  return (
+                                    <div className="flex-1 min-w-[110px]">
+                                      <CustomSelect
+                                        size="sm"
+                                        value={cur}
+                                        onChange={(v) => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: { kind: "text", value: v } } : r) } : prev); }}
+                                        placeholder="값 선택"
+                                        options={merged.map((o) => ({ value: o.value, label: o.value, badgeClass: o.badgeClass }))}
+                                      />
+                                    </div>
+                                  );
+                                })()}
                                 <span className="text-[10px] text-wedly-muted flex-shrink-0">와 같으면</span>
                                 <button
                                   type="button"
