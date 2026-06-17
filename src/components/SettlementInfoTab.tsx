@@ -738,7 +738,7 @@ export default function SettlementInfoTab({
         columnScopeMode === "partner-custom" ? "custom"
         : columnScopeMode === "erp" ? draftScope
         : undefined;
-      if (newScope) (newField as Record<string, unknown>).scope = newScope;
+      if (newScope) (newField as unknown as Record<string, unknown>).scope = newScope;
       const key = newField.key;
       const next = [...fields, newField];
       setFields(next);
@@ -776,18 +776,18 @@ export default function SettlementInfoTab({
         if (newType === "formula") {
           const nf: FieldDef = { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
           if (formulaConditional) nf.conditional = formulaConditional;
-          if (keepScope) (nf as Record<string, unknown>).scope = keepScope;
+          if (keepScope) (nf as unknown as Record<string, unknown>).scope = keepScope;
           return nf;
         }
         // select 로 바꾸면 보기 목록을 싣는다 (범위 scope 는 유지)
         if (newType === "select") {
           const sel = { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
-          if (keepScope) (sel as Record<string, unknown>).scope = keepScope;
+          if (keepScope) (sel as unknown as Record<string, unknown>).scope = keepScope;
           return sel;
         }
         // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거 (범위 scope 는 유지)
         const convField: FieldDef = { key: f.key, label: f.label, type: newType };
-        if (keepScope) (convField as Record<string, unknown>).scope = keepScope;
+        if (keepScope) (convField as unknown as Record<string, unknown>).scope = keepScope;
         return convField;
       });
       setFields(next);
