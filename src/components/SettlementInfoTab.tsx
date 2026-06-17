@@ -124,6 +124,10 @@ export default function SettlementInfoTab({
   //   본부(ERP)만 true 로 켠다. 파트너 앱(하이브·일루아)은 값 입력만 하고, 구조는 ERP 에서만 바꾼다.
   //   기본이 false 라서 파트너 앱이 실수로 isAdmin=true 를 넘겨도 구조 편집 버튼은 안 나온다(안전장치).
   allowStructureEdit = false,
+  // 칸(컬럼) 목록 편집만 허용 — 세부섹션/차수접미사(allowStructureEdit)와 분리. 미지정 시 allowStructureEdit 폴백.
+  allowColumnEdit,
+  // 칸 범위 모드: off(현행·토글없음) | erp(공통/커스텀 선택) | partner-custom(커스텀고정·공통잠금)
+  columnScopeMode = "off",
   // ── 영역 분리 prop (A-1 모듈화) ──
   // 정산정보 외 계약·환불 같은 다른 영역에서도 같은 차수 카드 부품 재사용 가능
   // 기본값은 정산 — 기존 호출 호환
@@ -157,6 +161,10 @@ export default function SettlementInfoTab({
   hideSummaryCards?: boolean;
   // 구조(차수 카드·컬럼) 편집 허용 — 본부(ERP) 전용. 미지정 시 false (파트너 앱 = 값 입력만).
   allowStructureEdit?: boolean;
+  // 칸 목록 편집 게이트(세부섹션·차수접미사와 분리). 미지정 시 allowStructureEdit 폴백.
+  allowColumnEdit?: boolean;
+  // 칸 범위 모드(공통/커스텀). 기본 off = 현행 동작.
+  columnScopeMode?: "off" | "erp" | "partner-custom";
   storagePrefix?: string;
   fieldsApiPath?: string;
   sectionTitle?: string;
@@ -280,7 +288,9 @@ export default function SettlementInfoTab({
   void sectionTitleSafe;
   // 구조 편집(전체 합계 카드 '편집' 버튼)은 본부(ERP)에서만 — allowStructureEdit 가 명시적으로 켜져야 한다.
   // (기본 꺼짐 → 파트너 앱은 isAdmin 이 참이어도 값 입력만 가능.)
-  const canEditColumns = !readOnly && isAdmin && allowStructureEdit;
+  const canEditColumns = !readOnly && isAdmin && (allowColumnEdit ?? allowStructureEdit);
+  // 세부섹션·차수접미사 등 "무거운 구조" 편집 — 본부(ERP)만(allowStructureEdit).
+  const canEditStructure = !readOnly && isAdmin && allowStructureEdit;
   // ⚠️ 마운트 시 초기값을 빈 배열로 — 서버 fetch 응답 전까지 옛 기본 컬럼이 잠깐 보이는
   // 깜빡임 방지. 서버 응답이 진실의 원천.
   const [fields, setFields] = useState<FieldDef[]>([]);
@@ -615,6 +625,8 @@ export default function SettlementInfoTab({
   >(null);
   const [draftLabel, setDraftLabel] = useState("");
   const [draftType, setDraftType] = useState<FieldType>("text");
+  // 새 칸 범위(공통/커스텀) — erp 모드 추가창에서만 사용.
+  const [draftScope, setDraftScope] = useState<"common" | "custom">("common");
   // 수식 컬럼 편집용 — 항(term)들과 결과 표시 형식, 검증 오류 메시지
   const [draftFormula, setDraftFormula] = useState<FormulaTerm[]>([]);
   const [draftFormulaResult, setDraftFormulaResult] = useState<FormulaResultFormat>("number");
@@ -634,6 +646,7 @@ export default function SettlementInfoTab({
     setDraftOptions([]);
     setFormulaError("");
     setDraftConditional(null);
+    setDraftScope("common");
     setFieldEditModal({ mode: "add" });
   }, []);
   const openRenameField = useCallback((key: string) => {
@@ -720,6 +733,12 @@ export default function SettlementInfoTab({
       } else {
         newField = { key: generateFieldKey(label, fields), label, type: draftType };
       }
+      // 칸 범위(scope) 부여 — 서버가 공통/커스텀 저장소를 가른다. off 모드는 scope 없음(현행).
+      const newScope =
+        columnScopeMode === "partner-custom" ? "custom"
+        : columnScopeMode === "erp" ? draftScope
+        : undefined;
+      if (newScope) (newField as Record<string, unknown>).scope = newScope;
       const key = newField.key;
       const next = [...fields, newField];
       setFields(next);
@@ -753,17 +772,23 @@ export default function SettlementInfoTab({
       }
       const next = fields.map((f) => {
         if (f.key !== key) return f;
+        const keepScope = (f as { scope?: "common" | "custom" }).scope;
         if (newType === "formula") {
           const nf: FieldDef = { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
           if (formulaConditional) nf.conditional = formulaConditional;
+          if (keepScope) (nf as Record<string, unknown>).scope = keepScope;
           return nf;
         }
-        // select 로 바꾸면 보기 목록을 싣는다
+        // select 로 바꾸면 보기 목록을 싣는다 (범위 scope 는 유지)
         if (newType === "select") {
-          return { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
+          const sel = { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
+          if (keepScope) (sel as Record<string, unknown>).scope = keepScope;
+          return sel;
         }
-        // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거
-        return { key: f.key, label: f.label, type: newType };
+        // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거 (범위 scope 는 유지)
+        const convField: FieldDef = { key: f.key, label: f.label, type: newType };
+        if (keepScope) (convField as Record<string, unknown>).scope = keepScope;
+        return convField;
       });
       setFields(next);
       persistFields(next);
@@ -785,7 +810,7 @@ export default function SettlementInfoTab({
       });
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
@@ -1068,7 +1093,7 @@ export default function SettlementInfoTab({
             <span className="text-[10px] text-wedly-muted">탭을 눌러 영역별 합계와 차수를 봅니다</span>
             {/* 어드민 — "세부 섹션 편집" 토글. 켜면 활성 탭에 ⋮ 등장.
                 디자인 통일: 히스토리/상세정보 "탭 편집" 과 같은 작은 테두리 버튼 + 연필 아이콘. */}
-            {canEditColumns && onUpdateSubSections && (
+            {canEditStructure && onUpdateSubSections && (
               <button
                 type="button"
                 onClick={() => setEditSubMode((v) => !v)}
@@ -1103,7 +1128,7 @@ export default function SettlementInfoTab({
             {subSectionsSafe.map((s) => {
               const isActive = activeSubSectionId === s.id;
               // 세부 섹션 편집(구조)도 본부(ERP) 전용 — canEditColumns(=allowStructureEdit 포함) 로 묶는다.
-              const canEditSub = canEditColumns && onUpdateSubSections;
+              const canEditSub = canEditStructure && onUpdateSubSections;
               const showDots = isActive && canEditSub && editSubMode;
               // 편집 모드에서 활성 탭 — 라벨과 ⋮ 를 한 알약 컨테이너에 넣어 모서리 끊김 방지.
               if (showDots) {
@@ -1657,9 +1682,18 @@ export default function SettlementInfoTab({
                 </span>
                 <span className="text-[13px] font-medium text-wedly-t1 flex-1 min-w-0 truncate">{f.label}</span>
                 <span className="text-[10px] uppercase font-mono text-wedly-muted bg-wedly-bg-gray px-1.5 py-0.5 rounded">{f.type}</span>
-                <button onClick={() => renameFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-accent hover:bg-wedly-bg-blue">이름 변경</button>
-                <button onClick={() => changeFieldType(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-purple hover:bg-wedly-bg-purple">타입</button>
-                <button onClick={() => removeFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-red hover:bg-wedly-bg-red">삭제</button>
+                {columnScopeMode !== "off" && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded text-wedly-muted bg-wedly-bg-gray">
+                    {(f as { scope?: string }).scope === "custom" ? "커스텀" : "공통"}
+                  </span>
+                )}
+                {(columnScopeMode !== "partner-custom" || (f as { scope?: string }).scope === "custom") && (
+                  <>
+                    <button onClick={() => renameFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-accent hover:bg-wedly-bg-blue">이름 변경</button>
+                    <button onClick={() => changeFieldType(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-purple hover:bg-wedly-bg-purple">타입</button>
+                    <button onClick={() => removeFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-red hover:bg-wedly-bg-red">삭제</button>
+                  </>
+                )}
               </div>
             );
           })}
@@ -1693,7 +1727,7 @@ export default function SettlementInfoTab({
             onLabelChange={(label) => updateTierLabel(idx, label)}
             onRemove={() => removeTier(idx)}
             tierSuffix={tierSuffix}
-            onTierSuffixChange={canEditColumns ? (next) => {
+            onTierSuffixChange={canEditStructure ? (next) => {
               setTierSuffix(next);
               fetch(configApiPath, {
                 method: "PUT",
@@ -1752,7 +1786,7 @@ export default function SettlementInfoTab({
                 + {ORDINAL_KO[tiers.length] || `${tiers.length + 1}차`} {addButtonSuffixOverride ?? tierSuffix} 추가
               </button>
             )}
-            {canEditColumns && onUpdateSubSections && (
+            {canEditStructure && onUpdateSubSections && (
               <button
                 type="button"
                 onClick={() => { setSubSectionDraftLabel(""); setSubSectionAddOpen(true); }}
@@ -1927,6 +1961,21 @@ export default function SettlementInfoTab({
                         { value: "select", label: "드롭다운" },
                         { value: "percent", label: "퍼센트 (%)" },
                         { value: "formula", label: "수식 (자동 계산)" },
+                      ]}
+                    />
+                  </div>
+                </label>
+              )}
+              {columnScopeMode === "erp" && fieldEditModal.mode === "add" && (
+                <label className="block">
+                  <span className="text-[11px] font-semibold text-wedly-t2">칸 범위</span>
+                  <div className="mt-1">
+                    <CustomSelect
+                      value={draftScope}
+                      onChange={(v) => setDraftScope(v as "common" | "custom")}
+                      options={[
+                        { value: "common", label: "공통 (전 앱 공유)" },
+                        { value: "custom", label: "커스텀 (이 화면만)" },
                       ]}
                     />
                   </div>
