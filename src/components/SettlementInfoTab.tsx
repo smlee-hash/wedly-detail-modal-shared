@@ -682,11 +682,8 @@ export default function SettlementInfoTab({
     const terms = parseFormulaTerms(draftFormula);
     if (terms.length === 0) return { ok: false, msg: "계산할 항목을 한 개 이상 추가하세요." };
     for (const t of terms) {
-      if (t.unit === "column") {
-        const ref = fields.find((f) => f.key === t.columnKey);
-        if (!ref) return { ok: false, msg: "컬럼을 아직 고르지 않은 항목이 있습니다." };
-        if (!isNumericFieldType(ref.type)) return { ok: false, msg: "글자·날짜 컬럼은 계산에 쓸 수 없습니다." };
-      }
+      const e = checkFormulaTermColumns(t, fields);
+      if (e) return { ok: false, msg: e };
     }
     return { ok: true, terms };
   }, [draftFormula, fields]);
@@ -706,11 +703,8 @@ export default function SettlementInfoTab({
       if (!hasRight) return { ok: false, msg: "조건의 비교 값(글자 또는 다른 칸)을 채우세요." };
       if (!hasTerms) return { ok: false, msg: "조건이 맞을 때 쓸 계산 항목을 한 개 이상 추가하세요." };
       for (const t of terms) {
-        if (t.unit === "column") {
-          const ref = fields.find((f) => f.key === t.columnKey);
-          if (!ref) return { ok: false, msg: "조건 식에 컬럼을 아직 고르지 않은 항목이 있습니다." };
-          if (!isNumericFieldType(ref.type)) return { ok: false, msg: "조건 식에 글자·날짜 컬럼은 쓸 수 없습니다." };
-        }
+        const e = checkFormulaTermColumns(t, fields);
+        if (e) return { ok: false, msg: `조건 식에 ${e}` };
       }
       cleaned.push({ leftKey: r.leftKey, right: r.right, formula: terms });
     }
@@ -2457,8 +2451,25 @@ function TierCard({
 
 // 수식 "항목(term) 묶음" 편집 UI — 기본 식과 조건 규칙별 식에서 공용으로 재사용.
 //   terms/onChange 로만 동작(부모의 어떤 배열이든 편집). 계산 자체는 ui-shared(evalFormulaForTier)가 함.
+// 한 항(묶음이면 안쪽까지 재귀) 컬럼 검증 — 컬럼 항은 계산 가능한(숫자·퍼센트·수식) 컬럼을 가리켜야 함.
+function checkFormulaTermColumns(t: FormulaTerm, fields: FieldDef[]): string | null {
+  if (t.unit === "group") {
+    for (const g of t.terms ?? []) {
+      const e = checkFormulaTermColumns(g, fields);
+      if (e) return e;
+    }
+    return null;
+  }
+  if (t.unit === "column") {
+    const ref = fields.find((f) => f.key === t.columnKey);
+    if (!ref) return "컬럼을 아직 고르지 않은 항목이 있습니다.";
+    if (!isNumericFieldType(ref.type)) return "글자·날짜 컬럼은 계산에 쓸 수 없습니다.";
+  }
+  return null;
+}
+
 function FormulaTermsEditor({
-  terms, onChange, fields, editingFieldKey, columnOptions, resultFormat,
+  terms, onChange, fields, editingFieldKey, columnOptions, resultFormat, allowGroup = true,
 }: {
   terms: FormulaTerm[];
   onChange: (next: FormulaTerm[]) => void;
@@ -2466,6 +2477,7 @@ function FormulaTermsEditor({
   editingFieldKey: string | null;
   columnOptions: { value: string; label: string }[];
   resultFormat: FormulaResultFormat;
+  allowGroup?: boolean;
 }) {
   const addTerm = () => {
     const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
@@ -2474,6 +2486,16 @@ function FormulaTermsEditor({
       : { op: "+", unit: "number", value: 0 };
     onChange([...terms, term]);
   };
+  // 묶음(괄호) 항 추가 — 안에 기본 항 1개로 시작. (한 겹: 묶음 안엔 묶음 버튼 없음)
+  const addGroup = () => {
+    const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
+    const inner: FormulaTerm = firstCol
+      ? { op: "+", unit: "column", columnKey: firstCol.key, value: 0 }
+      : { op: "+", unit: "number", value: 0 };
+    onChange([...terms, { op: "+", unit: "group", terms: [inner] }]);
+  };
+  const updateGroupTerms = (idx: number, nextInner: FormulaTerm[]) =>
+    onChange(terms.map((t, i) => (i === idx ? { ...t, terms: nextInner } : t)));
   const updateTerm = (idx: number, patch: Partial<FormulaTerm>) => {
     onChange(
       terms.map((t, i) => {
@@ -2500,6 +2522,49 @@ function FormulaTermsEditor({
           <p className="text-[11px] text-wedly-muted italic px-1">아래 &quot;+ 항목 추가&quot;로 시작하세요.</p>
         ) : (
           terms.map((t, i) => (
+            t.unit === "group" ? (
+              <div key={i} className="rounded-lg border-2 border-dashed border-wedly-accent/40 bg-wedly-bg-blue/30 p-2 space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  {i > 0 ? (
+                    <div className="w-[92px] flex-shrink-0">
+                      <CustomSelect
+                        size="sm"
+                        value={t.op}
+                        onChange={(v) => updateTerm(i, { op: v as "+" | "-" | "*" | "/" })}
+                        options={[
+                          { value: "+", label: "＋ 더하기" },
+                          { value: "-", label: "－ 빼기" },
+                          { value: "*", label: "× 곱하기" },
+                          { value: "/", label: "÷ 나누기" },
+                        ]}
+                      />
+                    </div>
+                  ) : (
+                    <span className="w-[92px] flex-shrink-0 text-[10px] text-wedly-muted px-1">시작 값</span>
+                  )}
+                  <span className="flex-1 text-[10px] font-bold text-wedly-accent px-1">묶음 (먼저 계산)</span>
+                  <button
+                    type="button"
+                    onClick={() => removeTerm(i)}
+                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                    title="이 묶음 삭제"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="pl-2">
+                  <FormulaTermsEditor
+                    terms={t.terms ?? []}
+                    onChange={(next) => updateGroupTerms(i, next)}
+                    fields={fields}
+                    editingFieldKey={editingFieldKey}
+                    columnOptions={columnOptions}
+                    resultFormat={resultFormat}
+                    allowGroup={false}
+                  />
+                </div>
+              </div>
+            ) : (
             <div key={i} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-1.5">
               <div className="flex items-center gap-1.5">
                 {i > 0 ? (
@@ -2569,6 +2634,7 @@ function FormulaTermsEditor({
                 )}
               </div>
             </div>
+            )
           ))
         )}
       </div>
@@ -2579,14 +2645,28 @@ function FormulaTermsEditor({
       >
         + 항목 추가
       </button>
-      {terms.length > 0 && (() => {
-        const text = terms.map((t, i) => {
-          let operand = "?";
-          if (t.unit === "number") operand = String(t.value ?? 0);
-          else if (t.unit === "percent") operand = `${t.value ?? 0}%`;
-          else operand = fields.find((f) => f.key === t.columnKey)?.label ?? "(컬럼)";
-          return i === 0 ? operand : `${opSym[t.op] || t.op} ${operand}`;
-        }).join(" ");
+      {allowGroup && (
+        <button
+          type="button"
+          onClick={addGroup}
+          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+        >
+          + 묶음(괄호) 추가
+        </button>
+      )}
+      {terms.length > 0 && allowGroup && (() => {
+        const operandText = (t: FormulaTerm): string => {
+          if (t.unit === "number") return String(t.value ?? 0);
+          if (t.unit === "percent") return `${t.value ?? 0}%`;
+          if (t.unit === "group") {
+            const inner = (t.terms ?? [])
+              .map((g, gi) => (gi === 0 ? operandText(g) : `${opSym[g.op] || g.op} ${operandText(g)}`))
+              .join(" ");
+            return `( ${inner} )`;
+          }
+          return fields.find((f) => f.key === t.columnKey)?.label ?? "(컬럼)";
+        };
+        const text = terms.map((t, i) => (i === 0 ? operandText(t) : `${opSym[t.op] || t.op} ${operandText(t)}`)).join(" ");
         return (
           <div className="rounded-lg bg-wedly-bg-gray px-2.5 py-2">
             <span className="text-[10px] font-semibold text-wedly-muted">미리보기: </span>
