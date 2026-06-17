@@ -20,6 +20,8 @@ export type CustomSelectOption = {
   label: string;
   /** 선택 라벨 옆에 표시되는 작은 색 점 (예: 상태 색상) */
   dotColor?: string;
+  /** 라벨을 감쌀 색 배지 클래스(예: "bg-blue-200 text-blue-800"). 있으면 점 대신 배지로 표시. */
+  badgeClass?: string;
 };
 
 export default function CustomSelect({
@@ -89,14 +91,22 @@ export default function CustomSelect({
         )}
       >
         <span className={cn("flex-1 truncate flex items-center gap-1.5", isEmpty && "text-wedly-muted")}>
-          {selected?.dotColor && (
-            <span
-              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
-              style={{ backgroundColor: selected.dotColor }}
-              aria-hidden="true"
-            />
+          {selected?.badgeClass ? (
+            <span className={cn("inline-block px-2 py-0.5 rounded-md text-[11px] font-medium truncate", selected.badgeClass)}>
+              {selected.label}
+            </span>
+          ) : (
+            <>
+              {selected?.dotColor && (
+                <span
+                  className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: selected.dotColor }}
+                  aria-hidden="true"
+                />
+              )}
+              {selected?.label || placeholder}
+            </>
           )}
-          {selected?.label || placeholder}
         </span>
         <svg
           width="12" height="12" viewBox="0 0 12 12" fill="none"
@@ -136,14 +146,24 @@ export default function CustomSelect({
                       : "text-wedly-t2 hover:bg-wedly-bg-gray",
                   )}
                 >
-                  {opt.dotColor && (
-                    <span
-                      className="inline-block w-2 h-2 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: opt.dotColor }}
-                      aria-hidden="true"
-                    />
+                  {opt.badgeClass ? (
+                    <span className="flex-1 truncate flex items-center">
+                      <span className={cn("inline-block px-2 py-0.5 rounded-md text-[11px] font-medium truncate", opt.badgeClass)}>
+                        {opt.label}
+                      </span>
+                    </span>
+                  ) : (
+                    <>
+                      {opt.dotColor && (
+                        <span
+                          className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: opt.dotColor }}
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span className="flex-1 truncate">{opt.label}</span>
+                    </>
                   )}
-                  <span className="flex-1 truncate">{opt.label}</span>
                   {isSelected && (
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="flex-shrink-0">
                       <path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
