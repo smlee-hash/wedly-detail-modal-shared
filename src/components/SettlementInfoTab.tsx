@@ -2073,10 +2073,9 @@ export default function SettlementInfoTab({
                     const optionsForKey = (key: string): Array<{ value: string; badgeClass?: string }> => {
                       const f = fields.find((x) => x.key === key);
                       if (f && f.type === "select" && Array.isArray(f.options) && f.options.length > 0) {
-                        return f.options.map((v) => ({
-                          value: v,
-                          badgeClass: f.optionColors?.[v] ? `${f.optionColors[v].bg} ${f.optionColors[v].text}` : undefined,
-                        }));
+                        // 정산 select 칸: 값만 제공(평문). optionColors 는 셀에서 인라인 style 로 쓰는 CSS 색상값({bg,text})이라
+                        //   className 인 badgeClass 와 형식이 달라 색을 입히지 않는다(현재 정산 select 엔 optionColors 설정 경로도 없음).
+                        return f.options.map((v) => ({ value: v }));
                       }
                       const cf = (conditionFieldOptions ?? []).find((x) => x.key === key);
                       return cf?.options ?? [];
