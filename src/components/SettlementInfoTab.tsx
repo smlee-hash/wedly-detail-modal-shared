@@ -855,6 +855,28 @@ export default function SettlementInfoTab({
     setPendingDeleteFieldKey(null);
   }, [pendingDeleteFieldKey, fields, persistFields, persist]);
 
+  // ── 칸 범위(공통↔커스텀) 변경 — 삭제 후 재생성 없이 그 자리에서 토글(ERP 편집기 전용) ──
+  // 저장 시 서버가 공통/커스텀 보관함을 다시 가르므로 칸이 알맞은 보관함으로 옮겨진다. 입력값은 그대로 유지.
+  const [pendingScopeToggleKey, setPendingScopeToggleKey] = useState<string | null>(null);
+  const changeFieldScope = useCallback((key: string) => {
+    setPendingScopeToggleKey(key);
+  }, []);
+  const confirmScopeToggle = useCallback(() => {
+    const key = pendingScopeToggleKey;
+    if (!key) return;
+    const next = fields.map((f) => {
+      if (f.key !== key) return f;
+      const cur = (f as { scope?: string }).scope === "custom" ? "custom" : "common";
+      const nextScope = cur === "custom" ? "common" : "custom";
+      const nf = { ...f } as FieldDef;
+      (nf as unknown as Record<string, unknown>).scope = nextScope;
+      return nf;
+    });
+    setFields(next);
+    persistFields(next);
+    setPendingScopeToggleKey(null);
+  }, [pendingScopeToggleKey, fields, persistFields]);
+
   // ── 드래그 앤 드롭으로 컬럼 순서 변경 ──
   const moveField = useCallback((fromIdx: number, toIdx: number) => {
     if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= fields.length || toIdx >= fields.length) return;
@@ -1690,6 +1712,9 @@ export default function SettlementInfoTab({
                   <>
                     <button onClick={() => renameFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-accent hover:bg-wedly-bg-blue">이름 변경</button>
                     <button onClick={() => changeFieldType(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-purple hover:bg-wedly-bg-purple">타입</button>
+                    {columnScopeMode === "erp" && (
+                      <button onClick={() => changeFieldScope(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-green hover:bg-wedly-bg-green">범위</button>
+                    )}
                     <button onClick={() => removeFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-red hover:bg-wedly-bg-red">삭제</button>
                   </>
                 )}
@@ -2267,6 +2292,46 @@ export default function SettlementInfoTab({
               <div className="px-5 py-3 bg-wedly-bg-gray/50 border-t border-wedly-bd/60 flex items-center justify-end gap-2">
                 <button onClick={() => setPendingDeleteFieldKey(null)} className="px-4 py-2 text-[13px] font-medium text-wedly-t2 bg-white border border-wedly-bd rounded-lg hover:bg-wedly-bg-gray transition-colors">취소</button>
                 <button onClick={confirmDeleteField} className="px-4 py-2 text-[13px] font-bold text-white bg-wedly-red rounded-lg hover:brightness-110 transition-colors">삭제</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 칸 범위(공통↔커스텀) 변경 확인창 — ERP 편집기 전용 */}
+      {pendingScopeToggleKey && (() => {
+        const target = fields.find((f) => f.key === pendingScopeToggleKey);
+        const cur = (target as { scope?: string } | undefined)?.scope === "custom" ? "custom" : "common";
+        const toCustom = cur === "common"; // 공통 → 커스텀 으로 바뀌는 방향
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setPendingScopeToggleKey(null)} />
+            <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
+              <div className="px-5 pt-5 pb-3 flex items-start gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-green flex items-center justify-center">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-green">
+                    <path d="M3 12h18M3 6h18M3 18h18" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[15px] font-bold text-wedly-navy">칸 범위 변경</h3>
+                  <p className="mt-1 text-[12px] text-wedly-muted truncate">{target?.label || pendingScopeToggleKey}</p>
+                </div>
+              </div>
+              <div className="px-5 pb-4">
+                <p className="text-[13px] text-wedly-t2 leading-relaxed">
+                  이 칸을 <b className="text-wedly-t1">{toCustom ? "커스텀 (이 화면만)" : "공통 (전 앱 공유)"}</b> 으로 바꿀까요?
+                  <br />
+                  <span className="text-wedly-muted">
+                    {toCustom
+                      ? "이 화면에서만 보이게 됩니다(다른 화면·앱과 공유 해제). 입력값은 그대로 유지됩니다."
+                      : "여러 화면·앱이 함께 쓰는 공통 칸이 됩니다. 입력값은 그대로 유지됩니다."}
+                  </span>
+                </p>
+              </div>
+              <div className="px-5 py-3 bg-wedly-bg-gray/50 border-t border-wedly-bd/60 flex items-center justify-end gap-2">
+                <button onClick={() => setPendingScopeToggleKey(null)} className="px-4 py-2 text-[13px] font-medium text-wedly-t2 bg-white border border-wedly-bd rounded-lg hover:bg-wedly-bg-gray transition-colors">취소</button>
+                <button onClick={confirmScopeToggle} className="px-4 py-2 text-[13px] font-bold text-white bg-wedly-accent rounded-lg hover:brightness-110 transition-colors">바꾸기</button>
               </div>
             </div>
           </div>
