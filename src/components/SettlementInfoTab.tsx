@@ -17,6 +17,7 @@ import {
   type FormulaResultFormat,
   type ConditionalRule,
   type ConditionCompare,
+  type ConditionOp,
   SCORECARD_COLOR_CLASSES,
   ORDINAL_KO,
   makeEmptyTier,
@@ -38,11 +39,12 @@ type RowData = Record<string, string | number | boolean | null>;
 // 저장된 conditional(새/옛 형식) → 편집 초안. 없으면 null. (옛 conditionFieldKey/whenValue 흡수)
 function loadConditionalDraft(
   cond: FieldDef["conditional"],
-): { rules: Array<{ leftKey: string; right: ConditionCompare; formula: FormulaTerm[] }> } | null {
+): { rules: Array<{ leftKey: string; right: ConditionCompare; op: ConditionOp; formula: FormulaTerm[] }> } | null {
   if (!cond || !Array.isArray(cond.rules) || cond.rules.length === 0) return null;
   const rules = cond.rules.map((r) => ({
     leftKey: r.leftKey ?? cond.conditionFieldKey ?? "",
     right: r.right ?? { kind: "text" as const, value: r.whenValue ?? "" },
+    op: (r.op ?? "eq") as ConditionOp,
     formula: parseFormulaTerms(r.formula),
   }));
   return { rules };
@@ -641,7 +643,7 @@ export default function SettlementInfoTab({
   // 조건별 수식 편집 상태. null = 조건 안 씀(기본 식만). 객체면 "값에 따라 다른 식" 켠 상태.
   //   rules: 규칙별 기준 칸(leftKey) + 비교 대상(right: 글자/다른 칸) + 식.
   const [draftConditional, setDraftConditional] = useState<
-    { rules: Array<{ leftKey: string; right: ConditionCompare; formula: FormulaTerm[] }> } | null
+    { rules: Array<{ leftKey: string; right: ConditionCompare; op: ConditionOp; formula: FormulaTerm[] }> } | null
   >(null);
 
   const openAddField = useCallback(() => {
@@ -707,7 +709,7 @@ export default function SettlementInfoTab({
         const e = checkFormulaTermColumns(t, fields);
         if (e) return { ok: false, msg: `조건 식에 ${e}` };
       }
-      cleaned.push({ leftKey: r.leftKey, right: r.right, formula: terms });
+      cleaned.push({ leftKey: r.leftKey, right: r.right, op: r.op, formula: terms });
     }
     if (cleaned.length === 0) return { ok: true }; // 켰지만 규칙 없음 → 기본식만(conditional 없이)
     return { ok: true, conditional: { rules: cleaned } };
@@ -2087,7 +2089,7 @@ export default function SettlementInfoTab({
                       ...(conditionFieldOptions ?? []).map((o) => ({ value: o.key, label: o.label })),
                     ];
                     const firstTargetKey = condTargets[0]?.value ?? "";
-                    const newRule = () => ({ leftKey: firstTargetKey, right: { kind: "text" as const, value: "" }, formula: [] as FormulaTerm[] });
+                    const newRule = () => ({ leftKey: firstTargetKey, right: { kind: "text" as const, value: "" }, op: "eq" as ConditionOp, formula: [] as FormulaTerm[] });
                     // 기준 칸(leftKey)의 설정 선택지 찾기: 정산 select 칸(this tab) 우선, 없으면 기본정보 주입 칸.
                     //   선택지가 있으면 "직접 입력" 자리를 드롭다운(색 배지)으로, 없으면 자유 입력 유지.
                     const optionsForKey = (key: string): Array<{ value: string; badgeClass?: string }> => {
@@ -2114,7 +2116,7 @@ export default function SettlementInfoTab({
                         />
                         <span className="text-[11px] font-bold text-wedly-orange">값에 따라 다른 식 쓰기</span>
                       </label>
-                      <p className="text-[10px] text-wedly-muted px-0.5">조건마다 기준 칸을 고르고, 그 값이 “다른 칸 값” 또는 “직접 입력한 글자”와 같으면 그 식으로, 어디에도 안 맞으면 위의 기본 식으로 계산합니다. 위에서부터 먼저 맞는 조건이 적용됩니다.</p>
+                      <p className="text-[10px] text-wedly-muted px-0.5">조건마다 기준 칸을 고르고, 그 값이 “다른 칸 값” 또는 “직접 입력한 글자”와 같음/다름/포함/미포함 중 고른 조건에 맞으면 그 식으로, 어디에도 안 맞으면 위의 기본 식으로 계산합니다. 위에서부터 먼저 맞는 조건이 적용됩니다.</p>
 
                       {draftConditional && (
                         <div className="space-y-2.5">
@@ -2178,7 +2180,19 @@ export default function SettlementInfoTab({
                                     </div>
                                   );
                                 })()}
-                                <span className="text-[10px] text-wedly-muted flex-shrink-0">와 같으면</span>
+                                <div className="w-[116px] flex-shrink-0">
+                                  <CustomSelect
+                                    size="sm"
+                                    value={rule.op}
+                                    onChange={(v) => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, op: v as ConditionOp } : r) } : prev); }}
+                                    options={[
+                                      { value: "eq", label: "와 같으면" },
+                                      { value: "neq", label: "와 다르면" },
+                                      { value: "contains", label: "를 포함하면" },
+                                      { value: "notContains", label: "를 포함 안 하면" },
+                                    ]}
+                                  />
+                                </div>
                                 <button
                                   type="button"
                                   onClick={() => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.filter((_, i) => i !== ri) } : prev); }}
