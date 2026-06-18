@@ -14,6 +14,12 @@
 import { useState, useRef, useEffect } from "react";
 import { cn } from "../lib/cn";
 import { isFileDrag } from "../lib/files-drag";
+import {
+  formatFileSize,
+  partitionFilesBySize,
+  oversizeMessage,
+  DEFAULT_MAX_UPLOAD_BYTES,
+} from "../lib/file-size";
 
 // 파일 한 건의 메타. 모든 필드 선택 — 앱별 로컬 타입과 구조 호환.
 export interface FileMeta {
@@ -24,6 +30,8 @@ export interface FileMeta {
   // ERP에서 업로드한 파일은 url 필드로 직접 링크 (proxy 미사용)
   url?: string;
   category?: string;
+  // 업로드 시 기록한 파일 용량(바이트). 과거 파일엔 없을 수 있음(표시 생략).
+  size?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +109,7 @@ export function FilesTab({
   proxyApiBase = "/api/files/proxy",
   downloadApiPath,
   onOpenFile,
+  maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES,
 }: {
   files: FileMeta[];
   pageId: string;
@@ -122,6 +131,8 @@ export function FilesTab({
   // 주어지면 파일 열기 클릭을 가로채 이 함수로 처리(노션 임시 링크 만료 자동 갱신 등).
   // 없으면 a 태그가 평범하게 새 탭으로 연다.
   onOpenFile?: (args: { href: string; entryId: string; fileName: string; category?: string }) => void;
+  // 업로드 최대 용량(바이트). 기본 100MB — 앱 서버 한도와 일치. 올리기 전 화면에서 즉시 검사.
+  maxUploadBytes?: number;
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -171,19 +182,25 @@ export function FilesTab({
       setError("저장된 항목에만 파일을 업로드할 수 있습니다 (먼저 등록 후 시도)");
       return;
     }
-    setError(null);
+    // 올리기 전 즉시 용량 검사 — 초과분은 서버로 보내지 않고 바로 안내(느린 실패 방지).
+    const { accepted, rejected } = partitionFilesBySize(Array.from(fileList), maxUploadBytes);
+    setError(rejected.length > 0 ? oversizeMessage(rejected, maxUploadBytes) : null);
+    if (accepted.length === 0) {
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
     setUploading(true);
     let totalSkipped = 0;
     try {
       const next: FileMeta[] = [...files];
-      for (const file of Array.from(fileList)) {
+      for (const file of accepted) {
         const fd = new FormData();
         fd.append("file", file);
         const res = await fetch(uploadApiPath, { method: "POST", body: fd });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || `${file.name} 업로드 실패`);
         // ZIP 자동 해제 — 압축 안의 여러 파일이면 각각 추가 (단일 파일 응답이면 data 하나)
-        const uploaded: Array<{ id: string; fileName: string; url: string; mimeType?: string }> =
+        const uploaded: Array<{ id: string; fileName: string; url: string; mimeType?: string; size?: number }> =
           Array.isArray(json.files) ? json.files : (json.data ? [json.data] : []);
         if (typeof json.skipped === "number") totalSkipped += json.skipped;
         for (const u of uploaded) {
@@ -196,6 +213,7 @@ export function FilesTab({
             url: u.url,
             contentType: u.mimeType,
             category,
+            size: u.size,
           });
         }
       }
@@ -298,7 +316,7 @@ export function FilesTab({
             </>
           )}
         </button>
-        <span className="text-[11px] text-wedly-muted">최대 50MB · 여러 파일 동시 선택 가능</span>
+        <span className="text-[11px] text-wedly-muted">최대 {formatFileSize(maxUploadBytes)} · 여러 파일 동시 선택 가능</span>
       </div>
 
       {/* 끌어다 놓기 영역 — 항상 표시(저장된 항목·편집 가능일 때), 드래그 중 강조. 클릭=파일 선택창.
@@ -394,6 +412,11 @@ export function FilesTab({
                     {f.fileName || "파일"}
                   </span>
                 </a>
+                {typeof f.size === "number" && f.size >= 0 && (
+                  <span className="text-[11px] text-wedly-muted flex-shrink-0 tabular-nums">
+                    {formatFileSize(f.size)}
+                  </span>
+                )}
                 {(() => {
                   const useRealCategories = Array.isArray(categoryOptions) && categoryOptions.length > 0;
                   const isEditing = editingCategoryIdx === i;
@@ -561,6 +584,19 @@ export function FilesTab({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* 총 개수·합계 용량 — 용량이 기록된 파일만 합산(과거 파일은 기록 없어 제외) */}
+      {visible.length > 0 && (
+        <div className="text-[11px] text-wedly-muted px-1">
+          총 {visible.length}개
+          {(() => {
+            const known = visible.filter((f) => typeof f.size === "number" && (f.size as number) >= 0);
+            if (known.length === 0) return null;
+            const sum = known.reduce((acc, f) => acc + (f.size as number), 0);
+            return <> · 합계 {formatFileSize(sum)}</>;
+          })()}
         </div>
       )}
 
