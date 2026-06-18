@@ -13,6 +13,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { cn } from "../lib/cn";
+import { isFileDrag } from "../lib/files-drag";
 
 // 파일 한 건의 메타. 모든 필드 선택 — 앱별 로컬 타입과 구조 호환.
 export interface FileMeta {
@@ -130,6 +131,12 @@ export function FilesTab({
   const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // 끌어다 놓기 상태 — 자식 위를 지날 때 깜빡이지 않도록 깊이 카운터로 관리.
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepthRef = useRef(0);
+  // 드롭 허용 조건: 읽기전용이 아니고, 저장된 항목(pageId 존재)일 때만.
+  const canAcceptDrop = !disabled && !!pageId;
+
   const visible = filterCategory
     ? files.filter((f) => (f.category || "기타자료") === filterCategory)
     : files;
@@ -211,8 +218,45 @@ export function FilesTab({
     onFilesChange(next);
   };
 
+  // 끌어다 놓은 파일을 기존 업로드 함수로 그대로 넘긴다(업로드·저장 경로 재사용).
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptDrop || !isFileDrag(e.dataTransfer?.types)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragging(true);
+  };
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptDrop || !isFileDrag(e.dataTransfer?.types)) return;
+    e.preventDefault(); // 드롭 허용 + 브라우저가 파일을 새 탭으로 여는 기본동작 차단
+    try {
+      e.dataTransfer.dropEffect = "copy";
+    } catch {
+      /* 일부 환경에서 dropEffect 설정 불가 — 무시 */
+    }
+  };
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptDrop) return;
+    if (dragDepthRef.current === 0) return; // 파일 드래그를 추적 중이 아니면 무시
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current === 0) setIsDragging(false);
+  };
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptDrop || !isFileDrag(e.dataTransfer?.types)) return;
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+    const dropped = e.dataTransfer?.files ?? null;
+    if (dropped && dropped.length > 0) handleSelectFiles(dropped);
+  };
+
   return (
-    <div className="space-y-3">
+    <div
+      className="space-y-3"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Upload button */}
       <div className="flex items-center gap-2">
         <input
@@ -252,6 +296,31 @@ export function FilesTab({
         </button>
         <span className="text-[11px] text-wedly-muted">최대 50MB · 여러 파일 동시 선택 가능</span>
       </div>
+
+      {/* 끌어다 놓기 영역 — 항상 표시(저장된 항목·편집 가능일 때), 드래그 중 강조. 클릭=파일 선택창 */}
+      {canAcceptDrop && (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          aria-label="파일을 끌어다 놓거나 클릭해서 업로드"
+          className={cn(
+            "w-full flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-4 py-5 text-[12.5px] transition-colors",
+            isDragging
+              ? "border-wedly-accent bg-wedly-bg-blue/50 text-wedly-accent"
+              : "border-wedly-bd bg-wedly-bg-gray/30 text-wedly-muted hover:border-wedly-accent hover:bg-wedly-bg-blue/30",
+            uploading && "opacity-60 cursor-not-allowed",
+          )}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 16V4M7 9l5-5 5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="font-medium">
+            {isDragging ? "여기에 파일을 놓으세요" : "파일을 끌어다 놓거나 클릭해서 업로드"}
+          </span>
+        </button>
+      )}
 
       {error && (
         <p className="text-[12px] text-wedly-red bg-wedly-bg-red/40 rounded-md px-3 py-1.5">{error}</p>
