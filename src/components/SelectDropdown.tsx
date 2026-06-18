@@ -46,6 +46,8 @@ export type SelectDropdownBodyProps = {
   globalChangeEvent?: string;
   /** 옵션 삭제 버튼 노출 여부 (어드민만 보이게 하려면 false) — 기본 false 안전 */
   allowDelete?: boolean;
+  /** 옵션 → 인라인 색상({bg,text}). 있으면 className(getColorClass) 대신 우선 적용 — 차수카드 등 고정색 칸용 */
+  optionColors?: Record<string, { bg: string; text: string }>;
 };
 
 export default function SelectDropdownBody({
@@ -60,6 +62,7 @@ export default function SelectDropdownBody({
   colorFamilies,
   globalChangeEvent,
   allowDelete = false,
+  optionColors,
 }: SelectDropdownBodyProps) {
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState(initialOptions);
@@ -186,8 +189,9 @@ export default function SelectDropdownBody({
                 <span
                   className={cn(
                     "inline-block rounded-md px-2 py-0.5 text-[11.5px] font-medium truncate",
-                    colorClassFor(opt),
+                    !optionColors?.[opt] && colorClassFor(opt),
                   )}
+                  style={optionColors?.[opt] ? { backgroundColor: optionColors[opt].bg, color: optionColors[opt].text } : undefined}
                 >
                   {opt}
                 </span>

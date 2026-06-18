@@ -6,6 +6,7 @@
 //   - 경정청구: 10총환급금 / 20확정수수료 비율 (없으면 자동 OFF)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   type FieldDef,
   type FieldType,
@@ -2638,6 +2639,19 @@ function FieldRow({
   optionColors?: Record<string, { bg: string; text: string }>;
 }) {
   const [editing, setEditing] = useState(false);
+  // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    if (!editing || type !== "select") { setDropPos(null); return; }
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const dropH = 320;
+    const spaceBelow = window.innerHeight - rect.bottom - 8;
+    const top = spaceBelow >= dropH ? rect.bottom + 4 : Math.max(8, rect.top - dropH - 4);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 224 - 8));
+    setDropPos({ top, left });
+  }, [editing, type]);
 
   const display = useMemo(() => {
     // 수식 컬럼 — value 는 이미 계산된 자연값(또는 null). 항상 읽기전용.
@@ -2679,18 +2693,27 @@ function FieldRow({
         {isAuto && <span className="ml-1 text-[10px] text-wedly-accent">(자동)</span>}
         {type === "formula" && <span className="ml-1 text-[10px] text-wedly-purple">(수식)</span>}
       </div>
-      <div className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
+      <div ref={anchorRef} className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
         {editing && isEditable ? (
           (type === "select") ? (
-            <div className="absolute z-50 mt-1 w-56 rounded-xl border border-wedly-bd bg-white shadow-[0_8px_24px_-4px_rgba(10,34,68,0.18)]">
-              <SelectDropdownBody
-                value={value == null ? "" : String(value)}
-                options={options ?? []}
-                onSave={(next) => { onChange(next); setEditing(false); }}
-                onClose={() => setEditing(false)}
-                getColorClass={() => "bg-wedly-bg-gray text-wedly-t1"}
-              />
-            </div>
+            <>
+              {display}
+              {dropPos && createPortal(
+                <div
+                  className="fixed z-[9999] w-56 rounded-xl border border-wedly-bd bg-white shadow-[0_8px_24px_-4px_rgba(10,34,68,0.18)]"
+                  style={{ top: dropPos.top, left: dropPos.left }}
+                >
+                  <SelectDropdownBody
+                    value={value == null ? "" : String(value)}
+                    options={options ?? []}
+                    onSave={(next) => { onChange(next); setEditing(false); }}
+                    onClose={() => setEditing(false)}
+                    optionColors={optionColors}
+                  />
+                </div>,
+                document.body,
+              )}
+            </>
           ) : (type === "number" || type === "percent") ? (
             <div className="relative">
               <input
