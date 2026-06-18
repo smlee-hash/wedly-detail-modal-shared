@@ -134,8 +134,12 @@ export function FilesTab({
   // 끌어다 놓기 상태 — 자식 위를 지날 때 깜빡이지 않도록 깊이 카운터로 관리.
   const [isDragging, setIsDragging] = useState(false);
   const dragDepthRef = useRef(0);
-  // 드롭 허용 조건: 읽기전용이 아니고, 저장된 항목(pageId 존재)일 때만.
-  const canAcceptDrop = !disabled && !!pageId;
+  // 드롭 박스 표시 조건: 읽기전용이 아니고, 저장된 항목(pageId 존재)일 때.
+  const dropZoneVisible = !disabled && !!pageId;
+  // 실제 드래그·드롭을 받는 조건: 업로드 중이면 무시한다.
+  // (기존 업로드 버튼이 uploading 동안 비활성인 것과 동일 — 업로드가 끝나기 전 또 떨어뜨려
+  //  두 업로드가 겹치면서 먼저 올린 파일이 목록에서 누락되는 충돌을 막는다.)
+  const canAcceptDrop = dropZoneVisible && !uploading;
 
   const visible = filterCategory
     ? files.filter((f) => (f.category || "기타자료") === filterCategory)
@@ -297,8 +301,9 @@ export function FilesTab({
         <span className="text-[11px] text-wedly-muted">최대 50MB · 여러 파일 동시 선택 가능</span>
       </div>
 
-      {/* 끌어다 놓기 영역 — 항상 표시(저장된 항목·편집 가능일 때), 드래그 중 강조. 클릭=파일 선택창 */}
-      {canAcceptDrop && (
+      {/* 끌어다 놓기 영역 — 항상 표시(저장된 항목·편집 가능일 때), 드래그 중 강조. 클릭=파일 선택창.
+          업로드 중에는 보이되 비활성(disabled)로 흐려지고, 드롭도 무시된다(canAcceptDrop). */}
+      {dropZoneVisible && (
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
