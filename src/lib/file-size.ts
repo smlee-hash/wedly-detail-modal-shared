@@ -40,3 +40,20 @@ export function oversizeMessage(
   const subject = rejected.length > 1 ? `${head} 외 ${rejected.length - 1}개는` : `${head}은(는)`;
   return `${subject} 최대 ${formatFileSize(maxBytes)}를 초과하여 업로드할 수 없습니다.`;
 }
+
+/** 파일 한 건을 용량 조회·색인에 쓸 키 — url 우선, 없으면 objectKey, 둘 다 없으면 "". */
+export function fileSizeKey(f: { url?: string; objectKey?: string }): string {
+  if (typeof f.url === "string" && f.url) return f.url;
+  if (typeof f.objectKey === "string" && f.objectKey) return f.objectKey;
+  return "";
+}
+
+/**
+ * 용량(byte)이 아직 기록되지 않은 파일만(키가 있는 것만) 골라낸다 — 옛 파일 용량 보강 대상.
+ * size가 0인 빈 파일은 "기록값 있음"으로 보고 제외(저장소 재조회 불필요).
+ */
+export function filesMissingSize<T extends { url?: string; objectKey?: string; size?: number }>(
+  files: T[],
+): T[] {
+  return files.filter((f) => typeof f.size !== "number" && fileSizeKey(f) !== "");
+}
