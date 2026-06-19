@@ -18,6 +18,8 @@ import {
   formatFileSize,
   partitionFilesBySize,
   oversizeMessage,
+  fileSizeKey,
+  filesMissingSize,
   DEFAULT_MAX_UPLOAD_BYTES,
 } from "../lib/file-size";
 
@@ -110,6 +112,7 @@ export function FilesTab({
   downloadApiPath,
   onOpenFile,
   maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES,
+  resolveSizes,
 }: {
   files: FileMeta[];
   pageId: string;
@@ -133,6 +136,9 @@ export function FilesTab({
   onOpenFile?: (args: { href: string; entryId: string; fileName: string; category?: string }) => void;
   // 업로드 최대 용량(바이트). 기본 100MB — 앱 서버 한도와 일치. 올리기 전 화면에서 즉시 검사.
   maxUploadBytes?: number;
+  // 옛 파일(용량 미기록)의 실제 크기를 저장소에서 불러오는 콜백(선택). 키 = fileSizeKey(f).
+  // 없으면 보강 안 함(하위호환). 반환 실패는 무시(용량 칸만 비고 동작 무영향).
+  resolveSizes?: (items: FileMeta[]) => Promise<Record<string, number>>;
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -155,6 +161,35 @@ export function FilesTab({
   const visible = filterCategory
     ? files.filter((f) => (f.category || "기타자료") === filterCategory)
     : files;
+
+  // 옛 파일 용량 보강 — 용량(size)이 없는 파일이 있으면 저장소에서 1회 조회해 화면에만 채운다.
+  // 부모가 넘긴 files·실제 저장 데이터는 건드리지 않는다(NO.64 교훈: _files 운영 쓰기 회피).
+  const [resolvedSizes, setResolvedSizes] = useState<Record<string, number>>({});
+  const missingKeySig = filesMissingSize(files).map(fileSizeKey).join("|");
+  useEffect(() => {
+    if (!resolveSizes) return;
+    const missing = filesMissingSize(files);
+    if (missing.length === 0) return;
+    let alive = true;
+    resolveSizes(missing)
+      .then((map) => {
+        if (alive && map) setResolvedSizes((prev) => ({ ...prev, ...map }));
+      })
+      .catch(() => {
+        /* 보강 실패는 조용히 무시 — 용량 칸만 비고 나머지 동작엔 영향 없음 */
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missingKeySig]);
+
+  // 표시·합계용 실제 용량 — 기록값 우선, 없으면 저장소 보강값.
+  const sizeOf = (f: FileMeta): number | undefined => {
+    if (typeof f.size === "number") return f.size;
+    const k = fileSizeKey(f);
+    return k && typeof resolvedSizes[k] === "number" ? resolvedSizes[k] : undefined;
+  };
 
   // 카테고리 드롭다운 외부 클릭 시 닫기 — mousedown 이 click 보다 먼저 발생해 다른 드롭다운 토글과 race 가 없음
   useEffect(() => {
@@ -412,11 +447,14 @@ export function FilesTab({
                     {f.fileName || "파일"}
                   </span>
                 </a>
-                {typeof f.size === "number" && f.size >= 0 && (
-                  <span className="text-[11px] text-wedly-muted flex-shrink-0 tabular-nums">
-                    {formatFileSize(f.size)}
-                  </span>
-                )}
+                {(() => {
+                  const s = sizeOf(f);
+                  return typeof s === "number" && s >= 0 ? (
+                    <span className="text-[11px] text-wedly-muted flex-shrink-0 tabular-nums">
+                      {formatFileSize(s)}
+                    </span>
+                  ) : null;
+                })()}
                 {(() => {
                   const useRealCategories = Array.isArray(categoryOptions) && categoryOptions.length > 0;
                   const isEditing = editingCategoryIdx === i;
@@ -587,14 +625,16 @@ export function FilesTab({
         </div>
       )}
 
-      {/* 총 개수·합계 용량 — 용량이 기록된 파일만 합산(과거 파일은 기록 없어 제외) */}
+      {/* 총 개수·합계 용량 — 기록값 또는 저장소 보강값이 있는 파일만 합산 */}
       {visible.length > 0 && (
         <div className="text-[11px] text-wedly-muted px-1">
           총 {visible.length}개
           {(() => {
-            const known = visible.filter((f) => typeof f.size === "number" && (f.size as number) >= 0);
-            if (known.length === 0) return null;
-            const sum = known.reduce((acc, f) => acc + (f.size as number), 0);
+            const sizes = visible
+              .map(sizeOf)
+              .filter((n): n is number => typeof n === "number" && n >= 0);
+            if (sizes.length === 0) return null;
+            const sum = sizes.reduce((acc, n) => acc + n, 0);
             return <> · 합계 {formatFileSize(sum)}</>;
           })()}
         </div>

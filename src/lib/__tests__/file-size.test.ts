@@ -3,6 +3,8 @@ import {
   formatFileSize,
   partitionFilesBySize,
   oversizeMessage,
+  fileSizeKey,
+  filesMissingSize,
   DEFAULT_MAX_UPLOAD_BYTES,
 } from "../file-size";
 
@@ -63,5 +65,32 @@ describe("oversizeMessage", () => {
       max,
     );
     expect(m).toContain("외 1개");
+  });
+});
+
+describe("fileSizeKey", () => {
+  it("url 우선", () => {
+    expect(fileSizeKey({ url: "/api/upload/abc", objectKey: "k" })).toBe("/api/upload/abc");
+  });
+  it("url 없으면 objectKey", () => {
+    expect(fileSizeKey({ objectKey: "k1" })).toBe("k1");
+  });
+  it("둘 다 없으면 빈 문자열", () => {
+    expect(fileSizeKey({})).toBe("");
+  });
+});
+
+describe("filesMissingSize", () => {
+  it("용량 없는 것만, 키 있는 것만 남긴다", () => {
+    const r = filesMissingSize([
+      { url: "/a", size: 10 }, // 용량 있음 → 제외
+      { url: "/b" }, // 없음 → 포함
+      { objectKey: "k" }, // 없음 → 포함
+      {}, // 키 없음 → 제외
+    ]);
+    expect(r.map((f) => f.url ?? f.objectKey)).toEqual(["/b", "k"]);
+  });
+  it("용량이 0이면 '있음'으로 보고 제외(빈 파일도 기록값 존중)", () => {
+    expect(filesMissingSize([{ url: "/zero", size: 0 }])).toEqual([]);
   });
 });
