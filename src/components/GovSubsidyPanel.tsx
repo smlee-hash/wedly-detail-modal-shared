@@ -83,9 +83,18 @@ const SUB_TABS: { key: SubTab; label: string }[] = [
 ];
 
 async function commentsJson(res: Response): Promise<UnifiedComment[]> {
+  // 앱별 댓글 응답 형태 차이 흡수: ERP={data:[...]}, 일루아={data:{illuaComments:[...]}},
+  // 하이브 읽기전용={data:[...]}, 그 외 {data:{comments:[...]}} / {data:{hiveComments:[...]}}.
   const j = await res.json().catch(() => null);
-  if (Array.isArray(j?.data)) return j.data as UnifiedComment[];
-  if (Array.isArray(j?.data?.comments)) return j.data.comments as UnifiedComment[];
+  const d = (j as { data?: unknown } | null)?.data as
+    | UnifiedComment[]
+    | { comments?: UnifiedComment[]; illuaComments?: UnifiedComment[]; hiveComments?: UnifiedComment[] }
+    | null
+    | undefined;
+  if (Array.isArray(d)) return d;
+  if (d && Array.isArray(d.comments)) return d.comments;
+  if (d && Array.isArray(d.illuaComments)) return d.illuaComments;
+  if (d && Array.isArray(d.hiveComments)) return d.hiveComments;
   return [];
 }
 
