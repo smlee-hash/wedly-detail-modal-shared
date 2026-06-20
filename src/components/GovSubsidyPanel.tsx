@@ -127,7 +127,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
     // 값 편집 가능 = 앱이 편집 허용 && 현재 사용자가 관리자. (하이브는 editable=false → 항상 보기 전용)
     const canEditValues = config.editable && isAdmin;
-    const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void }>;
+    const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
       const url = config.commentsPath(entryId);
@@ -322,7 +322,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
           {subTab === "meetings" && (
             <div className="p-4">
-              <MeetingsTab rawValue={data["_meetings"] ?? null} onSave={canEditValues ? (json: string) => saveOrCreate("_meetings", json) : () => {}} />
+              <MeetingsTab readOnly={!canEditValues} rawValue={data["_meetings"] ?? null} onSave={canEditValues ? (json: string) => saveOrCreate("_meetings", json) : () => {}} />
             </div>
           )}
         </div>
