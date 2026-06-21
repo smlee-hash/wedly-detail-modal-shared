@@ -33,6 +33,7 @@ import {
 } from "@wedly/ui-shared";
 import CustomSelect from "./CustomSelect";
 import SelectDropdownBody from "./SelectDropdown";
+import { buildCondTargets } from "./cond-targets-helpers";
 
 type RowData = Record<string, string | number | boolean | null>;
 
@@ -2084,11 +2085,9 @@ export default function SettlementInfoTab({
                   {/* ── 값에 따라 다른 식(조건별 수식) — ERP(enableConditionalFormula)에서만 ── */}
                   {enableConditionalFormula && (() => {
                     // 비교에 고를 수 있는 칸: 정산정보 칸(this tab) + 기본정보 평면 칸(주입)
-                    const condTargets: Array<{ value: string; label: string }> = [
-                      ...fields.filter((f) => f.key !== editingFieldKey).map((f) => ({ value: f.key, label: f.label })),
-                      ...(conditionFieldOptions ?? []).map((o) => ({ value: o.key, label: o.label })),
-                    ];
-                    const firstTargetKey = condTargets[0]?.value ?? "";
+                    // — 두 그룹을 섹션 헤더("정산 정보" / "기본정보")로 묶어 표시
+                    const condTargets = buildCondTargets(fields, editingFieldKey, conditionFieldOptions);
+                    const firstTargetKey = condTargets.find((o) => !o.isHeader)?.value ?? "";
                     const newRule = () => ({ leftKey: firstTargetKey, right: { kind: "text" as const, value: "" }, op: "eq" as ConditionOp, formula: [] as FormulaTerm[] });
                     // 기준 칸(leftKey)의 설정 선택지 찾기: 정산 select 칸(this tab) 우선, 없으면 기본정보 주입 칸.
                     //   선택지가 있으면 "직접 입력" 자리를 드롭다운(색 배지)으로, 없으면 자유 입력 유지.
