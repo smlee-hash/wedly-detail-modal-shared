@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
+import { selectableOptions } from "./custom-select-helpers";
 
 export type CustomSelectOption = {
   value: string;
@@ -22,6 +23,8 @@ export type CustomSelectOption = {
   dotColor?: string;
   /** 라벨을 감쌀 색 배지 클래스(예: "bg-blue-200 text-blue-800"). 있으면 점 대신 배지로 표시. */
   badgeClass?: string;
+  /** true면 선택 불가한 섹션 제목 줄로 렌더 */
+  isHeader?: boolean;
 };
 
 export default function CustomSelect({
@@ -67,7 +70,7 @@ export default function CustomSelect({
     };
   }, [open]);
 
-  const selected = options.find((o) => o.value === value);
+  const selected = selectableOptions(options).find((o) => o.value === value);
   const isEmpty = !selected || selected.value === "";
 
   const paddingY = size === "sm" ? "py-1.5" : "py-2";
@@ -123,10 +126,17 @@ export default function CustomSelect({
           )}
           role="listbox"
         >
-          {options.length === 0 ? (
+          {selectableOptions(options).length === 0 ? (
             <p className="px-3 py-2 text-[12px] text-wedly-muted">옵션이 없습니다</p>
           ) : (
             options.map((opt) => {
+              if (opt.isHeader) {
+                return (
+                  <div key={opt.value} role="presentation" className="px-3 pt-2 pb-1 text-[10px] font-bold text-wedly-muted uppercase tracking-wide">
+                    {opt.label}
+                  </div>
+                );
+              }
               const isSelected = opt.value === value;
               return (
                 <button
