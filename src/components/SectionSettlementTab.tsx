@@ -16,6 +16,7 @@ export default function SectionSettlementTab({
   settlementApiBase,
   enableConditionalFormula,
   conditionFieldOptions,
+  row,
 }: {
   section: string;
   rawValue: unknown;
@@ -26,6 +27,8 @@ export default function SectionSettlementTab({
   // 조건별 수식 게이트 + 비교용 기본정보 칸 후보 (ERP만 주입). 미주입이면 기존과 동일.
   enableConditionalFormula?: boolean;
   conditionFieldOptions?: Array<{ key: string; label: string }>;
+  // 조건 평가용 기본정보 행 값 — conditionValues 로 전달돼 기본정보 칸 조건 매칭에 사용.
+  row?: Record<string, unknown> | null;
 }) {
   const base = `${settlementApiBase}/${encodeURIComponent(section)}`;
   return (
@@ -43,6 +46,7 @@ export default function SectionSettlementTab({
       defaultScoreCards={EMPTY_CARDS}
       enableConditionalFormula={enableConditionalFormula}
       conditionFieldOptions={conditionFieldOptions}
+      row={row as Record<string, string | number | boolean | null> | null | undefined}
     />
   );
 }
