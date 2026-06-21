@@ -18,6 +18,7 @@ import {
   type ConditionalRule,
   type ConditionCompare,
   type ConditionOp,
+  type DateFormulaSpec,
   SCORECARD_COLOR_CLASSES,
   ORDINAL_KO,
   makeEmptyTier,
@@ -28,10 +29,13 @@ import {
   generateFieldKey,
   parseFormulaTerms,
   evalFormulaForTier,
+  evalDateFormulaForTier,
+  parseDateFormula,
   formatFormulaResult,
   isNumericFieldType,
 } from "@wedly/ui-shared";
 import CustomSelect from "./CustomSelect";
+import DateFormulaEditor from "./DateFormulaEditor";
 import SelectDropdownBody from "./SelectDropdown";
 import { buildCondTargets } from "./cond-targets-helpers";
 
@@ -639,6 +643,7 @@ export default function SettlementInfoTab({
   // 수식 컬럼 편집용 — 항(term)들과 결과 표시 형식, 검증 오류 메시지
   const [draftFormula, setDraftFormula] = useState<FormulaTerm[]>([]);
   const [draftFormulaResult, setDraftFormulaResult] = useState<FormulaResultFormat>("number");
+  const [draftDateFormula, setDraftDateFormula] = useState<DateFormulaSpec>({ mode: "offset", baseKey: "", offsets: [{ amount: 1, unit: "day" }] });
   const [draftOptions, setDraftOptions] = useState<string[]>([]); // type==="select" 보기 목록 초안
   const [formulaError, setFormulaError] = useState<string>("");
   // 조건별 수식 편집 상태. null = 조건 안 씀(기본 식만). 객체면 "값에 따라 다른 식" 켠 상태.
@@ -652,6 +657,7 @@ export default function SettlementInfoTab({
     setDraftType("text");
     setDraftFormula([]);
     setDraftFormulaResult("number");
+    setDraftDateFormula({ mode: "offset", baseKey: "", offsets: [{ amount: 1, unit: "day" }] });
     setDraftOptions([]);
     setFormulaError("");
     setDraftConditional(null);
@@ -669,7 +675,8 @@ export default function SettlementInfoTab({
     if (!cur) return;
     setDraftType(cur.type);
     setDraftFormula(cur.type === "formula" ? parseFormulaTerms(cur.formula) : []);
-    setDraftFormulaResult(cur.formulaResult === "percent" ? "percent" : "number");
+    setDraftFormulaResult(cur.formulaResult === "percent" ? "percent" : cur.formulaResult === "date" ? "date" : "number");
+    setDraftDateFormula(parseDateFormula(cur.dateFormula) ?? { mode: "offset", baseKey: "", offsets: [{ amount: 1, unit: "day" }] });
     setDraftOptions(cur.type === "select" && Array.isArray(cur.options) ? [...cur.options] : []);
     setFormulaError("");
     setDraftConditional(loadConditionalDraft(cur.conditional));
@@ -725,12 +732,16 @@ export default function SettlementInfoTab({
       if (!label) return;
       let newField: FieldDef;
       if (draftType === "formula") {
-        const v = validateDraftFormula();
-        if (!v.ok) { setFormulaError(v.msg); return; }
-        const vc = validateDraftConditional();
-        if (!vc.ok) { setFormulaError(vc.msg); return; }
-        newField = { key: generateFieldKey(label, fields), label, type: "formula", formula: v.terms, formulaResult: draftFormulaResult };
-        if (vc.conditional) newField.conditional = vc.conditional;
+        if (draftFormulaResult === "date") {
+          newField = { key: generateFieldKey(label, fields), label, type: "formula", formulaResult: "date", dateFormula: draftDateFormula };
+        } else {
+          const v = validateDraftFormula();
+          if (!v.ok) { setFormulaError(v.msg); return; }
+          const vc = validateDraftConditional();
+          if (!vc.ok) { setFormulaError(vc.msg); return; }
+          newField = { key: generateFieldKey(label, fields), label, type: "formula", formula: v.terms, formulaResult: draftFormulaResult };
+          if (vc.conditional) newField.conditional = vc.conditional;
+        }
       } else if (draftType === "select") {
         newField = { key: generateFieldKey(label, fields), label, type: "select", options: cleanedOptions };
       } else {
@@ -765,7 +776,7 @@ export default function SettlementInfoTab({
       if (newType !== "formula" && newType === fieldEditModal.type) { setFieldEditModal(null); return; }
       let formulaTerms: FormulaTerm[] = [];
       let formulaConditional: FieldDef["conditional"] | undefined;
-      if (newType === "formula") {
+      if (newType === "formula" && draftFormulaResult !== "date") {
         const v = validateDraftFormula();
         if (!v.ok) { setFormulaError(v.msg); return; }
         const vc = validateDraftConditional();
@@ -777,8 +788,10 @@ export default function SettlementInfoTab({
         if (f.key !== key) return f;
         const keepScope = (f as { scope?: "common" | "custom" }).scope;
         if (newType === "formula") {
-          const nf: FieldDef = { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
-          if (formulaConditional) nf.conditional = formulaConditional;
+          const nf: FieldDef = draftFormulaResult === "date"
+            ? { key: f.key, label: f.label, type: "formula" as FieldType, formulaResult: "date", dateFormula: draftDateFormula }
+            : { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
+          if (draftFormulaResult !== "date" && formulaConditional) nf.conditional = formulaConditional;
           if (keepScope) (nf as unknown as Record<string, unknown>).scope = keepScope;
           return nf;
         }
@@ -813,7 +826,7 @@ export default function SettlementInfoTab({
       });
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
@@ -1048,6 +1061,8 @@ export default function SettlementInfoTab({
     // 수식 컬럼은 저장값이 없으므로 차수마다 계산해서 합산.
     const field = fields.find((f) => f.key === k);
     if (field?.type === "formula") {
+      // 날짜 수식 칸은 숫자 합계에 포함하지 않음 (문자열 날짜이므로 0 처리)
+      if (field.formulaResult === "date") return 0;
       return target.reduce((a, t) => {
         const r = evalFormulaForTier(field, t, fields, undefined, row ?? undefined);
         return a + (typeof r === "number" && Number.isFinite(r) ? r : 0);
@@ -2062,28 +2077,38 @@ export default function SettlementInfoTab({
                       <CustomSelect
                         size="sm"
                         value={draftFormulaResult}
-                        onChange={(v) => { setDraftFormulaResult(v === "percent" ? "percent" : "number"); setFormulaError(""); }}
+                        onChange={(v) => { setDraftFormulaResult(v === "percent" ? "percent" : v === "date" ? "date" : "number"); setFormulaError(""); }}
                         options={[
                           { value: "number", label: "숫자 (원)" },
                           { value: "percent", label: "퍼센트 (%)" },
+                          { value: "date", label: "날짜" },
                         ]}
                       />
                     </div>
                   </label>
 
-                  <FormulaTermsEditor
-                    terms={draftFormula}
-                    onChange={(next) => { setDraftFormula(next); setFormulaError(""); }}
-                    fields={fields}
-                    editingFieldKey={editingFieldKey}
-                    columnOptions={formulaColumnOptions}
-                    resultFormat={draftFormulaResult}
-                  />
+                  {draftFormulaResult === "date" ? (
+                    <DateFormulaEditor
+                      value={draftDateFormula}
+                      onChange={(next) => { setDraftDateFormula(next); setFormulaError(""); }}
+                      fields={fields}
+                      editingFieldKey={editingFieldKey}
+                    />
+                  ) : (
+                    <FormulaTermsEditor
+                      terms={draftFormula}
+                      onChange={(next) => { setDraftFormula(next); setFormulaError(""); }}
+                      fields={fields}
+                      editingFieldKey={editingFieldKey}
+                      columnOptions={formulaColumnOptions}
+                      resultFormat={draftFormulaResult}
+                    />
+                  )}
 
                   {formulaError && <p className="text-[11px] text-wedly-red px-1">{formulaError}</p>}
 
-                  {/* ── 값에 따라 다른 식(조건별 수식) — ERP(enableConditionalFormula)에서만 ── */}
-                  {enableConditionalFormula && (() => {
+                  {/* ── 값에 따라 다른 식(조건별 수식) — ERP(enableConditionalFormula)에서만, 날짜 수식은 제외 ── */}
+                  {draftFormulaResult !== "date" && enableConditionalFormula && (() => {
                     // 비교에 고를 수 있는 칸: 정산정보 칸(this tab) + 기본정보 평면 칸(주입)
                     // — 두 그룹을 섹션 헤더("정산 정보" / "기본정보")로 묶어 표시
                     const condTargets = buildCondTargets(fields, editingFieldKey, conditionFieldOptions);
@@ -2504,12 +2529,14 @@ function TierCard({
               >
                 {grp.items.map((f) => {
                   const isFormula = f.type === "formula";
+                  const isDateFormula = isFormula && f.formulaResult === "date";
                   return (
                     <FieldRow
                       key={f.key}
                       label={f.label}
                       type={f.type}
-                      value={isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null)}
+                      value={isDateFormula ? null : (isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null))}
+                      dateValue={isDateFormula ? evalDateFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : undefined}
                       readOnly={readOnly}
                       isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       formulaResult={f.formulaResult}
@@ -2759,11 +2786,12 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, type, value, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
+  label, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
 }: {
   label: string;
   type: FieldType;
   value: string | number | null;
+  dateValue?: string | null;
   onChange: (v: string | number | null) => void;
   readOnly?: boolean;
   isAuto?: boolean;
@@ -2787,8 +2815,11 @@ function FieldRow({
   }, [editing, type]);
 
   const display = useMemo(() => {
-    // 수식 컬럼 — value 는 이미 계산된 자연값(또는 null). 항상 읽기전용.
+    // 수식 컬럼 — 날짜 수식은 dateValue, 숫자/퍼센트는 value. 항상 읽기전용.
     if (type === "formula") {
+      if (formulaResult === "date") {
+        return <span className="tabular-nums font-medium">{dateValue || "-"}</span>;
+      }
       const num = typeof value === "number" ? value : Number(value);
       if (value === null || value === undefined || value === "" || !Number.isFinite(num)) {
         return <span className="text-wedly-muted">-</span>;
@@ -2814,7 +2845,7 @@ function FieldRow({
       return <span className="tabular-nums font-medium">{fmtCurrency(value)}원</span>;
     }
     return <span>{String(value)}</span>;
-  }, [value, type, readOnly, isAuto, formulaResult, optionColors]);
+  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors]);
 
   // 수식 컬럼은 사람이 입력하지 않음 (자동 계산 읽기전용)
   const isEditable = !readOnly && !isAuto && type !== "formula";
