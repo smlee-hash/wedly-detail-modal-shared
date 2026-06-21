@@ -26,6 +26,7 @@ import {
   type UnifiedComment,
   type SectionPanelProps,
   type ScoreCardDef,
+  basicFieldOptionsFromRow,
 } from "@wedly/ui-shared";
 import SettlementInfoTabBase from "./SettlementInfoTab";
 
@@ -230,7 +231,16 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     }, [adapter, config.conditionBasicDomain, config.enableConditionalFormula]);
 
     const onSaveFor = (key: string) => (canEditValues ? (json: string) => saveOrCreate(key, json) : () => {});
-    const condOpts = condFromDefs ?? (config.enableConditionalFormula && config.conditionFieldOptions ? config.conditionFieldOptions(data) : undefined);
+    const condOpts = (() => {
+      if (condFromDefs) {
+        // ERP 경로: 표준 기본정보 칸(primaryRow) + 커스텀(enrich) 합산.
+        const std = basicFieldOptionsFromRow(primaryRow as Record<string, unknown>);
+        const customKeys = new Set(condFromDefs.map((o) => o.key));
+        return [...std.filter((o) => !customKeys.has(o.key)), ...condFromDefs];
+      }
+      // 어댑터 미공급(하이브·일루아) → 기존 폴백 그대로(변경 금지).
+      return config.enableConditionalFormula && config.conditionFieldOptions ? config.conditionFieldOptions(data) : undefined;
+    })();
 
     // 계약/정산/환불 공통 prop — 공용 저장소 설정·합계카드로 3앱 동일 렌더.
     const settlementCommon: Record<string, unknown> = {
