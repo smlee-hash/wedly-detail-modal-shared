@@ -71,6 +71,8 @@ export type GovSubsidyPanelConfig = {
   createContract?: (primaryRow: Record<string, unknown>) => Promise<string>;
   /** 이 그룹 행 중 정책 행만 골라내기(도메인 키 차이 흡수). */
   filterPolicyRows: (rows: SectionPanelProps["rows"]) => SectionPanelProps["rows"];
+  /** 조건부 수식 기준 칸을 가져올 기본정보 도메인(ERP가 "government-subsidy" 등 주입). */
+  conditionBasicDomain?: string;
 };
 
 type SubTab = "history" | "contract" | "settlement" | "refund" | "meetings";
@@ -209,8 +211,26 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       }
     }
 
+    // 어댑터가 공급하는 기본정보 정의 기반 조건 옵션(ERP가 conditionBasicDomain 주입 시 사용).
+    const [condFromDefs, setCondFromDefs] = useState<Array<{ key: string; label: string; options?: Array<{ value: string; badgeClass?: string }> }> | null>(null);
+    useEffect(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const a = adapter as any;
+      const fn = a?.conditionFieldOptionsFor as ((defs: unknown[]) => Array<{ key: string; label: string; options?: Array<{ value: string; badgeClass?: string }> }>) | undefined;
+      const load = a?.api?.loadBasicFieldDefs as ((d: string) => Promise<unknown[]>) | undefined;
+      if (!config.enableConditionalFormula || !fn || !load || !config.conditionBasicDomain) {
+        setCondFromDefs(null);
+        return;
+      }
+      let alive = true;
+      Promise.resolve(load(config.conditionBasicDomain))
+        .then((defs: unknown[]) => { if (alive) setCondFromDefs(fn(defs)); })
+        .catch(() => {});
+      return () => { alive = false; };
+    }, [adapter, config.conditionBasicDomain, config.enableConditionalFormula]);
+
     const onSaveFor = (key: string) => (canEditValues ? (json: string) => saveOrCreate(key, json) : () => {});
-    const condOpts = config.enableConditionalFormula && config.conditionFieldOptions ? config.conditionFieldOptions(data) : undefined;
+    const condOpts = condFromDefs ?? (config.enableConditionalFormula && config.conditionFieldOptions ? config.conditionFieldOptions(data) : undefined);
 
     // 계약/정산/환불 공통 prop — 공용 저장소 설정·합계카드로 3앱 동일 렌더.
     const settlementCommon: Record<string, unknown> = {
