@@ -620,8 +620,11 @@ export default function SettlementInfoTab({
   const [draftOptions, setDraftOptions] = useState<string[]>([]); // type==="select" 보기 목록 초안
   const [formulaError, setFormulaError] = useState<string>("");
   // 조건별 수식 편집 상태. null = 조건 안 씀(기본 식만). 객체면 "값에 따라 다른 식" 켠 상태.
+  // 타입은 공용 ui-shared 의 새 조건모델(FieldDef["conditional"])을 그대로 따른다.
+  // (이 옛 편집기 UI 는 conditionFieldOptions 주입 앱=ERP 에서만 표시되어 하이브/일루아에선 안 보이지만,
+  //  새 ui-shared 타입과 형이 맞아야 빌드가 통과하므로 상태 타입을 새 모델로 맞춘다.)
   const [draftConditional, setDraftConditional] = useState<
-    { conditionFieldKey: string; rules: Array<{ whenValue: string; formula: FormulaTerm[] }> } | null
+    FieldDef["conditional"] | null
   >(null);
 
   const openAddField = useCallback(() => {
@@ -673,7 +676,7 @@ export default function SettlementInfoTab({
   //   유효 규칙만 추려 돌려준다(빈 규칙 자동 제외). 규칙이 하나도 없으면 conditional 없이 저장(기본식만).
   const validateDraftConditional = useCallback((): { ok: true; conditional?: FieldDef["conditional"] } | { ok: false; msg: string } => {
     if (!draftConditional) return { ok: true };
-    const fk = draftConditional.conditionFieldKey.trim();
+    const fk = (draftConditional.conditionFieldKey ?? "").trim();
     if (!fk) return { ok: false, msg: "조건의 기준 필드를 고르세요." };
     const cleaned: Array<{ whenValue: string; formula: FormulaTerm[] }> = [];
     for (const r of draftConditional.rules) {
@@ -2059,7 +2062,7 @@ export default function SettlementInfoTab({
                             <div className="mt-1">
                               <CustomSelect
                                 size="sm"
-                                value={draftConditional.conditionFieldKey}
+                                value={draftConditional.conditionFieldKey ?? ""}
                                 onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, conditionFieldKey: v } : prev)}
                                 placeholder="기준 필드 선택"
                                 options={conditionFieldOptions.map((o) => ({ value: o.key, label: o.label }))}
@@ -2073,7 +2076,7 @@ export default function SettlementInfoTab({
                                 <span className="text-[10px] font-semibold text-wedly-t2 flex-shrink-0">이 값일 때</span>
                                 <input
                                   type="text"
-                                  value={rule.whenValue}
+                                  value={rule.whenValue ?? ""}
                                   onChange={(e) => {
                                     setFormulaError("");
                                     const val = e.target.value;
