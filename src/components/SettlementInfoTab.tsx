@@ -1629,7 +1629,13 @@ export default function SettlementInfoTab({
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ [rowLayoutKey]: next }),
-              }).catch(() => { /* ignore */ });
+              })
+                .then(() => {
+                  // 모듈 설정 캐시 새로고침 — 안 하면 창을 다시 열 때 옛 배치를 보여줘 되돌아간 것처럼 보임
+                  // (saveCardsToServer 와 동일 패턴)
+                  fetchConfigCached(configApiPath, true).catch(() => {});
+                })
+                .catch(() => { /* ignore */ });
             };
             const rowGroups = groupFieldsByRowLayout(fields, rowLayout);
             return (
@@ -1776,7 +1782,12 @@ export default function SettlementInfoTab({
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ [tierSuffixKey]: next }),
-              }).catch(() => { /* ignore */ });
+              })
+                .then(() => {
+                  // 모듈 설정 캐시 새로고침 — 꼬리표도 창 재오픈 시 되돌아가는 것 예방(saveLayout 과 동일)
+                  fetchConfigCached(configApiPath, true).catch(() => {});
+                })
+                .catch(() => { /* ignore */ });
             } : undefined}
             rowLayout={rowLayout}
             conditionValues={row ?? undefined}
