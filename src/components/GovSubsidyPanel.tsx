@@ -213,8 +213,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const condOpts = config.enableConditionalFormula && config.conditionFieldOptions ? config.conditionFieldOptions(data) : undefined;
 
     // 계약/정산/환불 공통 prop — 공용 저장소 설정·합계카드로 3앱 동일 렌더.
+    // row: 기본정보 행(primaryRow) + 정산 행(data) 합산 — 정산 키가 우선(덮어씀).
+    //   conditionValues 는 row 에서 오므로, 조건부 수식 기준칸(담당사 등 기본정보 칸)을 조건에 쓸 수 있음(ERP 동일).
     const settlementCommon: Record<string, unknown> = {
-      row: data,
+      row: { ...(primaryRow as Record<string, unknown>), ...(data ?? {}) },
       isAdmin: canEditValues,
       readOnly: !canEditValues,
       allowStructureEdit: config.allowStructureEdit && isAdmin,
