@@ -16,6 +16,8 @@ import {
   type FormulaTerm,
   type FormulaResultFormat,
   type ConditionalRule,
+  type ConditionClause,
+  type ConditionCombine,
   type ConditionCompare,
   type ConditionOp,
   type DateFormulaSpec,
@@ -41,17 +43,29 @@ import { buildCondTargets } from "./cond-targets-helpers";
 
 type RowData = Record<string, string | number | boolean | null>;
 
-// 저장된 conditional(새/옛 형식) → 편집 초안. 없으면 null. (옛 conditionFieldKey/whenValue 흡수)
-function loadConditionalDraft(
-  cond: FieldDef["conditional"],
-): { rules: Array<{ leftKey: string; right: ConditionCompare; op: ConditionOp; formula: FormulaTerm[] }> } | null {
+// 조건 편집 초안 타입 — 규칙별 조건 절 목록(clauses) + 묶음(combine) + 식.
+type DraftClause = { leftKey: string; right: ConditionCompare; op: ConditionOp };
+type DraftCondRule = { clauses: DraftClause[]; combine: ConditionCombine; formula: FormulaTerm[] };
+type DraftConditional = { rules: DraftCondRule[] };
+
+// 저장된 conditional(새/옛 형식) → 편집 초안. 없으면 null.
+// 새 형식(clauses) 우선, 옛 단일(leftKey/right/op·conditionFieldKey/whenValue)은 절 1개로 흡수.
+function loadConditionalDraft(cond: FieldDef["conditional"]): DraftConditional | null {
   if (!cond || !Array.isArray(cond.rules) || cond.rules.length === 0) return null;
-  const rules = cond.rules.map((r) => ({
-    leftKey: r.leftKey ?? cond.conditionFieldKey ?? "",
-    right: r.right ?? { kind: "text" as const, value: r.whenValue ?? "" },
-    op: (r.op ?? "eq") as ConditionOp,
-    formula: parseFormulaTerms(r.formula),
-  }));
+  const rules: DraftCondRule[] = cond.rules.map((r) => {
+    const clauses: DraftClause[] = Array.isArray(r.clauses) && r.clauses.length > 0
+      ? r.clauses.map((c) => ({
+          leftKey: c.leftKey ?? "",
+          right: c.right ?? ({ kind: "text" as const, value: "" }),
+          op: (c.op ?? "eq") as ConditionOp,
+        }))
+      : [{
+          leftKey: r.leftKey ?? cond.conditionFieldKey ?? "",
+          right: r.right ?? ({ kind: "text" as const, value: r.whenValue ?? "" }),
+          op: (r.op ?? "eq") as ConditionOp,
+        }];
+    return { clauses, combine: (r.combine ?? "and") as ConditionCombine, formula: parseFormulaTerms(r.formula) };
+  });
   return { rules };
 }
 
@@ -648,9 +662,7 @@ export default function SettlementInfoTab({
   const [formulaError, setFormulaError] = useState<string>("");
   // 조건별 수식 편집 상태. null = 조건 안 씀(기본 식만). 객체면 "값에 따라 다른 식" 켠 상태.
   //   rules: 규칙별 기준 칸(leftKey) + 비교 대상(right: 글자/다른 칸) + 식.
-  const [draftConditional, setDraftConditional] = useState<
-    { rules: Array<{ leftKey: string; right: ConditionCompare; op: ConditionOp; formula: FormulaTerm[] }> } | null
-  >(null);
+  const [draftConditional, setDraftConditional] = useState<DraftConditional | null>(null);
 
   const openAddField = useCallback(() => {
     setDraftLabel("");
@@ -706,18 +718,31 @@ export default function SettlementInfoTab({
     const cleaned: ConditionalRule[] = [];
     for (const r of draftConditional.rules) {
       const terms = parseFormulaTerms(r.formula);
-      const hasLeft = !!r.leftKey;
-      const hasRight = r.right.kind === "field" ? !!r.right.key : r.right.value.trim() !== "";
       const hasTerms = terms.length > 0;
-      if (!hasLeft && !hasRight && !hasTerms) continue; // 완전 빈 규칙 건너뜀
-      if (!hasLeft) return { ok: false, msg: "조건의 기준 칸을 고르세요." };
-      if (!hasRight) return { ok: false, msg: "조건의 비교 값(글자 또는 다른 칸)을 채우세요." };
+      // 절별 정리: 완전 빈 절 제거, 반만 찬 절은 오류.
+      const cleanClauses: ConditionClause[] = [];
+      for (const c of r.clauses) {
+        const hasLeft = !!c.leftKey;
+        const hasRight = c.right.kind === "field" ? !!c.right.key : c.right.value.trim() !== "";
+        if (!hasLeft && !hasRight) continue; // 완전 빈 절 건너뜀
+        if (!hasLeft) return { ok: false, msg: "조건의 기준 칸을 고르세요." };
+        if (!hasRight) return { ok: false, msg: "조건의 비교 값(글자 또는 다른 칸)을 채우세요." };
+        cleanClauses.push({ leftKey: c.leftKey, right: c.right, op: c.op });
+      }
+      if (cleanClauses.length === 0 && !hasTerms) continue; // 완전 빈 규칙 건너뜀
+      if (cleanClauses.length === 0) return { ok: false, msg: "조건을 한 개 이상 채우세요." };
       if (!hasTerms) return { ok: false, msg: "조건이 맞을 때 쓸 계산 항목을 한 개 이상 추가하세요." };
       for (const t of terms) {
         const e = checkFormulaTermColumns(t, fields);
         if (e) return { ok: false, msg: `조건 식에 ${e}` };
       }
-      cleaned.push({ leftKey: r.leftKey, right: r.right, op: r.op, formula: terms });
+      // 절 1개 → 옛 형식(전 앱 호환), 2개+ → clauses 형식(새 계산기 필요).
+      if (cleanClauses.length === 1) {
+        const c = cleanClauses[0];
+        cleaned.push({ leftKey: c.leftKey, right: c.right, op: c.op, formula: terms });
+      } else {
+        cleaned.push({ clauses: cleanClauses, combine: r.combine, formula: terms });
+      }
     }
     if (cleaned.length === 0) return { ok: true }; // 켰지만 규칙 없음 → 기본식만(conditional 없이)
     return { ok: true, conditional: { rules: cleaned } };
@@ -2124,7 +2149,32 @@ export default function SettlementInfoTab({
                     // — 두 그룹을 섹션 헤더("정산 정보" / "기본정보")로 묶어 표시
                     const condTargets = buildCondTargets(fields, editingFieldKey, conditionFieldOptions);
                     const firstTargetKey = condTargets.find((o) => !o.isHeader)?.value ?? "";
-                    const newRule = () => ({ leftKey: firstTargetKey, right: { kind: "text" as const, value: "" }, op: "eq" as ConditionOp, formula: [] as FormulaTerm[] });
+                    const newClause = (): DraftClause => ({ leftKey: firstTargetKey, right: { kind: "text" as const, value: "" }, op: "eq" });
+                    const newRule = (): DraftCondRule => ({ clauses: [newClause()], combine: "and", formula: [] });
+                    const updateClause = (ri: number, ci: number, patch: Partial<DraftClause>) => {
+                      setFormulaError("");
+                      setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, clauses: r.clauses.map((c, j) => j === ci ? { ...c, ...patch } : c) } : r) } : prev);
+                    };
+                    const setCombine = (ri: number, combine: ConditionCombine) => {
+                      setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, combine } : r) } : prev);
+                    };
+                    const addClause = (ri: number) => {
+                      setFormulaError("");
+                      setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, clauses: [...r.clauses, newClause()] } : r) } : prev);
+                    };
+                    const removeClause = (ri: number, ci: number) => {
+                      setFormulaError("");
+                      setDraftConditional((prev) => {
+                        if (!prev) return prev;
+                        const rule = prev.rules[ri];
+                        if (rule && rule.clauses.length <= 1) return { ...prev, rules: prev.rules.filter((_, i) => i !== ri) }; // 마지막 절 → 경우 삭제
+                        return { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, clauses: r.clauses.filter((_, j) => j !== ci) } : r) };
+                      });
+                    };
+                    const setClauseFormula = (ri: number, next: FormulaTerm[]) => {
+                      setFormulaError("");
+                      setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, formula: next } : r) } : prev);
+                    };
                     // 기준 칸(leftKey)의 설정 선택지 찾기: 정산 select 칸(this tab) 우선, 없으면 기본정보 주입 칸.
                     //   선택지가 있으면 "직접 입력" 자리를 드롭다운(색 배지)으로, 없으면 자유 입력 유지.
                     const optionsForKey = (key: string): Array<{ value: string; badgeClass?: string }> => {
@@ -2151,95 +2201,117 @@ export default function SettlementInfoTab({
                         />
                         <span className="text-[11px] font-bold text-wedly-orange">값에 따라 다른 식 쓰기</span>
                       </label>
-                      <p className="text-[10px] text-wedly-muted px-0.5">조건마다 기준 칸을 고르고, 그 값이 “다른 칸 값” 또는 “직접 입력한 글자”와 같음/다름/포함/미포함 중 고른 조건에 맞으면 그 식으로, 어디에도 안 맞으면 위의 기본 식으로 계산합니다. 위에서부터 먼저 맞는 조건이 적용됩니다.</p>
+                      <p className="text-[10px] text-wedly-muted px-0.5">한 경우에 조건을 여러 개 걸 수 있습니다(“+ 조건 더하기”). 조건이 2개 이상이면 “모두 만족(그리고)” 또는 “하나라도 만족(또는)”을 고르세요. 어디에도 안 맞으면 위의 기본 식으로 계산하며, 여러 경우는 위에서부터 먼저 맞는 것이 적용됩니다.</p>
 
                       {draftConditional && (
                         <div className="space-y-2.5">
                           {draftConditional.rules.map((rule, ri) => (
                             <div key={ri} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-2">
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <span className="text-[10px] font-semibold text-wedly-t2 flex-shrink-0">만약</span>
-                                <div className="min-w-[110px] flex-1">
-                                  <CustomSelect
-                                    size="sm"
-                                    value={rule.leftKey}
-                                    onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, leftKey: v } : r) } : prev)}
-                                    placeholder="기준 칸"
-                                    options={condTargets}
-                                  />
+                              {rule.clauses.length >= 2 && (
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] px-0.5">
+                                  <span className="font-semibold text-wedly-t2">이 조건들을</span>
+                                  <label className="flex items-center gap-1 cursor-pointer select-none">
+                                    <input type="radio" name={`combine-${ri}`} checked={rule.combine !== "or"} onChange={() => setCombine(ri, "and")} className="w-3.5 h-3.5 accent-wedly-accent" />
+                                    <span className="text-wedly-t1">모두 만족(그리고)</span>
+                                  </label>
+                                  <label className="flex items-center gap-1 cursor-pointer select-none">
+                                    <input type="radio" name={`combine-${ri}`} checked={rule.combine === "or"} onChange={() => setCombine(ri, "or")} className="w-3.5 h-3.5 accent-wedly-accent" />
+                                    <span className="text-wedly-t1">하나라도 만족(또는)</span>
+                                  </label>
                                 </div>
-                                <span className="text-[10px] text-wedly-muted flex-shrink-0">이(가)</span>
-                                <div className="w-[84px] flex-shrink-0">
-                                  <CustomSelect
-                                    size="sm"
-                                    value={rule.right.kind}
-                                    onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: v === "field" ? { kind: "field", key: firstTargetKey } : { kind: "text", value: "" } } : r) } : prev)}
-                                    options={[{ value: "text", label: "직접 입력" }, { value: "field", label: "다른 칸" }]}
-                                  />
-                                </div>
-                                {rule.right.kind === "field" ? (
+                              )}
+                              {rule.clauses.map((clause, ci) => (
+                                <div key={ci} className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[10px] font-semibold text-wedly-t2 flex-shrink-0 w-8 text-right">{ci === 0 ? "만약" : (rule.combine === "or" ? "또는" : "그리고")}</span>
                                   <div className="min-w-[110px] flex-1">
                                     <CustomSelect
                                       size="sm"
-                                      value={rule.right.key}
-                                      onChange={(v) => setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: { kind: "field", key: v } } : r) } : prev)}
-                                      placeholder="비교할 칸"
+                                      value={clause.leftKey}
+                                      onChange={(v) => updateClause(ri, ci, { leftKey: v })}
+                                      placeholder="기준 칸"
                                       options={condTargets}
                                     />
                                   </div>
-                                ) : (() => {
-                                  const opts = optionsForKey(rule.leftKey);
-                                  const cur = rule.right.kind === "text" ? rule.right.value : "";
-                                  if (opts.length === 0) {
-                                    return (
-                                      <input
-                                        type="text"
-                                        value={rule.right.kind === "text" ? rule.right.value : ""}
-                                        onChange={(e) => { setFormulaError(""); const val = e.target.value; setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: { kind: "text", value: val } } : r) } : prev); }}
-                                        placeholder="예: 하이브"
-                                        className="flex-1 min-w-[90px] px-2.5 py-1.5 text-[16px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors"
-                                      />
-                                    );
-                                  }
-                                  // 기존에 적어둔 값이 목록에 없으면 보존(맨 위에 끼움) — 사라지지 않게.
-                                  const merged = cur && !opts.some((o) => o.value === cur) ? [{ value: cur }, ...opts] : opts;
-                                  return (
-                                    <div className="flex-1 min-w-[110px]">
+                                  <span className="text-[10px] text-wedly-muted flex-shrink-0">이(가)</span>
+                                  <div className="w-[84px] flex-shrink-0">
+                                    <CustomSelect
+                                      size="sm"
+                                      value={clause.right.kind}
+                                      onChange={(v) => updateClause(ri, ci, { right: v === "field" ? { kind: "field", key: firstTargetKey } : { kind: "text", value: "" } })}
+                                      options={[{ value: "text", label: "직접 입력" }, { value: "field", label: "다른 칸" }]}
+                                    />
+                                  </div>
+                                  {clause.right.kind === "field" ? (
+                                    <div className="min-w-[110px] flex-1">
                                       <CustomSelect
                                         size="sm"
-                                        value={cur}
-                                        onChange={(v) => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, right: { kind: "text", value: v } } : r) } : prev); }}
-                                        placeholder="값 선택"
-                                        options={merged.map((o) => ({ value: o.value, label: o.value, badgeClass: o.badgeClass }))}
+                                        value={clause.right.key}
+                                        onChange={(v) => updateClause(ri, ci, { right: { kind: "field", key: v } })}
+                                        placeholder="비교할 칸"
+                                        options={condTargets}
                                       />
                                     </div>
-                                  );
-                                })()}
-                                <div className="w-[116px] flex-shrink-0">
-                                  <CustomSelect
-                                    size="sm"
-                                    value={rule.op}
-                                    onChange={(v) => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, op: v as ConditionOp } : r) } : prev); }}
-                                    options={[
-                                      { value: "eq", label: "와 같으면" },
-                                      { value: "neq", label: "와 다르면" },
-                                      { value: "contains", label: "를 포함하면" },
-                                      { value: "notContains", label: "를 포함 안 하면" },
-                                    ]}
-                                  />
+                                  ) : (() => {
+                                    const opts = optionsForKey(clause.leftKey);
+                                    const cur = clause.right.kind === "text" ? clause.right.value : "";
+                                    if (opts.length === 0) {
+                                      return (
+                                        <input
+                                          type="text"
+                                          value={clause.right.kind === "text" ? clause.right.value : ""}
+                                          onChange={(e) => updateClause(ri, ci, { right: { kind: "text", value: e.target.value } })}
+                                          placeholder="예: 하이브"
+                                          className="flex-1 min-w-[90px] px-2.5 py-1.5 text-[16px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors"
+                                        />
+                                      );
+                                    }
+                                    // 기존에 적어둔 값이 목록에 없으면 보존(맨 위에 끼움) — 사라지지 않게.
+                                    const merged = cur && !opts.some((o) => o.value === cur) ? [{ value: cur }, ...opts] : opts;
+                                    return (
+                                      <div className="flex-1 min-w-[110px]">
+                                        <CustomSelect
+                                          size="sm"
+                                          value={cur}
+                                          onChange={(v) => updateClause(ri, ci, { right: { kind: "text", value: v } })}
+                                          placeholder="값 선택"
+                                          options={merged.map((o) => ({ value: o.value, label: o.value, badgeClass: o.badgeClass }))}
+                                        />
+                                      </div>
+                                    );
+                                  })()}
+                                  <div className="w-[116px] flex-shrink-0">
+                                    <CustomSelect
+                                      size="sm"
+                                      value={clause.op}
+                                      onChange={(v) => updateClause(ri, ci, { op: v as ConditionOp })}
+                                      options={[
+                                        { value: "eq", label: "와 같으면" },
+                                        { value: "neq", label: "와 다르면" },
+                                        { value: "contains", label: "를 포함하면" },
+                                        { value: "notContains", label: "를 포함 안 하면" },
+                                      ]}
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeClause(ri, ci)}
+                                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                                    title={rule.clauses.length <= 1 ? "이 경우 삭제" : "이 조건 삭제"}
+                                  >
+                                    ✕
+                                  </button>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.filter((_, i) => i !== ri) } : prev); }}
-                                  className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
-                                  title="이 조건 삭제"
-                                >
-                                  ✕
-                                </button>
-                              </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => addClause(ri)}
+                                className="w-full py-1 rounded-lg border border-dashed border-wedly-accent/50 text-[10px] font-semibold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+                              >
+                                + 조건 더하기
+                              </button>
                               <FormulaTermsEditor
                                 terms={rule.formula}
-                                onChange={(next) => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: prev.rules.map((r, i) => i === ri ? { ...r, formula: next } : r) } : prev); }}
+                                onChange={(next) => setClauseFormula(ri, next)}
                                 fields={fields}
                                 editingFieldKey={editingFieldKey}
                                 columnOptions={formulaColumnOptions}
@@ -2252,7 +2324,7 @@ export default function SettlementInfoTab({
                             onClick={() => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: [...prev.rules, newRule()] } : prev); }}
                             className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-gold/50 text-[11px] font-bold text-wedly-orange hover:bg-wedly-bg-yellow transition-colors"
                           >
-                            + 조건 추가
+                            + 다른 경우 추가
                           </button>
                         </div>
                       )}
