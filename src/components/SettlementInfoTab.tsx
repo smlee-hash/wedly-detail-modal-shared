@@ -1754,7 +1754,14 @@ export default function SettlementInfoTab({
                 <span className="text-[13px] font-medium text-wedly-t1 flex-1 min-w-0 truncate">{f.label}</span>
                 <span className="text-[10px] uppercase font-mono text-wedly-muted bg-wedly-bg-gray px-1.5 py-0.5 rounded">{f.type}</span>
                 {columnScopeMode !== "off" && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded text-wedly-muted bg-wedly-bg-gray">
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded text-wedly-muted bg-wedly-bg-gray"
+                    title={
+                      (f as { scope?: string }).scope === "custom"
+                        ? "커스텀 — 이 분야 모든 회사 공통 · ERP에서만 표시(하이브·일루아엔 안 보임)"
+                        : "공통 — 이 분야 모든 회사 공통 · 다른 앱(하이브·일루아)에도 표시"
+                    }
+                  >
                     {(f as { scope?: string }).scope === "custom" ? "커스텀" : "공통"}
                   </span>
                 )}
@@ -2054,7 +2061,7 @@ export default function SettlementInfoTab({
                       onChange={(v) => setDraftScope(v as "common" | "custom")}
                       options={[
                         { value: "common", label: "공통 (전 앱 공유)" },
-                        { value: "custom", label: "커스텀 (이 화면만)" },
+                        { value: "custom", label: "커스텀 (ERP 전용)" },
                       ]}
                     />
                   </div>
@@ -2442,13 +2449,16 @@ export default function SettlementInfoTab({
               </div>
               <div className="px-5 pb-4">
                 <p className="text-[13px] text-wedly-t2 leading-relaxed">
-                  이 칸을 <b className="text-wedly-t1">{toCustom ? "커스텀 (이 화면만)" : "공통 (전 앱 공유)"}</b> 으로 바꿀까요?
+                  이 칸을 <b className="text-wedly-t1">{toCustom ? "커스텀 (ERP 전용)" : "공통 (전 앱 공유)"}</b> 으로 바꿀까요?
                   <br />
                   <span className="text-wedly-muted">
                     {toCustom
-                      ? "이 화면에서만 보이게 됩니다(다른 화면·앱과 공유 해제). 입력값은 그대로 유지됩니다."
-                      : "여러 화면·앱이 함께 쓰는 공통 칸이 됩니다. 입력값은 그대로 유지됩니다."}
+                      ? "ERP에서만 보이고 하이브·일루아에는 안 보이는 칸이 됩니다. 입력값은 그대로 유지됩니다."
+                      : "하이브·일루아 등 다른 앱에서도 함께 보이는 공통 칸이 됩니다. 입력값은 그대로 유지됩니다."}
                   </span>
+                </p>
+                <p className="mt-2 text-[12px] text-wedly-gold bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                  ※ 이 칸은 이 분야의 <b>모든 회사가 함께 쓰는 칸</b>입니다. 범위를 바꾸면 모든 회사 상세창에 똑같이 적용됩니다. (회사마다 따로 두는 설정이 아닙니다)
                 </p>
               </div>
               <div className="px-5 py-3 bg-wedly-bg-gray/50 border-t border-wedly-bd/60 flex items-center justify-end gap-2">
