@@ -2920,7 +2920,7 @@ function FieldRow({
       return <span className="tabular-nums font-medium">{formatFormulaResult(num, formulaResult)}</span>;
     }
     if (value === null || value === undefined || value === "") {
-      return <span className="text-wedly-muted">{readOnly || isAuto ? "-" : "비어 있음"}</span>;
+      return <span className="text-wedly-muted">{"-"}</span>;
     }
     if (type === "select") {
       const c = optionColors?.[String(value)];

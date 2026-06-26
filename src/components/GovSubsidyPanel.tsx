@@ -323,6 +323,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   isAdmin={config.editable ? isAdmin : false}
                   ownSource={config.ownSource}
                   enableImagePaste={!config.commentsReadOnly}
+                  readOnly={config.commentsReadOnly === true}
                   timeFormatter={timeAgo}
                   pollingIntervalMs={5000}
                   shareEnabled={false}
