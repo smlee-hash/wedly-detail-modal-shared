@@ -6,6 +6,7 @@
 //   - 경정청구: 10총환급금 / 20확정수수료 비율 (없으면 자동 OFF)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { tierFieldsEqual } from "./tier-fields-equal";
 import {
   type FieldDef,
   type FieldType,
@@ -362,6 +363,11 @@ export default function SettlementInfoTab({
   }, [configApiPath]);
   const [editFields, setEditFields] = useState(false);
   const [savingFields, setSavingFields] = useState(false);
+  // 자동 갱신 effect 가 항상 최신 편집/저장 상태를 보도록 ref 동기(effect 의존성에서 분리).
+  const editFieldsRef = useRef(editFields);
+  const savingFieldsRef = useRef(savingFields);
+  useEffect(() => { editFieldsRef.current = editFields; }, [editFields]);
+  useEffect(() => { savingFieldsRef.current = savingFields; }, [savingFields]);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
@@ -406,21 +412,48 @@ export default function SettlementInfoTab({
     /WEDLY\s*매출/i.test(f.label) ||
     /매출.*VAT/.test(f.label);
 
+  // 칸 목록 자동 갱신 — config(합계카드 설정)와 동일하게 최초 1회 + 1분 간격 + 앱 복귀(visibilitychange/focus) 시 재요청.
+  // PWA 처럼 화면이 오래 떠 있어도 관리자가 바꾼 칸이 자동 반영되게 함.
+  // 표(tiers)는 아래 useEffect([rawValue, fields])가 재계산하므로 여기선 setFields 만 한다.
   useEffect(() => {
-    fetch(fieldsApiPath, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.success && Array.isArray(j.data)) {
-          // 서버 값을 그대로 신뢰. Hive 화면에서는 WEDLY 매출 컬럼만 시각적으로 제외.
-          const visible = (j.data as FieldDef[]).filter((f) => !isHiddenRevenueField(f));
-          setFields(visible);
-          setTiers(parseTiers(rawValue, visible));
-        }
-      })
-      .catch(() => { /* 빈 화면 그대로 */ })
-      .finally(() => setFieldsLoaded(true));
+    let cancelled = false;
+    const loadFields = (isInitial: boolean) => {
+      // 칸 편집/저장 중엔 자동 갱신 건너뜀(작업 덮어쓰기 방지). 단 최초 1회는 항상 로드.
+      if (!isInitial && (editFieldsRef.current || savingFieldsRef.current)) return;
+      fetch(fieldsApiPath, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j) => {
+          if (cancelled) return;
+          if (j.success && Array.isArray(j.data)) {
+            // 서버 값을 그대로 신뢰. Hive 화면에서는 WEDLY 매출 컬럼만 시각적으로 제외.
+            const visible = (j.data as FieldDef[]).filter((f) => !isHiddenRevenueField(f));
+            // 바뀐 게 없으면 setState 생략 — 불필요한 재렌더/입력 흔들림 방지.
+            setFields((prev) =>
+              tierFieldsEqual(
+                prev as unknown as Record<string, unknown>[],
+                visible as unknown as Record<string, unknown>[],
+              )
+                ? prev
+                : visible,
+            );
+          }
+        })
+        .catch(() => { /* 유지 */ })
+        .finally(() => { if (isInitial && !cancelled) setFieldsLoaded(true); });
+    };
+    loadFields(true);
+    const interval = setInterval(() => loadFields(false), 60000);
+    const onVisible = () => { if (document.visibilityState === "visible") loadFields(false); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fieldsApiPath]);
 
   useEffect(() => {
     setTiers(parseTiers(rawValue, fields));
