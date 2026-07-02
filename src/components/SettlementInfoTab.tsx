@@ -26,6 +26,7 @@ import {
   generateFieldKey,
   parseFormulaTerms,
   evalFormulaForTier,
+  evalDateFormulaForTier,
   formatFormulaResult,
   isNumericFieldType,
 } from "@wedly/ui-shared";
@@ -2407,12 +2408,19 @@ function TierCard({
               >
                 {grp.items.map((f) => {
                   const isFormula = f.type === "formula";
+                  // 날짜 수식(결과가 날짜)은 전용 계산기로 — 숫자 계산기는 날짜를 계산 못 해 빈칸이 됐었다.
+                  const isDateFormula = isFormula && (!!f.dateFormula || f.formulaResult === "date");
+                  const cellValue = isDateFormula
+                    ? evalDateFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined)
+                    : isFormula
+                      ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined)
+                      : (tier[f.key] ?? null);
                   return (
                     <FieldRow
                       key={f.key}
                       label={f.label}
                       type={f.type}
-                      value={isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null)}
+                      value={cellValue}
                       readOnly={readOnly}
                       isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       formulaResult={f.formulaResult}
@@ -2692,8 +2700,15 @@ function FieldRow({
   const display = useMemo(() => {
     // 수식 컬럼 — value 는 이미 계산된 자연값(또는 null). 항상 읽기전용.
     if (type === "formula") {
+      if (value === null || value === undefined || value === "") {
+        return <span className="text-wedly-muted">-</span>;
+      }
+      // 날짜 수식 결과(ISO 날짜 문자열)는 그대로 날짜로 표시(숫자 변환 금지).
+      if (formulaResult === "date") {
+        return <span className="tabular-nums font-medium">{String(value)}</span>;
+      }
       const num = typeof value === "number" ? value : Number(value);
-      if (value === null || value === undefined || value === "" || !Number.isFinite(num)) {
+      if (!Number.isFinite(num)) {
         return <span className="text-wedly-muted">-</span>;
       }
       return <span className="tabular-nums font-medium">{formatFormulaResult(num, formulaResult)}</span>;
