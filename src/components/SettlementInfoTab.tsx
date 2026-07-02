@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
+import { displayOrderNewestFirst } from "./tier-render-order";
 import { createPortal } from "react-dom";
 import {
   type FieldDef,
@@ -1775,7 +1776,7 @@ export default function SettlementInfoTab({
             });
           return (
             <div className="space-y-2">
-              {itemsInGroup.map(({ tier, idx }) => renderTierCard(tier, idx))}
+              {itemsInGroup.slice().reverse().map(({ tier, idx }) => renderTierCard(tier, idx))}
               {!readOnly && (
                 <button
                   type="button"
@@ -1792,7 +1793,7 @@ export default function SettlementInfoTab({
         // 세부 섹션 없음 — 옛 동작 그대로 + 어드민에게 "+ 세부 섹션으로 나눠 관리 시작" 진입점 노출
         return (
           <>
-            {tiers.map((tier, idx) => renderTierCard(tier, idx))}
+            {displayOrderNewestFirst(tiers).map(({ tier, idx }) => renderTierCard(tier, idx))}
             {!readOnly && (
               <button
                 onClick={() => addTier()}
