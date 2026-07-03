@@ -34,6 +34,8 @@ export interface FileMeta {
   category?: string;
   // 업로드 시 기록한 파일 용량(바이트). 과거 파일엔 없을 수 있음(표시 생략).
   size?: number;
+  // 업로드(첨부)한 시각(ISO 문자열). 과거 파일엔 없을 수 있음(표시 생략 — size 와 동일 관례).
+  at?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +68,15 @@ export function detectFileTag(filename: string): string {
 }
 function getFileTagDef(key: string) {
   return FILE_TAG_DEFS.find((t) => t.key === key) || FILE_TAG_DEFS[FILE_TAG_DEFS.length - 1];
+}
+
+// 첨부 시각(ISO) → "YYYY.MM.DD HH:mm". 값 없음·깨진 값이면 null(표시 생략 — size 와 동일 관례).
+function formatAttachedAt(at?: string): string | null {
+  if (!at) return null;
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 // 실제 파일 컬럼 카테고리(검토보고서·경정청구 신고서 등) 용 동적 색상.
@@ -249,6 +260,7 @@ export function FilesTab({
             contentType: u.mimeType,
             category,
             size: u.size,
+            at: new Date().toISOString(), // 첨부 시각 기록(클라 런타임) — 저장 경로가 그대로 보존.
           });
         }
       }
@@ -443,8 +455,18 @@ export function FilesTab({
                     <path d="M9 2H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1V6L9 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
                     <path d="M9 2v4h4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
                   </svg>
-                  <span className="flex-1 truncate text-wedly-t1 group-hover:text-wedly-accent">
-                    {f.fileName || "파일"}
+                  <span className="flex flex-col min-w-0 flex-1">
+                    <span className="truncate text-wedly-t1 group-hover:text-wedly-accent">
+                      {f.fileName || "파일"}
+                    </span>
+                    {(() => {
+                      const ts = formatAttachedAt(f.at);
+                      return ts ? (
+                        <span className="text-[11px] text-wedly-muted truncate tabular-nums">
+                          {ts}
+                        </span>
+                      ) : null;
+                    })()}
                   </span>
                 </a>
                 {(() => {
