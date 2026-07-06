@@ -110,6 +110,8 @@ export function FilesTab({
   uploadApiPath = "/api/upload",
   proxyApiBase = "/api/files/proxy",
   downloadApiPath,
+  downloadAllApiPath,
+  downloadAllLabel,
   onOpenFile,
   maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES,
   resolveSizes,
@@ -131,6 +133,10 @@ export function FilesTab({
   proxyApiBase?: string;
   // 주어지면 각 파일 행에 다운로드 버튼 표시(이 경로로 링크). 없으면 다운로드 버튼 숨김.
   downloadApiPath?: string;
+  // 주어지면 상단에 "전체 다운로드" 버튼 표시 — 이 경로로 목록 전체를 POST 하면 ZIP 을 돌려준다.
+  downloadAllApiPath?: string;
+  // 전체 다운로드 ZIP 파일명 라벨(업체명 등). 없으면 "첨부파일".
+  downloadAllLabel?: string;
   // 주어지면 파일 열기 클릭을 가로채 이 함수로 처리(노션 임시 링크 만료 자동 갱신 등).
   // 없으면 a 태그가 평범하게 새 탭으로 연다.
   onOpenFile?: (args: { href: string; entryId: string; fileName: string; category?: string }) => void;
@@ -141,6 +147,7 @@ export function FilesTab({
   resolveSizes?: (items: FileMeta[]) => Promise<Record<string, number>>;
 }) {
   const [uploading, setUploading] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingCategoryIdx, setEditingCategoryIdx] = useState<number | null>(null);
   // 위들리 자체 모달 상태 (window.confirm/alert 금지)
@@ -306,6 +313,43 @@ export function FilesTab({
     if (dropped && dropped.length > 0) handleSelectFiles(dropped);
   };
 
+  // 전체 다운로드 — 현재 화면에 보이는 파일들을 서버로 보내 하나의 ZIP 으로 받아 저장한다.
+  const handleDownloadAll = async () => {
+    if (!downloadAllApiPath || downloadingAll || visible.length === 0) return;
+    setDownloadingAll(true);
+    setError(null);
+    try {
+      const label = downloadAllLabel || "첨부파일";
+      const res = await fetch(downloadAllApiPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label,
+          files: visible.map((f) => ({
+            fileName: f.fileName || "파일",
+            url: f.url,
+            objectKey: f.objectKey,
+            entryId: pageId,
+          })),
+        }),
+      });
+      if (!res.ok) throw new Error("전체 다운로드에 실패했어요. 잠시 후 다시 시도해 주세요.");
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `${label}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (e) {
+      setNoticeMsg(e instanceof Error ? e.message : "전체 다운로드에 실패했어요.");
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   return (
     <div
       className="space-y-3"
@@ -351,6 +395,37 @@ export function FilesTab({
             </>
           )}
         </button>
+        {downloadAllApiPath && visible.length >= 2 && (
+          <button
+            type="button"
+            onClick={handleDownloadAll}
+            disabled={downloadingAll}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-semibold transition border",
+              downloadingAll
+                ? "bg-wedly-bg-gray text-wedly-muted border-wedly-bd cursor-not-allowed"
+                : "bg-white text-wedly-accent border-wedly-accent/40 hover:border-wedly-accent hover:bg-wedly-bg-blue/30",
+            )}
+            title="첨부파일 전체를 압축파일(ZIP)로 내려받기"
+          >
+            {downloadingAll ? (
+              <>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="animate-spin">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25" />
+                  <path d="M14 8a6 6 0 00-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span>압축 중…</span>
+              </>
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 2.5v8M5 7.5l3 3 3-3M3 13.5h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>전체 다운로드</span>
+              </>
+            )}
+          </button>
+        )}
         <span className="text-[11px] text-wedly-muted">최대 {formatFileSize(maxUploadBytes)} · 여러 파일 동시 선택 가능</span>
       </div>
 
