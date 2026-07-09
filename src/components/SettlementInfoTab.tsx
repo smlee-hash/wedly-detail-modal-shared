@@ -1,3 +1,4 @@
+// cache-bust 2026-07-10: illua 계약탭 합계카드 재작업 — 배포 재설치 강제(동작 무변경, f5ee993 후손)
 "use client";
 
 // 경정청구 정산정보 탭 — 정책자금(policy-fund/SettlementInfoTab.tsx) 와 동일한 UX/로직.
