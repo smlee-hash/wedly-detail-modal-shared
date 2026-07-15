@@ -103,7 +103,9 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
 export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
   function GovSubsidyPanel({ rows, primaryRow, isAdmin, onSaved, adapter }: SectionPanelProps) {
     const policyRows = config.filterPolicyRows(rows);
-    const [subTab, setSubTab] = useState<SubTab>(() => (policyRows.length ? "history" : "contract"));
+    // 항목이 없어도 히스토리로 먼저 연다 — 첫 메모 입력칸(또는 안내)이 바로 보이게(재작업 2026-07-15).
+    // 기존엔 항목 없으면 '계약정보'로 열려, 하이브(값 잠금)에선 빈 화면만 보여 혼동을 줬다.
+    const [subTab, setSubTab] = useState<SubTab>("history");
     const [sel, setSel] = useState(0);
     const [err, setErr] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
@@ -128,16 +130,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
     // 값 편집 가능 = 앱이 편집 허용 && 현재 사용자가 관리자. (하이브는 editable=false → 항상 보기 전용)
     const canEditValues = config.editable && isAdmin;
-    // 히스토리 게이트 — 항목 없어도 편집 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
-    // 식별값 키 = 각 앱 createContract prefill(ERP policy-rows·일루아 illua-gov-panel)이 읽는 사업자번호/연락처 키 합집합 —
-    // 둘 다 없으면 자동생성 항목이 이 회사 상세와 안 묶이는 고아가 되므로 composer 대신 안내(needAnchor).
-    const hasAnchorIdentity = ["15사업자번호", "04사업자번호", "04연락처", "03대표연락처"].some(
-      (k) => String(primaryRow[k] ?? "").trim() !== "",
-    );
+    // 히스토리 게이트 — 항목 없어도 댓글 작성 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
+    // 식별값(사업자번호/연락처)이 없어도 열린다 — 자동생성 항목은 앵커 꼬리표(_anchorRef, 각 앱 prefill 부여)로
+    // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
     // 댓글(히스토리) 작성 가능 = 보기전용 앱이 아니면 허용 — 값 편집(canEditValues)과 분리.
     // 2단계: 하이브는 editable:false(값 잠금) + commentsReadOnly 미설정(댓글 개방)으로 여기만 열린다.
     const canWriteHistory = config.commentsReadOnly !== true;
-    const historyGate = resolveHistoryGate({ entryId, canWriteHistory, hasCreateContract: Boolean(config.createContract), hasAnchorIdentity });
+    const historyGate = resolveHistoryGate({ entryId, canWriteHistory, hasCreateContract: Boolean(config.createContract) });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
@@ -323,10 +322,6 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                     onSaved?.();
                   }}
                 />
-              ) : historyGate === "needAnchor" ? (
-                <div className="py-12 text-center text-[13px] text-wedly-muted">
-                  기본정보에 사업자번호 또는 연락처를 입력하면 히스토리를 남길 수 있습니다.
-                </div>
               ) : (
                 <div className="py-12 text-center text-[13px] text-wedly-muted">아직 남겨진 히스토리가 없습니다.</div>
               )}
