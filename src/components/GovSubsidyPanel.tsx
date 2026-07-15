@@ -28,6 +28,7 @@ import {
   type ScoreCardDef,
 } from "@wedly/ui-shared";
 import SettlementInfoTabBase from "./SettlementInfoTab";
+import { resolveHistoryGate } from "./gov-history-gate";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
 const SettlementInfoTab = SettlementInfoTabBase as unknown as ComponentType<Record<string, unknown>>;
@@ -127,6 +128,8 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
     // 값 편집 가능 = 앱이 편집 허용 && 현재 사용자가 관리자. (하이브는 editable=false → 항상 보기 전용)
     const canEditValues = config.editable && isAdmin;
+    // 히스토리 게이트 — 항목 없어도 편집 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
+    const historyGate = resolveHistoryGate({ entryId, canEditValues, hasCreateContract: Boolean(config.createContract) });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
@@ -285,7 +288,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         <div className="flex-1">
           {subTab === "history" && (
             <div className="p-4">
-              {entryId ? (
+              {historyGate === "panel" ? (
                 <HistoryPanel
                   pageId={entryId}
                   adapter={historyAdapter}
@@ -299,8 +302,21 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   shareEnabled={false}
                   hideCategories
                 />
+              ) : historyGate === "composer" ? (
+                <FirstHistoryComposer
+                  onAdd={async (text) => {
+                    const id = await ensureEntryId();
+                    const res = await fetch(config.commentsPath(id), {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ text }),
+                    });
+                    if (!res.ok) throw new Error("저장에 실패했습니다.");
+                    onSaved?.();
+                  }}
+                />
               ) : (
-                <div className="py-12 text-center text-[13px] text-wedly-muted">계약 정보를 입력하면 히스토리를 남길 수 있습니다.</div>
+                <div className="py-12 text-center text-[13px] text-wedly-muted">아직 남겨진 히스토리가 없습니다.</div>
               )}
             </div>
           )}
@@ -333,4 +349,53 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     );
   }
   return GovSubsidyPanel;
+}
+
+/** 항목이 없을 때 첫 히스토리 메모 입력칸 — 저장하면 정부지원금 항목이 자동생성된다. */
+function FirstHistoryComposer({ onAdd }: { onAdd: (text: string) => Promise<void> }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function submit() {
+    const t = text.trim();
+    if (!t || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await onAdd(t);
+      setText("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "저장에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-[12px] text-wedly-muted">계약이 없어도 히스토리를 바로 남길 수 있어요. 첫 메모를 남기면 정부지원금 항목이 자동으로 만들어집니다.</p>
+      {err && <div role="alert" className="rounded-lg border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red">{err}</div>}
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+        placeholder="히스토리 메모를 입력하세요"
+        className="w-full rounded-lg border border-wedly-bd px-3 py-2 text-sm focus:border-wedly-accent focus:outline-none"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void submit();
+          }
+        }}
+      />
+      <div className="flex justify-end">
+        <button
+          onClick={submit}
+          disabled={busy || !text.trim()}
+          className="rounded-lg bg-wedly-accent px-4 py-1.5 text-[13px] font-semibold text-white hover:brightness-110 disabled:opacity-40"
+        >
+          {busy ? "저장 중…" : "히스토리 남기기"}
+        </button>
+      </div>
+    </div>
+  );
 }
