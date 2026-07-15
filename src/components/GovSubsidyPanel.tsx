@@ -132,7 +132,12 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 값 편집 가능 = 앱이 편집 허용 && 현재 사용자가 관리자. (하이브는 editable=false → 항상 보기 전용)
     const canEditValues = config.editable && isAdmin;
     // 히스토리 게이트 — 항목 없어도 편집 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
-    const historyGate = resolveHistoryGate({ entryId, canEditValues, hasCreateContract: Boolean(config.createContract) });
+    // 식별값 키 = 각 앱 createContract prefill(ERP policy-rows·일루아 illua-gov-panel)이 읽는 사업자번호/연락처 키 합집합 —
+    // 둘 다 없으면 자동생성 항목이 이 회사 상세와 안 묶이는 고아가 되므로 composer 대신 안내(needAnchor).
+    const hasAnchorIdentity = ["15사업자번호", "04사업자번호", "04연락처", "03대표연락처"].some(
+      (k) => String(primaryRow[k] ?? "").trim() !== "",
+    );
+    const historyGate = resolveHistoryGate({ entryId, canEditValues, hasCreateContract: Boolean(config.createContract), hasAnchorIdentity });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
@@ -345,6 +350,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                     onSaved?.();
                   }}
                 />
+              ) : historyGate === "needAnchor" ? (
+                <div className="py-12 text-center text-[13px] text-wedly-muted">
+                  기본정보에 사업자번호 또는 연락처를 입력하면 히스토리를 남길 수 있습니다.
+                </div>
               ) : (
                 <div className="py-12 text-center text-[13px] text-wedly-muted">아직 남겨진 히스토리가 없습니다.</div>
               )}
@@ -385,6 +394,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 function FirstHistoryComposer({ onAdd }: { onAdd: (text: string) => Promise<void> }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   async function submit() {
     const t = text.trim();
@@ -394,6 +404,9 @@ function FirstHistoryComposer({ onAdd }: { onAdd: (text: string) => Promise<void
     try {
       await onAdd(t);
       setText("");
+      // 저장 성공 — 부모 새로고침(onSaved)으로 항목이 잡히면 이 컴포저는 패널로 교체된다.
+      // 그 사이 빈 입력칸만 보이면 재입력(중복 메모)을 유도하므로 저장됨 안내를 띄운다(코드리뷰 반영).
+      setSaved(true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "저장에 실패했습니다.");
     } finally {
@@ -403,6 +416,11 @@ function FirstHistoryComposer({ onAdd }: { onAdd: (text: string) => Promise<void
   return (
     <div className="space-y-2">
       <p className="text-[12px] text-wedly-muted">계약이 없어도 히스토리를 바로 남길 수 있어요. 첫 메모를 남기면 정부지원금 항목이 자동으로 만들어집니다.</p>
+      {saved && (
+        <div className="rounded-lg border border-wedly-bd-green bg-wedly-bg-green px-3 py-2 text-[13px] text-wedly-green">
+          저장했습니다. 히스토리를 불러오는 중…
+        </div>
+      )}
       {err && <div role="alert" className="rounded-lg border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red">{err}</div>}
       <textarea
         value={text}
@@ -411,6 +429,8 @@ function FirstHistoryComposer({ onAdd }: { onAdd: (text: string) => Promise<void
         placeholder="히스토리 메모를 입력하세요"
         className="w-full rounded-lg border border-wedly-bd px-3 py-2 text-sm focus:border-wedly-accent focus:outline-none"
         onKeyDown={(e) => {
+          // 한글 IME 조합 확정 Enter로 미완성 텍스트가 제출되지 않게 가드(HistoryPanel과 동일 패턴).
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             void submit();
