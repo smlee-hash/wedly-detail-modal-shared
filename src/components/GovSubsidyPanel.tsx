@@ -134,7 +134,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const hasAnchorIdentity = ["15사업자번호", "04사업자번호", "04연락처", "03대표연락처"].some(
       (k) => String(primaryRow[k] ?? "").trim() !== "",
     );
-    const historyGate = resolveHistoryGate({ entryId, canEditValues, hasCreateContract: Boolean(config.createContract), hasAnchorIdentity });
+    // 댓글(히스토리) 작성 가능 = 보기전용 앱이 아니면 허용 — 값 편집(canEditValues)과 분리.
+    // 2단계: 하이브는 editable:false(값 잠금) + commentsReadOnly 미설정(댓글 개방)으로 여기만 열린다.
+    const canWriteHistory = config.commentsReadOnly !== true;
+    const historyGate = resolveHistoryGate({ entryId, canWriteHistory, hasCreateContract: Boolean(config.createContract), hasAnchorIdentity });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
@@ -298,7 +301,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   pageId={entryId}
                   adapter={historyAdapter}
                   currentUserName={userName}
-                  isAdmin={config.editable ? isAdmin : false}
+                  isAdmin={config.editable || canWriteHistory ? isAdmin : false}
                   ownSource={config.ownSource}
                   enableImagePaste={!config.commentsReadOnly}
                   readOnly={config.commentsReadOnly === true}
