@@ -49,6 +49,9 @@ export type GovSubsidyPanelConfig = {
   editable: boolean;
   /** 칸/카드 정의(구조) 편집 허용. ERP만 true(정의는 한 곳에서). 일루아·하이브 false. */
   allowStructureEdit: boolean;
+  /** 관리자가 아니어도 값(계약정보·정산 등) 수정·신규 추가 허용(옵트인). 미설정 시 기존대로 관리자만.
+   *  구조/칸 정의 편집은 이 플래그와 무관하게 항상 실제 관리자만(allowStructureEdit && isAdmin). */
+  allowNonAdminEdit?: boolean;
   /** 히스토리 출처 라벨: "erp" | "hive" | "illua". */
   ownSource: string;
   /** ERP만 조건부 수식 UI. */
@@ -128,8 +131,9 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const entryId = entry?.entryId ?? "";
     const data = (entry?.row ?? {}) as Record<string, unknown>;
 
-    // 값 편집 가능 = 앱이 편집 허용 && 현재 사용자가 관리자. (하이브는 editable=false → 항상 보기 전용)
-    const canEditValues = config.editable && isAdmin;
+    // 값 편집 가능 = 앱이 편집 허용 && (관리자 || 일반 사용자 편집 옵트인). 하이브는 editable=false → 항상 보기 전용.
+    // NO.119: allowNonAdminEdit(ERP·일루아) 로 일반 사용자도 값 수정·신규 추가 가능. 구조 편집은 실제 isAdmin 유지.
+    const canEditValues = config.editable && (isAdmin || config.allowNonAdminEdit === true);
     // 히스토리 게이트 — 항목 없어도 편집 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
     // 식별값(사업자번호/연락처)이 없어도 열린다 — 자동생성 항목은 앵커 꼬리표(_anchorRef, 각 앱 prefill 부여)로
     // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
