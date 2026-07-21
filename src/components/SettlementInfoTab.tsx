@@ -152,6 +152,9 @@ export default function SettlementInfoTab({
   allowColumnEdit,
   // 칸 범위 모드: off(현행·토글없음) | erp(공통/커스텀 선택) | partner-custom(커스텀고정·공통잠금)
   columnScopeMode = "off",
+  // 이 차수 칸을 도메인 "표"에 차수별 줄로 노출하는 "표 노출" 토글 버튼 허용 여부 — 기본 false.
+  //   실제 표 렌더가 구현된 도메인(1단계=경정청구)에서만 true 로 켠다. 다른 도메인은 버튼 자체가 안 뜬다.
+  allowTableExpose = false,
   // ── 영역 분리 prop (A-1 모듈화) ──
   // 정산정보 외 계약·환불 같은 다른 영역에서도 같은 차수 카드 부품 재사용 가능
   // 기본값은 정산 — 기존 호출 호환
@@ -189,6 +192,8 @@ export default function SettlementInfoTab({
   allowColumnEdit?: boolean;
   // 칸 범위 모드(공통/커스텀). 기본 off = 현행 동작.
   columnScopeMode?: "off" | "erp" | "partner-custom";
+  // "표 노출" 토글 버튼 허용(표 렌더 구현 도메인 전용). 기본 false = 버튼 숨김.
+  allowTableExpose?: boolean;
   storagePrefix?: string;
   fieldsApiPath?: string;
   sectionTitle?: string;
@@ -846,23 +851,27 @@ export default function SettlementInfoTab({
       const next = fields.map((f) => {
         if (f.key !== key) return f;
         const keepScope = (f as { scope?: "common" | "custom" }).scope;
+        const keepTableExposed = (f as { tableExposed?: boolean }).tableExposed;
         if (newType === "formula") {
           const nf: FieldDef = draftFormulaResult === "date"
             ? { key: f.key, label: f.label, type: "formula" as FieldType, formulaResult: "date", dateFormula: draftDateFormula }
             : { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
           if (draftFormulaResult !== "date" && formulaConditional) nf.conditional = formulaConditional;
           if (keepScope) (nf as unknown as Record<string, unknown>).scope = keepScope;
+          if (keepTableExposed) (nf as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
           return nf;
         }
         // select 로 바꾸면 보기 목록을 싣는다 (범위 scope 는 유지)
         if (newType === "select") {
           const sel = { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
           if (keepScope) (sel as unknown as Record<string, unknown>).scope = keepScope;
+          if (keepTableExposed) (sel as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
           return sel;
         }
         // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거 (범위 scope 는 유지)
         const convField: FieldDef = { key: f.key, label: f.label, type: newType };
         if (keepScope) (convField as unknown as Record<string, unknown>).scope = keepScope;
+        if (keepTableExposed) (convField as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
         return convField;
       });
       setFields(next);
@@ -952,6 +961,26 @@ export default function SettlementInfoTab({
     persistFields(next);
     setPendingScopeToggleKey(null);
   }, [pendingScopeToggleKey, fields, persistFields]);
+
+  // ── 차수 칸 "표 노출" 토글 — 이 칸을 도메인 표(경정청구 등)에 차수별 줄로 노출(ERP 전용) ──
+  const [pendingExposeKey, setPendingExposeKey] = useState<string | null>(null);
+  const toggleTableExpose = useCallback((key: string) => {
+    setPendingExposeKey(key);
+  }, []);
+  const confirmToggleExpose = useCallback(() => {
+    const key = pendingExposeKey;
+    if (!key) return;
+    const next = fields.map((f) => {
+      if (f.key !== key) return f;
+      const cur = !!(f as { tableExposed?: boolean }).tableExposed;
+      const nf = { ...f } as FieldDef;
+      (nf as unknown as Record<string, unknown>).tableExposed = !cur;
+      return nf;
+    });
+    setFields(next);
+    persistFields(next);
+    setPendingExposeKey(null);
+  }, [pendingExposeKey, fields, persistFields]);
 
   // ── 드래그 앤 드롭으로 컬럼 순서 변경 ──
   const moveField = useCallback((fromIdx: number, toIdx: number) => {
@@ -1806,6 +1835,19 @@ export default function SettlementInfoTab({
                     {columnScopeMode === "erp" && (
                       <button onClick={() => changeFieldScope(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-green hover:bg-wedly-bg-green">범위</button>
                     )}
+                    {columnScopeMode === "erp" && allowTableExpose && (
+                      <button
+                        onClick={() => toggleTableExpose(f.key)}
+                        className={
+                          (f as { tableExposed?: boolean }).tableExposed
+                            ? "text-[11px] px-2 py-1 rounded text-wedly-orange hover:bg-wedly-bg-yellow"
+                            : "text-[11px] px-2 py-1 rounded text-wedly-accent hover:bg-wedly-bg-blue"
+                        }
+                        title="이 칸을 경정청구 표에 차수별 줄로 노출/취소 (ERP 전용)"
+                      >
+                        {(f as { tableExposed?: boolean }).tableExposed ? "표 노출 취소" : "표 노출"}
+                      </button>
+                    )}
                     <button onClick={() => removeFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-red hover:bg-wedly-bg-red">삭제</button>
                   </>
                 )}
@@ -2498,6 +2540,48 @@ export default function SettlementInfoTab({
               <div className="px-5 py-3 bg-wedly-bg-gray/50 border-t border-wedly-bd/60 flex items-center justify-end gap-2">
                 <button onClick={() => setPendingScopeToggleKey(null)} className="px-4 py-2 text-[13px] font-medium text-wedly-t2 bg-white border border-wedly-bd rounded-lg hover:bg-wedly-bg-gray transition-colors">취소</button>
                 <button onClick={confirmScopeToggle} className="px-4 py-2 text-[13px] font-bold text-white bg-wedly-accent rounded-lg hover:brightness-110 transition-colors">바꾸기</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 차수 칸 "표 노출" 토글 확인창 — ERP 전용 */}
+      {pendingExposeKey && (() => {
+        const target = fields.find((f) => f.key === pendingExposeKey);
+        const on = !!(target as { tableExposed?: boolean } | undefined)?.tableExposed;
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setPendingExposeKey(null)} />
+            <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
+              <div className="px-5 pt-5 pb-3 flex items-start gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-blue flex items-center justify-center">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-accent">
+                    <path d="M3 9h18M3 15h18M9 3v18" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[15px] font-bold text-wedly-navy">{on ? "표 노출 취소" : "표 노출"}</h3>
+                  <p className="mt-1 text-[12px] text-wedly-muted truncate">{target?.label || pendingExposeKey}</p>
+                </div>
+              </div>
+              <div className="px-5 pb-4">
+                <p className="text-[13px] text-wedly-t2 leading-relaxed">
+                  이 칸을 <b className="text-wedly-t1">경정청구 표</b> 에 {on ? "더 이상 노출하지 않을까요?" : "차수별 줄로 노출할까요?"}
+                  <br />
+                  <span className="text-wedly-muted">
+                    {on
+                      ? "표에서 이 차수 칸이 사라집니다. 입력값은 그대로 유지됩니다."
+                      : "표에 이 차수 칸이 나타나고, 여러 차수는 줄로 나뉘어 표시·편집됩니다. 입력값은 그대로 유지됩니다."}
+                  </span>
+                </p>
+                <p className="mt-2 text-[12px] text-wedly-gold bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                  ※ 이 설정은 이 분야 <b>모든 회사 표</b>에 함께 적용됩니다. (ERP에서만 보이고 하이브·일루아엔 영향 없음)
+                </p>
+              </div>
+              <div className="px-5 py-3 bg-wedly-bg-gray/50 border-t border-wedly-bd/60 flex items-center justify-end gap-2">
+                <button onClick={() => setPendingExposeKey(null)} className="px-4 py-2 text-[13px] font-medium text-wedly-t2 bg-white border border-wedly-bd rounded-lg hover:bg-wedly-bg-gray transition-colors">취소</button>
+                <button onClick={confirmToggleExpose} className="px-4 py-2 text-[13px] font-bold text-white bg-wedly-accent rounded-lg hover:brightness-110 transition-colors">{on ? "노출 취소" : "노출하기"}</button>
               </div>
             </div>
           </div>
