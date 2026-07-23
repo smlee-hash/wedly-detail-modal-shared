@@ -27,6 +27,7 @@ import {
   generateFieldKey,
   parseFormulaTerms,
   evalFormulaForTier,
+  evalDateFormulaForTier,
   formatFormulaResult,
   isNumericFieldType,
 } from "@wedly/ui-shared";
@@ -1041,6 +1042,8 @@ export default function SettlementInfoTab({
     // 수식 컬럼은 저장값이 없으므로 차수마다 계산해서 합산.
     const field = fields.find((f) => f.key === k);
     if (field?.type === "formula") {
+      // 날짜 수식 칸은 숫자 합계에 포함하지 않음 (문자열 날짜이므로 0 처리)
+      if (field.formulaResult === "date") return 0;
       return target.reduce((a, t) => {
         const r = evalFormulaForTier(field, t, fields, undefined, row ?? undefined);
         return a + (typeof r === "number" && Number.isFinite(r) ? r : 0);
@@ -2408,12 +2411,14 @@ function TierCard({
               >
                 {grp.items.map((f) => {
                   const isFormula = f.type === "formula";
+                  const isDateFormula = isFormula && f.formulaResult === "date";
                   return (
                     <FieldRow
                       key={f.key}
                       label={f.label}
                       type={f.type}
-                      value={isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null)}
+                      value={isFormula && !isDateFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null)}
+                      dateValue={isDateFormula ? evalDateFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : undefined}
                       readOnly={readOnly}
                       isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       formulaResult={f.formulaResult}
@@ -2663,11 +2668,12 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, type, value, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
+  label, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
 }: {
   label: string;
   type: FieldType;
   value: string | number | null;
+  dateValue?: string | null;
   onChange: (v: string | number | null) => void;
   readOnly?: boolean;
   isAuto?: boolean;
@@ -2692,6 +2698,9 @@ function FieldRow({
 
   const display = useMemo(() => {
     // 수식 컬럼 — value 는 이미 계산된 자연값(또는 null). 항상 읽기전용.
+    if (formulaResult === "date") {
+      return <span className="tabular-nums font-medium">{typeof dateValue === "string" && dateValue ? dateValue : "-"}</span>;
+    }
     if (type === "formula") {
       const num = typeof value === "number" ? value : Number(value);
       if (value === null || value === undefined || value === "" || !Number.isFinite(num)) {
@@ -2718,7 +2727,7 @@ function FieldRow({
       return <span className="tabular-nums font-medium">{fmtCurrency(value)}원</span>;
     }
     return <span>{String(value)}</span>;
-  }, [value, type, readOnly, isAuto, formulaResult, optionColors]);
+  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors]);
 
   // 수식 컬럼은 사람이 입력하지 않음 (자동 계산 읽기전용)
   const isEditable = !readOnly && !isAuto && type !== "formula";
