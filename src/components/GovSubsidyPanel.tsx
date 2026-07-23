@@ -248,8 +248,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         // 표준 후보는 "정책 행(data)" 기준 — 조건 키는 3앱이 공유하는 정부지원금 데이터에 존재해야
         // 모든 화면에서 같은 값으로 평가된다(NO.125). primaryRow(통합협업 전체 탭=경정청구 행)를 쓰면
         // 52사업장주소지 같은 타 분야 키가 후보로 잡혀, 그 조건이 일루아·정부지원금 문맥에서는
-        // 기준 칸이 늘 비어 영영 미발동(항상 기본식)한다. 계약 행이 없을 때만 primaryRow 폴백.
-        const std = basicFieldOptionsFromRow((data ?? primaryRow) as Record<string, unknown>);
+        // 기준 칸이 늘 비어 영영 미발동(항상 기본식)한다.
+        // data 는 entry?.row ?? {} 라 항상 객체 — "계약 행 없음" 폴백은 빈 객체 검사로 해야 실제로 동작한다(리뷰 M-3).
+        const condRow = data && Object.keys(data).length > 0 ? data : primaryRow;
+        const std = basicFieldOptionsFromRow(condRow as Record<string, unknown>);
         const customKeys = new Set(condFromDefs.map((o) => o.key));
         return [...std.filter((o) => !customKeys.has(o.key)), ...condFromDefs];
       }
