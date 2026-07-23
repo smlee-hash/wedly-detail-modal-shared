@@ -26,9 +26,11 @@ import {
   type UnifiedComment,
   type SectionPanelProps,
   type ScoreCardDef,
+  COMMON_BASIC_FIELD_SPECS,
 } from "@wedly/ui-shared";
 import SettlementInfoTabBase from "./SettlementInfoTab";
 import { resolveHistoryGate } from "./gov-history-gate";
+import { buildGovEvalBase } from "./gov-eval-context";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
 const SettlementInfoTab = SettlementInfoTabBase as unknown as ComponentType<Record<string, unknown>>;
@@ -131,6 +133,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const entryId = entry?.entryId ?? "";
     const data = (entry?.row ?? {}) as Record<string, unknown>;
 
+    // NO.125 반려 재작업: 수식 평가 바탕 행 — 전체 탭과 동일 문맥(경정청구 행+공통 칸 채움)을
+    // 어느 화면에서든 재현한다(대웅글로벌: 일루아 탭·일루아 앱 카드가 전체 탭과 딴 값이던 원인).
+    const evalBase = useMemo(
+      () => buildGovEvalBase(rows as ReadonlyArray<{ domain?: string; row?: unknown }>, primaryRow as Record<string, unknown>, COMMON_BASIC_FIELD_SPECS),
+      [rows, primaryRow],
+    );
+
     // 값 편집 가능 = 앱이 편집 허용 && (관리자 || 일반 사용자 편집 옵트인). 하이브는 editable=false → 항상 보기 전용.
     // NO.119: allowNonAdminEdit(ERP·일루아) 로 일반 사용자도 값 수정·신규 추가 가능. 구조 편집은 실제 isAdmin 유지.
     const canEditValues = config.editable && (isAdmin || config.allowNonAdminEdit === true);
@@ -224,10 +233,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const condOpts = config.enableConditionalFormula && config.conditionFieldOptions ? config.conditionFieldOptions(data) : undefined;
 
     // 계약/정산/환불 공통 prop — 공용 저장소 설정·합계카드로 3앱 동일 렌더.
-    // row: 기본정보 행(primaryRow) + 정산 행(data) 합산 — 정산 키가 우선(덮어씀).
+    // row: 평가 바탕 행(evalBase = 경정청구 행+primaryRow+공통 칸 채움) + 정산 행(data) — 정산 키가 우선(덮어씀).
     //   conditionValues 는 row 에서 오므로, 조건부 수식 기준칸(담당사 등 기본정보 칸)을 조건에 쓸 수 있음(ERP 동일).
     const settlementCommon: Record<string, unknown> = {
-      row: { ...(primaryRow as Record<string, unknown>), ...(data ?? {}) },
+      row: { ...evalBase, ...(data ?? {}) },
       isAdmin: canEditValues,
       readOnly: !canEditValues,
       allowStructureEdit: config.allowStructureEdit && isAdmin,
