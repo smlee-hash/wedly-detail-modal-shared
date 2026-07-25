@@ -1052,6 +1052,22 @@ export default function SettlementInfoTab({
   }, [tiersInSubSection, fields, row]);
   // 옛 호출 호환 — 인자 1개. 항상 전체 합산.
   const sumColumn = useCallback((k: string) => sumColumnIn(k), [sumColumnIn]);
+  // NO.132 — 이 칸에 '실제로 더할 값'이 하나라도 있었나. 합계 카드가 0원을 보여줄지 '-'를
+  // 보여줄지 가르는 판정이다. 옛 경정청구 업체는 수수료율 칸이 아예 없어(옛 노션 DB에 없던
+  // 항목) 수식이 계산 불가(null)인데, 합계는 그걸 0으로 세어 "총 예상 수수료 0원"이라는
+  // 틀린 사실을 큰 카드에 띄웠다. 값이 하나라도 있으면 종전대로 합계를 보여준다.
+  const columnHasValueIn = useCallback((k: string, subId?: string): boolean => {
+    const target = tiersInSubSection(subId);
+    const field = fields.find((f) => f.key === k);
+    if (field?.type === "formula") {
+      if (field.formulaResult === "date") return false;
+      return target.some((t) => {
+        const r = evalFormulaForTier(field, t, fields, undefined, row ?? undefined);
+        return typeof r === "number" && Number.isFinite(r);
+      });
+    }
+    return target.some((t) => typeof t[k] === "number");
+  }, [tiersInSubSection, fields, row]);
   // 직접 수식 항목 배열을 base 에 순차 적용 — 합산/차감/전체 3 곳에서 공통 사용
   // unit=column 이면 그 컬럼 합계를 값으로 사용.
   //   ★ subId 가 있으면 그 영역 차수만 합산 (통합 탭 = subId 없음 → 전체)
@@ -1089,6 +1105,18 @@ export default function SettlementInfoTab({
   }, [fields, sumColumnIn]);
   // 옛 호환 — 인자 1개. 전체 합계.
   const evalCard = useCallback((card: ScoreCardDef): number => evalCardIn(card), [evalCardIn]);
+  // NO.132 — 카드에 보탤 실제 값이 하나도 없으면 true(화면에 '0원' 대신 '-').
+  // 직접 수식(숫자·퍼센트 상수)이 걸려 있으면 사람이 넣은 값이므로 '값 있음'으로 본다.
+  const cardIsEmpty = useCallback((card: ScoreCardDef, subId?: string): boolean => {
+    const numberFieldKeys = new Set(fields.filter((f) => f.type === "number" || f.type === "percent" || f.type === "formula").map((f) => f.key));
+    const anyColumn = [...card.formula.plus, ...card.formula.minus]
+      .some((k) => numberFieldKeys.has(k) && columnHasValueIn(k, subId));
+    if (anyColumn) return false;
+    const customs = [card.formula.plusCustom, card.formula.minusCustom, card.formula.custom];
+    const anyCustom = customs.some((list) => (list ?? []).some((c) =>
+      c.unit === "column" ? Boolean(c.columnKey && columnHasValueIn(c.columnKey, subId)) : true));
+    return !anyCustom;
+  }, [fields, columnHasValueIn]);
 
   // 옛 4-카드 totals 계산 제거 — 동적 scoreCards/evalCard 가 모든 카드 값을 계산.
   // cardLabels/cardSources 는 hive-config 마이그레이션 시 settlementCards 미존재 fallback 으로만 사용됨.
@@ -1277,12 +1305,17 @@ export default function SettlementInfoTab({
           {scoreCards.map((card) => {
             const colors = SCORECARD_COLOR_CLASSES[card.color];
             const value = evalCardIn(card, activeSubFilter);
+            const empty = cardIsEmpty(card, activeSubFilter); // NO.132 — 더할 값이 없으면 '-'
             return (
               <div key={card.id} className={`rounded-xl ${colors.bg} px-3 py-2.5`}>
                 <p className={`text-[10px] font-bold ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
                 <p className={`text-[16px] font-black ${colors.valueText} tabular-nums mt-0.5`}>
-                  {fmtCurrency(value) || "0"}
-                  <span className={`text-[10px] font-bold ${colors.labelText} ml-1`}>원</span>
+                  {empty ? "-" : (
+                    <>
+                      {fmtCurrency(value) || "0"}
+                      <span className={`text-[10px] font-bold ${colors.labelText} ml-1`}>원</span>
+                    </>
+                  )}
                 </p>
               </div>
             );
@@ -1309,12 +1342,17 @@ export default function SettlementInfoTab({
                     {scoreCards.map((card) => {
                       const colors = SCORECARD_COLOR_CLASSES[card.color];
                       const value = evalCardIn(card, sub.id);
+                      const empty = cardIsEmpty(card, sub.id); // NO.132 — 더할 값이 없으면 '-'
                       return (
                         <div key={card.id} className={`rounded-lg ${colors.bg} px-2 py-1.5`}>
                           <p className={`text-[10px] font-medium ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
                           <p className={`text-[13px] font-bold ${colors.valueText} tabular-nums`}>
-                            {fmtCurrency(value) || "0"}
-                            <span className={`text-[10px] font-medium ${colors.labelText} ml-1`}>원</span>
+                            {empty ? "-" : (
+                              <>
+                                {fmtCurrency(value) || "0"}
+                                <span className={`text-[10px] font-medium ${colors.labelText} ml-1`}>원</span>
+                              </>
+                            )}
                           </p>
                         </div>
                       );
@@ -1360,7 +1398,7 @@ export default function SettlementInfoTab({
                     <div className={`rounded-lg ${colors.bg} px-3 py-2 sm:min-w-[120px]`}>
                       <p className={`text-[9px] font-bold ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
                       <p className={`text-[14px] font-black ${colors.valueText} tabular-nums`}>
-                        {fmtCurrency(evalCard(card)) || "0"}원
+                        {cardIsEmpty(card) ? "-" : `${fmtCurrency(evalCard(card)) || "0"}원`}
                       </p>
                     </div>
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
