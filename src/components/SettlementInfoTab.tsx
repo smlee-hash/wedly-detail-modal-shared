@@ -1217,13 +1217,19 @@ export default function SettlementInfoTab({
   // 직접 수식(숫자·퍼센트 상수)이 걸려 있으면 사람이 넣은 값이므로 '값 있음'으로 본다.
   const cardIsEmpty = useCallback((card: ScoreCardDef, subId?: string): boolean => {
     const numberFieldKeys = new Set(fields.filter((f) => f.type === "number" || f.type === "percent" || f.type === "formula").map((f) => f.key));
-    const anyColumn = [...card.formula.plus, ...card.formula.minus]
-      .some((k) => numberFieldKeys.has(k) && columnHasValueIn(k, subId));
-    if (anyColumn) return false;
     const customs = [card.formula.plusCustom, card.formula.minusCustom, card.formula.custom];
-    const anyCustom = customs.some((list) => (list ?? []).some((c) =>
-      c.unit === "column" ? Boolean(c.columnKey && columnHasValueIn(c.columnKey, subId)) : true));
-    return !anyCustom;
+    const referenced = [
+      ...[...card.formula.plus, ...card.formula.minus].filter((k) => numberFieldKeys.has(k)),
+      ...customs.flatMap((list) => (list ?? [])
+        .filter((c) => c.unit === "column" && c.columnKey)
+        .map((c) => c.columnKey as string)),
+    ];
+    // 칸을 하나라도 참조하면, 그 칸들에 이 회사의 실제 값이 있는지로만 판정한다.
+    // 카드 설정의 상수(예: 부가세율 110%)는 '이 회사의 데이터'가 아니므로 값으로 치지 않는다
+    // — 상수를 값으로 치면 상수가 붙은 카드에서 가짜 0원이 그대로 남는다(코드리뷰 F6).
+    if (referenced.length > 0) return !referenced.some((k) => columnHasValueIn(k, subId));
+    // 칸을 하나도 참조하지 않는 '순수 상수' 카드는 그 상수가 곧 값이다.
+    return !customs.some((list) => (list ?? []).length > 0);
   }, [fields, columnHasValueIn]);
 
   // 옛 4-카드 totals 계산 제거 — 동적 scoreCards/evalCard 가 모든 카드 값을 계산.
