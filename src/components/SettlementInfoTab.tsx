@@ -2406,7 +2406,7 @@ export default function SettlementInfoTab({
                                       </div>
                                     );
                                   })()}
-                                  <div className="w-[116px] flex-shrink-0">
+                                  <div className="w-[150px] flex-shrink-0">
                                     <CustomSelect
                                       size="sm"
                                       value={clause.op}
@@ -2416,6 +2416,9 @@ export default function SettlementInfoTab({
                                         { value: "neq", label: "와 다르면" },
                                         { value: "contains", label: "를 포함하면" },
                                         { value: "notContains", label: "를 포함 안 하면" },
+                                        // 크기 비교 — 날짜·숫자 칸에서만 판정된다(글자는 매칭 안 함).
+                                        { value: "gte", label: "이후(당일 포함)" },
+                                        { value: "lte", label: "이전(당일 포함)" },
                                       ]}
                                     />
                                   </div>
