@@ -2878,7 +2878,7 @@ function FormulaTermsEditor({
     );
   };
   const removeTerm = (idx: number) => onChange(terms.filter((_, i) => i !== idx));
-  const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷" };
+  const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷", round: "≈" };
   return (
     <>
       <div className="space-y-2">
@@ -2936,12 +2936,20 @@ function FormulaTermsEditor({
                     <CustomSelect
                       size="sm"
                       value={t.op}
-                      onChange={(v) => updateTerm(i, { op: v as "+" | "-" | "*" | "/" })}
+                      onChange={(v) =>
+                        updateTerm(i, v === "round"
+                          ? { op: "round", unit: "number", value: typeof t.value === "number" && t.value > 0 ? t.value : 1000 }
+                          : t.op === "round"
+                            // 반올림을 풀 때 1000 이 남으면 조용히 '+1,000원' 항이 된다 → 값을 비운다
+                            ? { op: v as "+" | "-" | "*" | "/", value: 0 }
+                            : { op: v as "+" | "-" | "*" | "/" })
+                      }
                       options={[
                         { value: "+", label: "＋ 더하기" },
                         { value: "-", label: "－ 빼기" },
                         { value: "*", label: "× 곱하기" },
                         { value: "/", label: "÷ 나누기" },
+                        { value: "round", label: "≈ 반올림" },
                       ]}
                     />
                   </div>
@@ -2949,16 +2957,22 @@ function FormulaTermsEditor({
                   <span className="w-[92px] flex-shrink-0 text-[10px] text-wedly-muted px-1">시작 값</span>
                 )}
                 <div className="flex-1 min-w-0">
-                  <CustomSelect
-                    size="sm"
-                    value={t.unit}
-                    onChange={(v) => updateTerm(i, { unit: v as "column" | "number" | "percent" })}
-                    options={[
-                      { value: "column", label: "다른 컬럼" },
-                      { value: "number", label: "숫자" },
-                      { value: "percent", label: "퍼센트(%)" },
-                    ]}
-                  />
+                  {t.op === "round" ? (
+                    <span className="block px-1 py-1.5 text-[11px] text-wedly-muted">
+                      여기까지의 값을 아래 단위로 반올림합니다
+                    </span>
+                  ) : (
+                    <CustomSelect
+                      size="sm"
+                      value={t.unit}
+                      onChange={(v) => updateTerm(i, { unit: v as "column" | "number" | "percent" })}
+                      options={[
+                        { value: "column", label: "다른 컬럼" },
+                        { value: "number", label: "숫자" },
+                        { value: "percent", label: "퍼센트(%)" },
+                      ]}
+                    />
+                  )}
                 </div>
                 <button
                   type="button"
@@ -2970,7 +2984,7 @@ function FormulaTermsEditor({
                 </button>
               </div>
               <div>
-                {t.unit === "column" ? (
+                {t.op !== "round" && t.unit === "column" ? (
                   columnOptions.length === 0 ? (
                     <p className="text-[10px] text-wedly-orange px-1">고를 숫자·퍼센트 컬럼이 없습니다. 숫자/퍼센트로 바꾸세요.</p>
                   ) : (
@@ -2988,7 +3002,7 @@ function FormulaTermsEditor({
                       type="number"
                       value={typeof t.value === "number" ? String(t.value) : ""}
                       onChange={(e) => updateTerm(i, { value: e.target.value === "" ? 0 : Number(e.target.value) })}
-                      placeholder={t.unit === "percent" ? "예: 30" : "예: 12"}
+                      placeholder={t.op === "round" ? "예: 1000 (천원 단위)" : t.unit === "percent" ? "예: 30" : "예: 12"}
                       className={`w-full px-2.5 py-1.5 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${t.unit === "percent" ? "pr-7" : ""}`}
                     />
                     {t.unit === "percent" && (
