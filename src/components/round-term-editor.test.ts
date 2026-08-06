@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FieldDef, FormulaTerm } from "@wedly/ui-shared";
-import { roundTermIssue, chainKind } from "./round-term-rules";
+import { roundTermIssue, chainKind, applyTermPatch } from "./round-term-rules";
 
 const col = (k: string): FormulaTerm => ({ op: "+", unit: "column", columnKey: k, value: 0 });
 const mulCol = (k: string): FormulaTerm => ({ op: "*", unit: "column", columnKey: k, value: 0 });
@@ -86,6 +86,40 @@ describe("반올림 앞의 값이 비율이면 막는다 (0원이 되던 구멍)
   it("금액에 비율을 곱한 뒤라면 통과한다 (실제 총 수수료 수식)", () => {
     const f = [col("환급액"), pct(30), round(1000), pct(110)];
     expect(roundTermIssue(f, fields)).toBeNull();
+  });
+});
+
+// 첫 검토가 반려한 사유(반올림으로 바꿨다 되돌리면 참조 칸이 지워져 300만원이 0원)를
+// 화면 모양이 아니라 '규칙'으로 못 박는다. 나중에 누가 연산 선택지를 도로 열어도 안 뚫린다.
+describe("반올림 항은 반올림 단위 말고는 못 바꾼다", () => {
+  const 반올림항 = round(1000);
+
+  it("연산을 곱하기로 바꾸려 해도 그대로다", () => {
+    expect(applyTermPatch(반올림항, { op: "*" }, "환급액")).toEqual(반올림항);
+  });
+  it("단위를 '다른 칸'으로 바꾸려 해도 그대로다 — 여기가 300만원이 0원 되던 길이었다", () => {
+    expect(applyTermPatch(반올림항, { unit: "column" }, "환급액")).toEqual(반올림항);
+    expect(applyTermPatch(반올림항, { unit: "percent" }, "환급액")).toEqual(반올림항);
+  });
+  it("참조 칸을 심으려 해도 그대로다", () => {
+    expect(applyTermPatch(반올림항, { columnKey: "환급액" }, "환급액")).toEqual(반올림항);
+  });
+  it("반올림 단위만 바뀐다 (연산·단위는 늘 반올림·숫자로 고정)", () => {
+    expect(applyTermPatch(반올림항, { value: 10000 })).toEqual({ op: "round", unit: "number", value: 10000 });
+    expect(applyTermPatch({ op: "round", unit: "column", columnKey: "환급액", value: 1000 } as FormulaTerm, { value: 500 }))
+      .toEqual({ op: "round", unit: "number", columnKey: "환급액", value: 500 });
+  });
+
+  it("반올림이 아닌 항은 예전 규칙 그대로다", () => {
+    // '다른 칸'으로 바꾸면 기본 칸이 심긴다
+    expect(applyTermPatch({ op: "+", unit: "number", value: 5 }, { unit: "column" }, "환급액"))
+      .toEqual({ op: "+", unit: "column", value: 5, columnKey: "환급액" });
+    // 숫자·퍼센트로 바꾸면 참조 칸을 지운다
+    expect(applyTermPatch(col("환급액"), { unit: "number" }, "환급액"))
+      .toEqual({ op: "+", unit: "number", value: 0 });
+    // 연산만 바꾸면 나머지는 그대로
+    expect(applyTermPatch(col("환급액"), { op: "*" }, "환급액"))
+      .toEqual({ op: "*", unit: "column", columnKey: "환급액", value: 0 });
   });
 });
 

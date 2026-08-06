@@ -7,6 +7,33 @@ import type { FieldDef, FormulaTerm } from "@wedly/ui-shared";
 // SettlementInfoTab.tsx(화면 부품 파일)에서 분리한 이유: 그 파일을 시험에서 불러오면
 // 시험 도구가 화면 문법을 못 읽어 실패한다. 로직 자체는 화면과 무관한 순수 계산이다.
 
+// 항 하나를 고칠 때의 규칙(순수 함수 — 시험 대상).
+//
+// **반올림 항은 '반올림 단위'만 고칠 수 있다.** 연산·단위·참조 칸을 바꾸는 길을 열어 두면
+// 아래 "숫자로 바꾸면 참조 칸을 지운다" 규칙에 걸려 그 항의 금액이 통째로 사라진다
+// (실제로 300만원이 0원이 되던 길이었다). 화면에서 그런 조작을 안 그리지만,
+// 나중에 누가 다시 그려도 여기서 막힌다.
+//
+// firstNumericKey = '다른 칸'으로 바꿨는데 고른 칸이 없을 때 기본으로 넣을 칸.
+export function applyTermPatch(
+  t: FormulaTerm,
+  patch: Partial<FormulaTerm>,
+  firstNumericKey?: string,
+): FormulaTerm {
+  if (t.op === "round") {
+    return typeof patch.value === "number"
+      ? { ...t, op: "round", unit: "number", value: patch.value }
+      : t;
+  }
+  const merged: FormulaTerm = { ...t, ...patch };
+  if (patch.unit === "column" && !merged.columnKey) merged.columnKey = firstNumericKey;
+  if (patch.unit === "number" || patch.unit === "percent") {
+    delete merged.columnKey;
+    if (typeof merged.value !== "number") merged.value = 0;
+  }
+  return merged;
+}
+
 // 항의 '단위 성격'. 엔진은 퍼센트를 0~1 비율로 바꿔 계산하므로,
 // 어느 지점의 누적값이 '금액(원)'인지 '비율'인지가 갈린다.
 type Kind = "money" | "ratio";

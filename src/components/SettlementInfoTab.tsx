@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
-import { roundTermIssue, chainKind } from "./round-term-rules";
+import { roundTermIssue, chainKind, applyTermPatch } from "./round-term-rules";
 import { createPortal } from "react-dom";
 import {
   type FieldDef,
@@ -2869,30 +2869,8 @@ function FormulaTermsEditor({
   const updateGroupTerms = (idx: number, nextInner: FormulaTerm[]) =>
     onChange(terms.map((t, i) => (i === idx ? { ...t, terms: nextInner } : t)));
   const updateTerm = (idx: number, patch: Partial<FormulaTerm>) => {
-    onChange(
-      terms.map((t, i) => {
-        if (i !== idx) return t;
-        // 반올림 항은 '반올림 단위'만 고칠 수 있다. 연산·단위·참조 칸을 바꾸는 길을 열어 두면
-        // 아래 "숫자로 바꾸면 참조 칸을 지운다" 규칙에 걸려 그 항의 금액이 통째로 사라진다
-        // (실제로 300만원이 0원이 되던 길이었다). 화면에서 그런 조작을 안 그리지만,
-        // 나중에 누가 다시 그려도 여기서 막힌다.
-        if (t.op === "round") {
-          return typeof patch.value === "number"
-            ? { ...t, op: "round" as const, unit: "number" as const, value: patch.value }
-            : t;
-        }
-        const merged: FormulaTerm = { ...t, ...patch };
-        if (patch.unit === "column" && !merged.columnKey) {
-          const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
-          merged.columnKey = firstCol?.key;
-        }
-        if (patch.unit === "number" || patch.unit === "percent") {
-          delete merged.columnKey;
-          if (typeof merged.value !== "number") merged.value = 0;
-        }
-        return merged;
-      }),
-    );
+    const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
+    onChange(terms.map((t, i) => (i === idx ? applyTermPatch(t, patch, firstCol?.key) : t)));
   };
   const removeTerm = (idx: number) => onChange(terms.filter((_, i) => i !== idx));
   // 반올림은 아래 termText 가 문장으로 따로 풀어 쓴다(기호를 넣어 두면 "≈ 1000" 이 되어
