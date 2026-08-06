@@ -1,25 +1,65 @@
-import type { FormulaTerm } from "@wedly/ui-shared";
+import type { FieldDef, FormulaTerm } from "@wedly/ui-shared";
 
-// 반올림 항이 계산되지 않는 자리에 있는지 검사한다(순수 함수 — 시험 대상).
-// 엔진은 이런 항을 조용히 무시하므로, 저장 전에 사람에게 말해 주지 않으면
-// "반올림을 걸어 놨는데 금액이 그대로"인 상태를 아무도 못 잡는다.
-// 묶음(괄호) 안쪽도 같은 규칙이라 재귀로 본다.
+// 이 파일은 "반올림 항이 실제로 계산되는 자리에 있는지"를 판정하는 순수 함수 모음이다.
+// 엔진은 잘못 놓인 반올림을 조용히 무시하거나 값을 0 으로 만들어 버리므로, 저장 전에
+// 사람에게 말해 주지 않으면 "반올림을 걸어 놨는데 금액이 이상하다"를 아무도 못 잡는다.
 //
-// SettlementInfoTab.tsx(React 컴포넌트 파일)에서 분리한 이유: 그 파일을 vitest .test.ts 에서
-// import 하면 vite 의 import-analysis 플러그인이 JSX 파싱에 실패한다(.ts 시험 파일이 .tsx 를
-// import 할 때 발생하는 esbuild/vite 로더 문제). 로직 자체는 화면과 무관한 순수 함수라 별도
-// 파일로 두면 시험이 화면 렌더링을 전혀 거치지 않고 돈다.
+// SettlementInfoTab.tsx(화면 부품 파일)에서 분리한 이유: 그 파일을 시험에서 불러오면
+// 시험 도구가 화면 문법을 못 읽어 실패한다. 로직 자체는 화면과 무관한 순수 계산이다.
+
+// 항의 '단위 성격'. 엔진은 퍼센트를 0~1 비율로 바꿔 계산하므로,
+// 어느 지점의 누적값이 '금액(원)'인지 '비율'인지가 갈린다.
+type Kind = "money" | "ratio";
+
+function termKind(t: FormulaTerm, fields: FieldDef[]): Kind {
+  if (!t) return "money";
+  if (t.unit === "percent") return "ratio";
+  if (t.unit === "group") return chainKind(t.terms ?? [], fields);
+  if (t.unit === "column") {
+    const ref = fields.find((f) => f.key === t.columnKey);
+    if (!ref) return "money"; // 모르는 칸은 금액으로 본다(공연히 막지 않는다)
+    if (ref.type === "percent") return "ratio";
+    if (ref.type === "formula" && ref.formulaResult === "percent") return "ratio";
+    return "money";
+  }
+  return "money"; // unit === "number"
+}
+
+// 항 사슬을 왼쪽부터 훑어 누적값의 성격을 따진다(엔진과 같은 순서, 연산 우선순위 없음).
+//   더하기·빼기·곱하기: 한쪽이라도 금액이면 금액
+//   나누기: 왼쪽 성격을 유지한다(금액 ÷ 1.1 은 여전히 금액)
+//   반올림: 성격을 바꾸지 않는다
+export function chainKind(terms: FormulaTerm[] | undefined, fields: FieldDef[]): Kind {
+  if (!Array.isArray(terms)) return "money";
+  let cur: Kind = "money";
+  let started = false;
+  for (const t of terms) {
+    if (!t) continue;
+    if (t.op === "round") continue;
+    const k = termKind(t, fields);
+    if (!started) { cur = k; started = true; continue; }
+    if (t.op === "/") continue;
+    cur = cur === "money" || k === "money" ? "money" : "ratio";
+  }
+  return cur;
+}
+
 // resultFormat = 이 수식이 무엇으로 나오는지("percent" | 그 외). 퍼센트로 나오는 수식은
 //   자연값이 비율이라(30% → 0.3) 1,000원 단위로 반올림하면 통째로 0 이 된다. 추가 버튼은
 //   숨겨 두지만, 원 단위로 만들어 둔 수식의 결과 형식을 나중에 퍼센트로 바꾸면 반올림 항이
 //   그대로 남아 값이 조용히 0% 가 된다 — 그 길을 저장 단계에서 막는다.
-export function roundTermIssue(terms: FormulaTerm[] | undefined, resultFormat?: string): string | null {
+// fields = 칸 목록. '다른 칸' 항이 퍼센트 칸인지 알아야 비율 여부를 판정할 수 있다.
+export function roundTermIssue(
+  terms: FormulaTerm[] | undefined,
+  fields: FieldDef[] = [],
+  resultFormat?: string,
+): string | null {
   if (!Array.isArray(terms)) return null;
   for (let i = 0; i < terms.length; i++) {
     const t = terms[i];
     if (!t) continue;
     if (t.unit === "group") {
-      const inner = roundTermIssue(t.terms, resultFormat);
+      const inner = roundTermIssue(t.terms, fields, resultFormat);
       if (inner) return `묶음(괄호) 안: ${inner}`;
       continue;
     }
@@ -32,6 +72,12 @@ export function roundTermIssue(terms: FormulaTerm[] | undefined, resultFormat?: 
     if (i === 0) return "맨 위 항목은 반올림이 될 수 없습니다. 이 항목을 지우고, 계산할 항목을 먼저 넣은 뒤 반올림을 다시 추가하세요.";
     if (typeof t.value !== "number" || !Number.isFinite(t.value) || t.value < 1 || !Number.isInteger(t.value)) {
       return "반올림 단위는 1 이상의 정수(원)여야 합니다. 예: 1000";
+    }
+    // 반올림은 '원 단위'를 전제한다. 반올림 직전 누적값이 비율(퍼센트)이면
+    // 1,000원 단위로 반올림하는 순간 0 이 되고, 그 뒤 곱셈까지 전부 0 이 된다.
+    // 화면은 멀쩡해 보이는데 금액만 0원이 되므로 반드시 저장 단계에서 막는다.
+    if (chainKind(terms.slice(0, i), fields) === "ratio") {
+      return "반올림 앞의 값이 금액(원)이 아니라 비율(%)입니다. 원 단위로 반올림하면 0 이 됩니다. 금액 칸을 먼저 놓고 비율을 곱한 뒤에 반올림하세요.";
     }
   }
   return null;

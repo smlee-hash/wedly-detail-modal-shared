@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
-import { roundTermIssue } from "./round-term-rules";
+import { roundTermIssue, chainKind } from "./round-term-rules";
 import { createPortal } from "react-dom";
 import {
   type FieldDef,
@@ -748,7 +748,7 @@ export default function SettlementInfoTab({
       const e = checkFormulaTermColumns(t, fields);
       if (e) return { ok: false, msg: e };
     }
-    const rIssue = roundTermIssue(terms, draftFormulaResult);
+    const rIssue = roundTermIssue(terms, fields, draftFormulaResult);
     if (rIssue) return { ok: false, msg: rIssue };
     return { ok: true, terms };
   }, [draftFormula, draftFormulaResult, fields]);
@@ -778,7 +778,7 @@ export default function SettlementInfoTab({
         const e = checkFormulaTermColumns(t, fields);
         if (e) return { ok: false, msg: `조건 식에 ${e}` };
       }
-      const rIssue = roundTermIssue(terms, draftFormulaResult);
+      const rIssue = roundTermIssue(terms, fields, draftFormulaResult);
       if (rIssue) return { ok: false, msg: `조건 식에 ${rIssue}` };
       // 절 1개 → 옛 형식(전 앱 호환), 2개+ → clauses 형식(새 계산기 필요).
       if (cleanClauses.length === 1) {
@@ -2872,6 +2872,15 @@ function FormulaTermsEditor({
     onChange(
       terms.map((t, i) => {
         if (i !== idx) return t;
+        // 반올림 항은 '반올림 단위'만 고칠 수 있다. 연산·단위·참조 칸을 바꾸는 길을 열어 두면
+        // 아래 "숫자로 바꾸면 참조 칸을 지운다" 규칙에 걸려 그 항의 금액이 통째로 사라진다
+        // (실제로 300만원이 0원이 되던 길이었다). 화면에서 그런 조작을 안 그리지만,
+        // 나중에 누가 다시 그려도 여기서 막힌다.
+        if (t.op === "round") {
+          return typeof patch.value === "number"
+            ? { ...t, op: "round" as const, unit: "number" as const, value: patch.value }
+            : t;
+        }
         const merged: FormulaTerm = { ...t, ...patch };
         if (patch.unit === "column" && !merged.columnKey) {
           const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
@@ -2886,7 +2895,9 @@ function FormulaTermsEditor({
     );
   };
   const removeTerm = (idx: number) => onChange(terms.filter((_, i) => i !== idx));
-  const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷", round: "≈" };
+  // 반올림은 아래 termText 가 문장으로 따로 풀어 쓴다(기호를 넣어 두면 "≈ 1000" 이 되어
+  // '대략 1,000원'으로 정반대로 읽힌다). 그래서 이 표에는 일부러 넣지 않는다.
+  const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷" };
   return (
     <>
       <div className="space-y-2">
@@ -2961,15 +2972,16 @@ function FormulaTermsEditor({
                     ✕
                   </button>
                 </div>
-                {i === 0 ? (
-                  <p className="text-[10px] text-wedly-red px-1">
-                    맨 위 항목이 반올림이면 계산되지 않습니다. 이 항목을 지우고, 계산할 항목을 먼저 넣은 뒤 다시 추가하세요.
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-wedly-muted px-1">
-                    여기까지 계산한 값을 이 단위로 반올림합니다.
-                  </p>
-                )}
+                {/* 저장 버튼을 눌러야 아는 게 아니라, 잘못 놓인 순간 이 줄에서 바로 보이게 한다. */}
+                {(() => {
+                  const warn = roundTermIssue(terms.slice(0, i + 1), fields, resultFormat);
+                  if (warn) return <p className="text-[10px] text-wedly-red px-1">{warn}</p>;
+                  return (
+                    <p className="text-[10px] text-wedly-muted px-1">
+                      {allowGroup ? "여기까지 계산한 값을" : "이 묶음 안에서 여기까지 계산한 값을"} 이 단위로 반올림합니다.
+                    </p>
+                  );
+                })()}
               </div>
             ) : (
             <div key={i} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-1.5">
@@ -3052,7 +3064,9 @@ function FormulaTermsEditor({
       >
         + 항목 추가
       </button>
-      {resultFormat !== "percent" && terms.length > 0 && (
+      {/* 반올림은 '원 단위'를 전제한다. 지금까지의 값이 비율(퍼센트)이면 1,000원 단위로
+          반올림하는 순간 0 이 되므로 버튼 자체를 안 띄운다(저장 검증은 그 뒤의 그물). */}
+      {resultFormat !== "percent" && terms.length > 0 && chainKind(terms, fields) === "money" && (
         <button
           type="button"
           onClick={addRound}
@@ -3083,8 +3097,11 @@ function FormulaTermsEditor({
         // 반올림은 연산이라 다른 항과 읽는 법이 다르다(value 가 금액이 아니라 반올림 단위(원)).
         // "≈ 1000" 이라고 찍으면 '대략 1,000원'으로 정반대로 읽힌다.
         const termText = (t: FormulaTerm, i: number): string => {
-          if (t.op === "round" && i > 0) {
+          if (t.op === "round") {
             const step = typeof t.value === "number" && t.value > 0 ? t.value : 0;
+            // 맨 위 반올림은 반올림할 앞선 값이 없어 엔진이 그냥 지나친다.
+            // 이때 숫자만 찍으면(옛 코드) '1000 원에서 시작'하는 것처럼 읽혀 실제와 어긋난다.
+            if (i === 0) return "→ 반올림(맨 위라 계산되지 않음)";
             return step > 0 ? `→ ${step.toLocaleString("ko-KR")}원 단위 반올림` : "→ 반올림(단위 미입력)";
           }
           return i === 0 ? operandText(t) : `${opSym[t.op] || t.op} ${operandText(t)}`;
