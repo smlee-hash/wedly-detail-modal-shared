@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
+import { roundTermIssue, chainKind, applyTermPatch } from "./round-term-rules";
 import { createPortal } from "react-dom";
 import {
   type FieldDef,
@@ -704,8 +705,10 @@ export default function SettlementInfoTab({
       const e = checkFormulaTermColumns(t, fields);
       if (e) return { ok: false, msg: e };
     }
+    const rIssue = roundTermIssue(terms, fields, draftFormulaResult);
+    if (rIssue) return { ok: false, msg: rIssue };
     return { ok: true, terms };
-  }, [draftFormula, fields]);
+  }, [draftFormula, draftFormulaResult, fields]);
 
   // 조건 설정 검증 — null 이면 통과(조건 안 씀). 켜져 있으면 기준필드·각 규칙(기준값·식)이 모두 유효해야 함.
   //   유효 규칙만 추려 돌려준다(빈 규칙 자동 제외). 규칙이 하나도 없으면 conditional 없이 저장(기본식만).
@@ -726,11 +729,13 @@ export default function SettlementInfoTab({
         const e = checkFormulaTermColumns(t, fields);
         if (e) return { ok: false, msg: `"${when}" 규칙에 ${e}` };
       }
+      const rIssue = roundTermIssue(terms, fields, draftFormulaResult);
+      if (rIssue) return { ok: false, msg: `"${when}" 규칙에 ${rIssue}` };
       cleaned.push({ whenValue: when, formula: terms });
     }
     if (cleaned.length === 0) return { ok: true }; // 켰지만 규칙 없음 → 기본식만(conditional 없이)
     return { ok: true, conditional: { conditionFieldKey: fk, rules: cleaned } };
-  }, [draftConditional, fields]);
+  }, [draftConditional, draftFormulaResult, fields]);
 
   // 모달 confirm 처리
   const confirmFieldEdit = useCallback(() => {
@@ -2526,26 +2531,18 @@ function FormulaTermsEditor({
       : { op: "+", unit: "number", value: 0 };
     onChange([...terms, { op: "+", unit: "group", terms: [inner] }]);
   };
+  // 반올림 항 추가 — 늘 '천원 단위'로 시작한다. 반올림은 값이 아니라 연산이라
+  // 다른 항으로 바뀌지 않는다(바꾸는 길을 열면 컬럼 참조가 지워져 금액이 0원이 된다).
+  const addRound = () => onChange([...terms, { op: "round", unit: "number", value: 1000 }]);
   const updateGroupTerms = (idx: number, nextInner: FormulaTerm[]) =>
     onChange(terms.map((t, i) => (i === idx ? { ...t, terms: nextInner } : t)));
   const updateTerm = (idx: number, patch: Partial<FormulaTerm>) => {
-    onChange(
-      terms.map((t, i) => {
-        if (i !== idx) return t;
-        const merged: FormulaTerm = { ...t, ...patch };
-        if (patch.unit === "column" && !merged.columnKey) {
-          const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
-          merged.columnKey = firstCol?.key;
-        }
-        if (patch.unit === "number" || patch.unit === "percent") {
-          delete merged.columnKey;
-          if (typeof merged.value !== "number") merged.value = 0;
-        }
-        return merged;
-      }),
-    );
+    const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
+    onChange(terms.map((t, i) => (i === idx ? applyTermPatch(t, patch, firstCol?.key) : t)));
   };
   const removeTerm = (idx: number) => onChange(terms.filter((_, i) => i !== idx));
+  // 반올림은 아래 termText 가 문장으로 따로 풀어 쓴다(기호를 넣어 두면 "≈ 1000" 이 되어
+  // '대략 1,000원'으로 정반대로 읽힌다). 그래서 이 표에는 일부러 넣지 않는다.
   const opSym: Record<string, string> = { "+": "＋", "-": "－", "*": "×", "/": "÷" };
   return (
     <>
@@ -2595,6 +2592,42 @@ function FormulaTermsEditor({
                     allowGroup={false}
                   />
                 </div>
+              </div>
+            ) : t.op === "round" ? (
+              <div key={i} className="rounded-lg border border-wedly-bd bg-wedly-bg-gray p-2 space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-[92px] flex-shrink-0 text-[10px] font-bold text-wedly-accent px-1">≈ 반올림</span>
+                  <div className="relative flex-1 min-w-0">
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={typeof t.value === "number" ? String(t.value) : ""}
+                      onChange={(e) => updateTerm(i, { unit: "number", value: e.target.value === "" ? 0 : Number(e.target.value) })}
+                      placeholder="예: 1000"
+                      className="w-full px-2.5 py-1.5 pr-12 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-wedly-muted text-[12px] pointer-events-none">원 단위</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeTerm(i)}
+                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                    title="이 항목 삭제"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {/* 저장 버튼을 눌러야 아는 게 아니라, 잘못 놓인 순간 이 줄에서 바로 보이게 한다. */}
+                {(() => {
+                  const warn = roundTermIssue(terms.slice(0, i + 1), fields, resultFormat);
+                  if (warn) return <p className="text-[10px] text-wedly-red px-1">{warn}</p>;
+                  return (
+                    <p className="text-[10px] text-wedly-muted px-1">
+                      {allowGroup ? "여기까지 계산한 값을" : "이 묶음 안에서 여기까지 계산한 값을"} 이 단위로 반올림합니다.
+                    </p>
+                  );
+                })()}
               </div>
             ) : (
             <div key={i} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-1.5">
@@ -2677,6 +2710,17 @@ function FormulaTermsEditor({
       >
         + 항목 추가
       </button>
+      {/* 반올림은 '원 단위'를 전제한다. 지금까지의 값이 비율(퍼센트)이면 1,000원 단위로
+          반올림하는 순간 0 이 되므로 버튼 자체를 안 띄운다(저장 검증은 그 뒤의 그물). */}
+      {resultFormat !== "percent" && terms.length > 0 && chainKind(terms, fields) === "money" && (
+        <button
+          type="button"
+          onClick={addRound}
+          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+        >
+          ≈ 반올림 추가
+        </button>
+      )}
       {allowGroup && (
         <button
           type="button"
@@ -2691,14 +2735,24 @@ function FormulaTermsEditor({
           if (t.unit === "number") return String(t.value ?? 0);
           if (t.unit === "percent") return `${t.value ?? 0}%`;
           if (t.unit === "group") {
-            const inner = (t.terms ?? [])
-              .map((g, gi) => (gi === 0 ? operandText(g) : `${opSym[g.op] || g.op} ${operandText(g)}`))
-              .join(" ");
+            const inner = (t.terms ?? []).map((g, gi) => termText(g, gi)).join(" ");
             return `( ${inner} )`;
           }
           return fields.find((f) => f.key === t.columnKey)?.label ?? "(컬럼)";
         };
-        const text = terms.map((t, i) => (i === 0 ? operandText(t) : `${opSym[t.op] || t.op} ${operandText(t)}`)).join(" ");
+        // 반올림은 연산이라 다른 항과 읽는 법이 다르다(value 가 금액이 아니라 반올림 단위(원)).
+        // "≈ 1000" 이라고 찍으면 '대략 1,000원'으로 정반대로 읽힌다.
+        const termText = (t: FormulaTerm, i: number): string => {
+          if (t.op === "round") {
+            const step = typeof t.value === "number" && t.value > 0 ? t.value : 0;
+            // 맨 위 반올림은 반올림할 앞선 값이 없어 엔진이 그냥 지나친다.
+            // 이때 숫자만 찍으면(옛 코드) '1000 원에서 시작'하는 것처럼 읽혀 실제와 어긋난다.
+            if (i === 0) return "→ 반올림(맨 위라 계산되지 않음)";
+            return step > 0 ? `→ ${step.toLocaleString("ko-KR")}원 단위 반올림` : "→ 반올림(단위 미입력)";
+          }
+          return i === 0 ? operandText(t) : `${opSym[t.op] || t.op} ${operandText(t)}`;
+        };
+        const text = terms.map((t, i) => termText(t, i)).join(" ");
         return (
           <div className="rounded-lg bg-wedly-bg-gray px-2.5 py-2">
             <span className="text-[10px] font-semibold text-wedly-muted">미리보기: </span>
