@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
+import { roundTermIssue } from "./round-term-rules";
 import { createPortal } from "react-dom";
 import {
   type FieldDef,
@@ -747,6 +748,8 @@ export default function SettlementInfoTab({
       const e = checkFormulaTermColumns(t, fields);
       if (e) return { ok: false, msg: e };
     }
+    const rIssue = roundTermIssue(terms);
+    if (rIssue) return { ok: false, msg: rIssue };
     return { ok: true, terms };
   }, [draftFormula, fields]);
 
@@ -775,6 +778,8 @@ export default function SettlementInfoTab({
         const e = checkFormulaTermColumns(t, fields);
         if (e) return { ok: false, msg: `조건 식에 ${e}` };
       }
+      const rIssue = roundTermIssue(terms);
+      if (rIssue) return { ok: false, msg: `조건 식에 ${rIssue}` };
       // 절 1개 → 옛 형식(전 앱 호환), 2개+ → clauses 형식(새 계산기 필요).
       if (cleanClauses.length === 1) {
         const c = cleanClauses[0];
@@ -2858,6 +2863,9 @@ function FormulaTermsEditor({
       : { op: "+", unit: "number", value: 0 };
     onChange([...terms, { op: "+", unit: "group", terms: [inner] }]);
   };
+  // 반올림 항 추가 — 늘 '천원 단위'로 시작한다. 반올림은 값이 아니라 연산이라
+  // 다른 항으로 바뀌지 않는다(바꾸는 길을 열면 컬럼 참조가 지워져 금액이 0원이 된다).
+  const addRound = () => onChange([...terms, { op: "round", unit: "number", value: 1000 }]);
   const updateGroupTerms = (idx: number, nextInner: FormulaTerm[]) =>
     onChange(terms.map((t, i) => (i === idx ? { ...t, terms: nextInner } : t)));
   const updateTerm = (idx: number, patch: Partial<FormulaTerm>) => {
@@ -2928,6 +2936,41 @@ function FormulaTermsEditor({
                   />
                 </div>
               </div>
+            ) : t.op === "round" ? (
+              <div key={i} className="rounded-lg border border-wedly-bd bg-wedly-bg-gray p-2 space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-[92px] flex-shrink-0 text-[10px] font-bold text-wedly-accent px-1">≈ 반올림</span>
+                  <div className="relative flex-1 min-w-0">
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={typeof t.value === "number" ? String(t.value) : ""}
+                      onChange={(e) => updateTerm(i, { unit: "number", value: e.target.value === "" ? 0 : Number(e.target.value) })}
+                      placeholder="예: 1000"
+                      className="w-full px-2.5 py-1.5 pr-12 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-wedly-muted text-[12px] pointer-events-none">원 단위</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeTerm(i)}
+                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                    title="이 항목 삭제"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {i === 0 ? (
+                  <p className="text-[10px] text-wedly-red px-1">
+                    맨 위 항목이 반올림이면 계산되지 않습니다. 위에 계산할 항목을 두거나 이 항목을 지우세요.
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-wedly-muted px-1">
+                    여기까지 계산한 값을 이 단위로 반올림합니다.
+                  </p>
+                )}
+              </div>
             ) : (
             <div key={i} className="rounded-lg border border-wedly-bd bg-white p-2 space-y-1.5">
               <div className="flex items-center gap-1.5">
@@ -2936,20 +2979,12 @@ function FormulaTermsEditor({
                     <CustomSelect
                       size="sm"
                       value={t.op}
-                      onChange={(v) =>
-                        updateTerm(i, v === "round"
-                          ? { op: "round", unit: "number", value: typeof t.value === "number" && t.value > 0 ? t.value : 1000 }
-                          : t.op === "round"
-                            // 반올림을 풀 때 1000 이 남으면 조용히 '+1,000원' 항이 된다 → 값을 비운다
-                            ? { op: v as "+" | "-" | "*" | "/", value: 0 }
-                            : { op: v as "+" | "-" | "*" | "/" })
-                      }
+                      onChange={(v) => updateTerm(i, { op: v as "+" | "-" | "*" | "/" })}
                       options={[
                         { value: "+", label: "＋ 더하기" },
                         { value: "-", label: "－ 빼기" },
                         { value: "*", label: "× 곱하기" },
                         { value: "/", label: "÷ 나누기" },
-                        { value: "round", label: "≈ 반올림" },
                       ]}
                     />
                   </div>
@@ -2957,22 +2992,16 @@ function FormulaTermsEditor({
                   <span className="w-[92px] flex-shrink-0 text-[10px] text-wedly-muted px-1">시작 값</span>
                 )}
                 <div className="flex-1 min-w-0">
-                  {t.op === "round" ? (
-                    <span className="block px-1 py-1.5 text-[11px] text-wedly-muted">
-                      여기까지의 값을 아래 단위로 반올림합니다
-                    </span>
-                  ) : (
-                    <CustomSelect
-                      size="sm"
-                      value={t.unit}
-                      onChange={(v) => updateTerm(i, { unit: v as "column" | "number" | "percent" })}
-                      options={[
-                        { value: "column", label: "다른 컬럼" },
-                        { value: "number", label: "숫자" },
-                        { value: "percent", label: "퍼센트(%)" },
-                      ]}
-                    />
-                  )}
+                  <CustomSelect
+                    size="sm"
+                    value={t.unit}
+                    onChange={(v) => updateTerm(i, { unit: v as "column" | "number" | "percent" })}
+                    options={[
+                      { value: "column", label: "다른 컬럼" },
+                      { value: "number", label: "숫자" },
+                      { value: "percent", label: "퍼센트(%)" },
+                    ]}
+                  />
                 </div>
                 <button
                   type="button"
@@ -2984,7 +3013,7 @@ function FormulaTermsEditor({
                 </button>
               </div>
               <div>
-                {t.op !== "round" && t.unit === "column" ? (
+                {t.unit === "column" ? (
                   columnOptions.length === 0 ? (
                     <p className="text-[10px] text-wedly-orange px-1">고를 숫자·퍼센트 컬럼이 없습니다. 숫자/퍼센트로 바꾸세요.</p>
                   ) : (
@@ -3002,7 +3031,7 @@ function FormulaTermsEditor({
                       type="number"
                       value={typeof t.value === "number" ? String(t.value) : ""}
                       onChange={(e) => updateTerm(i, { value: e.target.value === "" ? 0 : Number(e.target.value) })}
-                      placeholder={t.op === "round" ? "예: 1000 (천원 단위)" : t.unit === "percent" ? "예: 30" : "예: 12"}
+                      placeholder={t.unit === "percent" ? "예: 30" : "예: 12"}
                       className={`w-full px-2.5 py-1.5 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${t.unit === "percent" ? "pr-7" : ""}`}
                     />
                     {t.unit === "percent" && (
@@ -3023,6 +3052,15 @@ function FormulaTermsEditor({
       >
         + 항목 추가
       </button>
+      {resultFormat !== "percent" && terms.length > 0 && (
+        <button
+          type="button"
+          onClick={addRound}
+          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+        >
+          ≈ 반올림 추가
+        </button>
+      )}
       {allowGroup && (
         <button
           type="button"
@@ -3037,14 +3075,21 @@ function FormulaTermsEditor({
           if (t.unit === "number") return String(t.value ?? 0);
           if (t.unit === "percent") return `${t.value ?? 0}%`;
           if (t.unit === "group") {
-            const inner = (t.terms ?? [])
-              .map((g, gi) => (gi === 0 ? operandText(g) : `${opSym[g.op] || g.op} ${operandText(g)}`))
-              .join(" ");
+            const inner = (t.terms ?? []).map((g, gi) => termText(g, gi)).join(" ");
             return `( ${inner} )`;
           }
           return fields.find((f) => f.key === t.columnKey)?.label ?? "(컬럼)";
         };
-        const text = terms.map((t, i) => (i === 0 ? operandText(t) : `${opSym[t.op] || t.op} ${operandText(t)}`)).join(" ");
+        // 반올림은 연산이라 다른 항과 읽는 법이 다르다(value 가 금액이 아니라 반올림 단위(원)).
+        // "≈ 1000" 이라고 찍으면 '대략 1,000원'으로 정반대로 읽힌다.
+        const termText = (t: FormulaTerm, i: number): string => {
+          if (t.op === "round" && i > 0) {
+            const step = typeof t.value === "number" && t.value > 0 ? t.value : 0;
+            return step > 0 ? `→ ${step.toLocaleString("ko-KR")}원 단위 반올림` : "→ 반올림(단위 미입력)";
+          }
+          return i === 0 ? operandText(t) : `${opSym[t.op] || t.op} ${operandText(t)}`;
+        };
+        const text = terms.map((t, i) => termText(t, i)).join(" ");
         return (
           <div className="rounded-lg bg-wedly-bg-gray px-2.5 py-2">
             <span className="text-[10px] font-semibold text-wedly-muted">미리보기: </span>
