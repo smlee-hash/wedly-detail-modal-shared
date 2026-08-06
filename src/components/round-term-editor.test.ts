@@ -37,4 +37,19 @@ describe("반올림 항이 계산 안 되는 자리에 있는지 검사", () => 
     expect(roundTermIssue([묶음([round(1000)])])).toContain("묶음(괄호) 안");
     expect(roundTermIssue([묶음([col("환급액"), round(0)])])).toContain("묶음(괄호) 안");
   });
+
+  // 추가 버튼은 퍼센트 수식에 안 뜨지만, 원 단위로 만든 수식의 결과 형식을 나중에
+  // 퍼센트로 바꾸면 반올림 항이 그대로 남아 값이 조용히 0% 가 된다.
+  it("결과가 퍼센트인 수식에 반올림이 남아 있으면 막는다", () => {
+    expect(roundTermIssue([col("수수료"), round(1000)], "percent")).toContain("퍼센트");
+    const 묶음 = (inner: FormulaTerm[]): FormulaTerm => ({ op: "+", unit: "group", terms: inner });
+    expect(roundTermIssue([묶음([col("수수료"), round(1000)])], "percent")).toContain("퍼센트");
+  });
+
+  it("결과 형식이 원(숫자)이거나 안 넘어오면 예전처럼 본다", () => {
+    expect(roundTermIssue([col("수수료"), round(1000)], "number")).toBeNull();
+    expect(roundTermIssue([col("수수료"), round(1000)], undefined)).toBeNull();
+    // 반올림이 없는 퍼센트 수식은 여전히 통과해야 한다(기존 수식 회귀 방지)
+    expect(roundTermIssue([col("환급액"), pct(30)], "percent")).toBeNull();
+  });
 });

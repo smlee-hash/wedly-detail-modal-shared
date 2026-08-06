@@ -748,10 +748,10 @@ export default function SettlementInfoTab({
       const e = checkFormulaTermColumns(t, fields);
       if (e) return { ok: false, msg: e };
     }
-    const rIssue = roundTermIssue(terms);
+    const rIssue = roundTermIssue(terms, draftFormulaResult);
     if (rIssue) return { ok: false, msg: rIssue };
     return { ok: true, terms };
-  }, [draftFormula, fields]);
+  }, [draftFormula, draftFormulaResult, fields]);
 
   // 조건 설정 검증 — null 이면 통과(조건 안 씀). 켜져 있으면 기준필드·각 규칙(기준값·식)이 모두 유효해야 함.
   //   유효 규칙만 추려 돌려준다(빈 규칙 자동 제외). 규칙이 하나도 없으면 conditional 없이 저장(기본식만).
@@ -778,7 +778,7 @@ export default function SettlementInfoTab({
         const e = checkFormulaTermColumns(t, fields);
         if (e) return { ok: false, msg: `조건 식에 ${e}` };
       }
-      const rIssue = roundTermIssue(terms);
+      const rIssue = roundTermIssue(terms, draftFormulaResult);
       if (rIssue) return { ok: false, msg: `조건 식에 ${rIssue}` };
       // 절 1개 → 옛 형식(전 앱 호환), 2개+ → clauses 형식(새 계산기 필요).
       if (cleanClauses.length === 1) {
@@ -790,7 +790,7 @@ export default function SettlementInfoTab({
     }
     if (cleaned.length === 0) return { ok: true }; // 켰지만 규칙 없음 → 기본식만(conditional 없이)
     return { ok: true, conditional: { rules: cleaned } };
-  }, [draftConditional, fields]);
+  }, [draftConditional, draftFormulaResult, fields]);
 
   // 모달 confirm 처리
   const confirmFieldEdit = useCallback(() => {
@@ -2963,7 +2963,7 @@ function FormulaTermsEditor({
                 </div>
                 {i === 0 ? (
                   <p className="text-[10px] text-wedly-red px-1">
-                    맨 위 항목이 반올림이면 계산되지 않습니다. 위에 계산할 항목을 두거나 이 항목을 지우세요.
+                    맨 위 항목이 반올림이면 계산되지 않습니다. 이 항목을 지우고, 계산할 항목을 먼저 넣은 뒤 다시 추가하세요.
                   </p>
                 ) : (
                   <p className="text-[10px] text-wedly-muted px-1">
