@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
+import { tierFieldLock } from "./tier-field-lock";
 import { createPortal } from "react-dom";
 import {
   type FieldDef,
@@ -2232,7 +2233,7 @@ export default function SettlementInfoTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setPendingDeleteCardId(null)} />
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 flex items-start gap-3">
-                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-red flex items-center justify-center">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red">
                     <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                   </svg>
@@ -2266,7 +2267,7 @@ export default function SettlementInfoTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setPendingDeleteFieldKey(null)} />
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 flex items-start gap-3">
-                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-red flex items-center justify-center">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red">
                     <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                   </svg>
@@ -2461,13 +2462,16 @@ function TierCard({
                     : isFormula
                       ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined)
                       : (tier[f.key] ?? null);
+                  // 이 칸만 잠그라는 표시(앱별 정책)가 붙어 있으면 탭 전체 잠금과 같게 취급한다.
+                  const lock = tierFieldLock(f);
                   return (
                     <FieldRow
                       key={f.key}
                       label={f.label}
                       type={f.type}
                       value={cellValue}
-                      readOnly={readOnly}
+                      readOnly={readOnly || lock.locked}
+                      lockedNote={lock.locked ? lock.note : undefined}
                       isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       formulaResult={f.formulaResult}
                       options={f.options}
@@ -2716,7 +2720,7 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, type, value, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
+  label, type, value, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote,
 }: {
   label: string;
   type: FieldType;
@@ -2727,6 +2731,8 @@ function FieldRow({
   formulaResult?: FormulaResultFormat;
   options?: string[];
   optionColors?: Record<string, { bg: string; text: string }>;
+  /** 이 칸만 잠겼을 때 이름 옆에 (글자) 로 붙는 꼬리표. 없으면 안 붙는다. */
+  lockedNote?: string;
 }) {
   const [editing, setEditing] = useState(false);
   // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
@@ -2789,6 +2795,7 @@ function FieldRow({
         {label}
         {isAuto && <span className="ml-1 text-[10px] text-wedly-accent">(자동)</span>}
         {type === "formula" && <span className="ml-1 text-[10px] text-wedly-purple">(수식)</span>}
+        {lockedNote && <span className="ml-1 text-[10px] text-wedly-muted">({lockedNote})</span>}
       </div>
       <div ref={anchorRef} className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
         {editing && isEditable ? (
