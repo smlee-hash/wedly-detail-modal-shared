@@ -18,3 +18,18 @@ export function tierFieldLock(field: unknown): TierFieldLock {
   const raw = typeof f.readOnlyNote === "string" ? f.readOnlyNote.trim() : "";
   return { locked: true, note: raw === "" ? undefined : raw };
 }
+
+/**
+ * 칸 정의를 **처음부터 다시 만드는** 편집(타입 변경 등)에서 잠금 표시를 잃지 않게 옮긴다.
+ * 타입 변경은 key·label·type·options·scope 만 새 객체로 옮기므로, 이걸 안 거치면
+ * 잠긴 칸이 그 화면에서 다시 열려 "고를 수는 있는데 저장은 안 되는" 상태로 되돌아간다.
+ * 잠기지 않은 칸에는 아무것도 붙이지 않는다(기존 동작 그대로).
+ */
+export function carryFieldLock<T extends object>(from: unknown, to: T): T {
+  const lock = tierFieldLock(from);
+  if (!lock.locked) return to;
+  const out = to as Record<string, unknown>;
+  out.readOnly = true;
+  if (lock.note !== undefined) out.readOnlyNote = lock.note;
+  return to;
+}

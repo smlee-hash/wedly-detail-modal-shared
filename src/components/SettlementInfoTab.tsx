@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
-import { tierFieldLock } from "./tier-field-lock";
+import { tierFieldLock, carryFieldLock } from "./tier-field-lock";
 import { createPortal } from "react-dom";
 import {
   type FieldDef,
@@ -794,22 +794,25 @@ export default function SettlementInfoTab({
       const next = fields.map((f) => {
         if (f.key !== key) return f;
         const keepScope = (f as { scope?: "common" | "custom" }).scope;
+        // 타입 변경은 칸 정의를 처음부터 다시 만든다 → 잠금 표시(readOnly)를 반드시 함께 옮긴다.
+        //   안 옮기면 잠긴 칸이 그 화면에서 다시 열려, 고를 수는 있는데 서버가 되돌리는
+        //   "저장 안 되는 칸"으로 되돌아간다(범위 scope 를 지키는 것과 같은 이유).
         if (newType === "formula") {
           const nf: FieldDef = { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
           if (formulaConditional) nf.conditional = formulaConditional;
           if (keepScope) (nf as unknown as Record<string, unknown>).scope = keepScope;
-          return nf;
+          return carryFieldLock(f, nf);
         }
         // select 로 바꾸면 보기 목록을 싣는다 (범위 scope 는 유지)
         if (newType === "select") {
           const sel = { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
           if (keepScope) (sel as unknown as Record<string, unknown>).scope = keepScope;
-          return sel;
+          return carryFieldLock(f, sel);
         }
         // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거 (범위 scope 는 유지)
         const convField: FieldDef = { key: f.key, label: f.label, type: newType };
         if (keepScope) (convField as unknown as Record<string, unknown>).scope = keepScope;
-        return convField;
+        return carryFieldLock(f, convField);
       });
       setFields(next);
       persistFields(next);
