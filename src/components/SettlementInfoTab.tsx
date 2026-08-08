@@ -6,6 +6,7 @@
 //   - 경정청구: 10총환급금 / 20확정수수료 비율 (없으면 자동 OFF)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
 import { roundTermIssue, chainKind, applyTermPatch } from "./round-term-rules";
@@ -180,6 +181,7 @@ export default function SettlementInfoTab({
   addButtonSuffixOverride,
   conditionFieldOptions,
   enableConditionalFormula,
+  renderTierBadge,
 }: {
   rawValue: unknown;
   row?: RowData | null;
@@ -225,6 +227,11 @@ export default function SettlementInfoTab({
   }>;
   /** 조건별 수식 UI 표시 게이트 — ERP만 true. (기본정보 후보가 비어도 정산 칸만으로 조건 작성 가능하게 분리) */
   enableConditionalFormula?: boolean;
+  /**
+   * 차수 카드 제목 옆에 그릴 것(선택). index 는 0부터 세는 차수 번호.
+   * 미주입이면 지금과 100% 동일 — 주입하는 앱에서만 보인다(ERP 파트너 정산 뱃지용).
+   */
+  renderTierBadge?: (index: number) => ReactNode;
 }) {
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
@@ -1933,6 +1940,7 @@ export default function SettlementInfoTab({
             onChange={(key, value) => updateField(idx, key, value)}
             onLabelChange={(label) => updateTierLabel(idx, label)}
             onRemove={() => removeTier(idx)}
+            renderTierBadge={renderTierBadge}
             tierSuffix={tierSuffix}
             onTierSuffixChange={canEditStructure ? (next) => {
               setTierSuffix(next);
@@ -2679,7 +2687,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, renderTierBadge,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2701,6 +2709,8 @@ function TierCard({
   rowLayout?: number[];
   /** 조건별 수식의 기준값 — 이 행의 평면 값(row). 없으면 기존(조건 미적용)과 동일 */
   conditionValues?: RowData | null;
+  /** 차수 카드 제목 옆에 그릴 것(선택). 미주입이면 아무것도 안 그린다 */
+  renderTierBadge?: (index: number) => ReactNode;
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2766,6 +2776,7 @@ function TierCard({
           </h4>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {renderTierBadge?.(index)}
           {success != null && success > 0 && (
             <span className="text-[11px] font-bold text-wedly-accent tabular-nums">성공보수 {fmtCurrency(success)}원</span>
           )}
