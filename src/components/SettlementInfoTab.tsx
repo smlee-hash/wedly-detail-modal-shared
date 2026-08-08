@@ -231,7 +231,7 @@ export default function SettlementInfoTab({
    * 차수 카드 제목 옆에 그릴 것(선택). index 는 0부터 세는 차수 번호.
    * 미주입이면 지금과 100% 동일 — 주입하는 앱에서만 보인다(ERP 파트너 정산 뱃지용).
    */
-  renderTierBadge?: (index: number) => ReactNode;
+  renderTierBadge?: (index: number, tierId: string) => ReactNode;
 }) {
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
@@ -2709,8 +2709,8 @@ function TierCard({
   rowLayout?: number[];
   /** 조건별 수식의 기준값 — 이 행의 평면 값(row). 없으면 기존(조건 미적용)과 동일 */
   conditionValues?: RowData | null;
-  /** 차수 카드 제목 옆에 그릴 것(선택). 미주입이면 아무것도 안 그린다 */
-  renderTierBadge?: (index: number) => ReactNode;
+  /** 차수 카드 제목 옆에 그릴 것(선택). tierId 는 차수 고유 id — 배열 위치와 달리 삭제·순서변경에 안 흔들린다 */
+  renderTierBadge?: (index: number, tierId: string) => ReactNode;
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2776,7 +2776,7 @@ function TierCard({
           </h4>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {renderTierBadge?.(index)}
+          {renderTierBadge?.(index, tier.id)}
           {success != null && success > 0 && (
             <span className="text-[11px] font-bold text-wedly-accent tabular-nums">성공보수 {fmtCurrency(success)}원</span>
           )}
