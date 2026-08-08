@@ -38,6 +38,7 @@ import {
   parseDateFormula,
   formatFormulaResult,
   isNumericFieldType,
+  isStepOp,
 } from "@wedly/ui-shared";
 import CustomSelect from "./CustomSelect";
 import DateFormulaEditor from "./DateFormulaEditor";
@@ -2866,6 +2867,9 @@ function FormulaTermsEditor({
   // 반올림 항 추가 — 늘 '천원 단위'로 시작한다. 반올림은 값이 아니라 연산이라
   // 다른 항으로 바뀌지 않는다(바꾸는 길을 열면 컬럼 참조가 지워져 금액이 0원이 된다).
   const addRound = () => onChange([...terms, { op: "round", unit: "number", value: 1000 }]);
+  // 내림 항 추가 — 늘 '만원 단위'로 시작한다(경정청구 총 수수료가 만원 내림이라).
+  // 반올림과 마찬가지로 다른 항으로 바뀌지 않는다.
+  const addFloor = () => onChange([...terms, { op: "floor", unit: "number", value: 10000 }]);
   const updateGroupTerms = (idx: number, nextInner: FormulaTerm[]) =>
     onChange(terms.map((t, i) => (i === idx ? { ...t, terms: nextInner } : t)));
   const updateTerm = (idx: number, patch: Partial<FormulaTerm>) => {
@@ -2925,10 +2929,12 @@ function FormulaTermsEditor({
                   />
                 </div>
               </div>
-            ) : t.op === "round" ? (
+            ) : isStepOp(t.op) ? (
               <div key={i} className="rounded-lg border border-wedly-bd bg-wedly-bg-gray p-2 space-y-1.5">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-[92px] flex-shrink-0 text-[10px] font-bold text-wedly-accent px-1">≈ 반올림</span>
+                  <span className="w-[92px] flex-shrink-0 text-[10px] font-bold text-wedly-accent px-1">
+                    {t.op === "floor" ? "↓ 내림" : "≈ 반올림"}
+                  </span>
                   <div className="relative flex-1 min-w-0">
                     <input
                       type="number"
@@ -2936,7 +2942,7 @@ function FormulaTermsEditor({
                       step={1}
                       value={typeof t.value === "number" ? String(t.value) : ""}
                       onChange={(e) => updateTerm(i, { unit: "number", value: e.target.value === "" ? 0 : Number(e.target.value) })}
-                      placeholder="예: 1000"
+                      placeholder={t.op === "floor" ? "예: 10000" : "예: 1000"}
                       className="w-full px-2.5 py-1.5 pr-12 text-[16px] sm:text-[13px] tabular-nums border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent transition-colors [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     />
                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-wedly-muted text-[12px] pointer-events-none">원 단위</span>
@@ -2956,7 +2962,7 @@ function FormulaTermsEditor({
                   if (warn) return <p className="text-[10px] text-wedly-red px-1">{warn}</p>;
                   return (
                     <p className="text-[10px] text-wedly-muted px-1">
-                      {allowGroup ? "여기까지 계산한 값을" : "이 묶음 안에서 여기까지 계산한 값을"} 이 단위로 반올림합니다.
+                      {allowGroup ? "여기까지 계산한 값을" : "이 묶음 안에서 여기까지 계산한 값을"} 이 단위로 {t.op === "floor" ? "내립니다(단위 미만은 버립니다)" : "반올림합니다"}.
                     </p>
                   );
                 })()}
@@ -3053,6 +3059,15 @@ function FormulaTermsEditor({
           ≈ 반올림 추가
         </button>
       )}
+      {resultFormat !== "percent" && terms.length > 0 && chainKind(terms, fields) === "money" && (
+        <button
+          type="button"
+          onClick={addFloor}
+          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+        >
+          ↓ 내림 추가
+        </button>
+      )}
       {allowGroup && (
         <button
           type="button"
@@ -3075,12 +3090,12 @@ function FormulaTermsEditor({
         // 반올림은 연산이라 다른 항과 읽는 법이 다르다(value 가 금액이 아니라 반올림 단위(원)).
         // "≈ 1000" 이라고 찍으면 '대략 1,000원'으로 정반대로 읽힌다.
         const termText = (t: FormulaTerm, i: number): string => {
-          if (t.op === "round") {
+          if (isStepOp(t.op)) {
             const step = typeof t.value === "number" && t.value > 0 ? t.value : 0;
-            // 맨 위 반올림은 반올림할 앞선 값이 없어 엔진이 그냥 지나친다.
-            // 이때 숫자만 찍으면(옛 코드) '1000 원에서 시작'하는 것처럼 읽혀 실제와 어긋난다.
-            if (i === 0) return "→ 반올림(맨 위라 계산되지 않음)";
-            return step > 0 ? `→ ${step.toLocaleString("ko-KR")}원 단위 반올림` : "→ 반올림(단위 미입력)";
+            const 이름 = t.op === "floor" ? "내림" : "반올림";
+            // 맨 위 항은 앞선 값이 없어 엔진이 그냥 지나친다.
+            if (i === 0) return `→ ${이름}(맨 위라 계산되지 않음)`;
+            return step > 0 ? `→ ${step.toLocaleString("ko-KR")}원 단위 ${이름}` : `→ ${이름}(단위 미입력)`;
           }
           return i === 0 ? operandText(t) : `${opSym[t.op] || t.op} ${operandText(t)}`;
         };
