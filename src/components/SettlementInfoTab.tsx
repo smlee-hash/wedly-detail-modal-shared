@@ -231,7 +231,7 @@ export default function SettlementInfoTab({
    * 차수 카드 제목 옆에 그릴 것(선택). index 는 0부터 세는 차수 번호.
    * 미주입이면 지금과 100% 동일 — 주입하는 앱에서만 보인다(ERP 파트너 정산 뱃지용).
    */
-  renderTierBadge?: (index: number, tierId: string) => ReactNode;
+  renderTierBadge?: (index: number, tierId: string, tierIdDuplicated?: boolean) => ReactNode;
 }) {
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
@@ -1925,6 +1925,18 @@ export default function SettlementInfoTab({
           2) 세부 섹션 있음 + 통합 탭 = 차수 카드 안 보임 (영역별 합계만 위에서 표시)
           3) 세부 섹션 있음 + 세부 섹션 탭 = 그 영역의 차수만 + 추가 버튼 */}
       {(() => {
+        // 겹친 차수 고유 id 찾기 — 등록 병합이 만드는 id 는 배열 길이에서 나와서, 가운데 차수를 지웠다
+        // 다시 등록하면 이미 쓰던 id 가 되살아난다. 그대로 두면 한쪽에 붙은 표시가 아직 안 준 다른
+        // 차수까지 "정산완료"로 보이게 한다(정산표는 이미 막고 있는데 카드만 안 막고 있었다 — 코드리뷰 지적).
+        const dupTierIds = (() => {
+          const count = new Map<string, number>();
+          for (const t of tiers) {
+            const id = String(t?.id ?? "");
+            if (id) count.set(id, (count.get(id) ?? 0) + 1);
+          }
+          return new Set([...count.entries()].filter(([, n]) => n > 1).map(([id]) => id));
+        })();
+
         const renderTierCard = (tier: TierData, idx: number) => (
           <TierCard
             key={tier.id}
@@ -1941,6 +1953,7 @@ export default function SettlementInfoTab({
             onLabelChange={(label) => updateTierLabel(idx, label)}
             onRemove={() => removeTier(idx)}
             renderTierBadge={renderTierBadge}
+            tierIdDuplicated={dupTierIds.has(String(tier?.id ?? ""))}
             tierSuffix={tierSuffix}
             onTierSuffixChange={canEditStructure ? (next) => {
               setTierSuffix(next);
@@ -2687,7 +2700,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, renderTierBadge,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, renderTierBadge, tierIdDuplicated,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2710,7 +2723,9 @@ function TierCard({
   /** 조건별 수식의 기준값 — 이 행의 평면 값(row). 없으면 기존(조건 미적용)과 동일 */
   conditionValues?: RowData | null;
   /** 차수 카드 제목 옆에 그릴 것(선택). tierId 는 차수 고유 id — 배열 위치와 달리 삭제·순서변경에 안 흔들린다 */
-  renderTierBadge?: (index: number, tierId: string) => ReactNode;
+  renderTierBadge?: (index: number, tierId: string, tierIdDuplicated?: boolean) => ReactNode;
+  /** 이 차수의 고유 id 가 형제 차수와 겹치는가(겹치면 받는 쪽이 표시를 감춰 오표시를 막는다) */
+  tierIdDuplicated?: boolean;
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2776,7 +2791,7 @@ function TierCard({
           </h4>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {renderTierBadge?.(index, tier.id)}
+          {renderTierBadge?.(index, tier.id, tierIdDuplicated)}
           {success != null && success > 0 && (
             <span className="text-[11px] font-bold text-wedly-accent tabular-nums">성공보수 {fmtCurrency(success)}원</span>
           )}

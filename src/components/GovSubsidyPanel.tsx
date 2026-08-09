@@ -73,6 +73,8 @@ export type GovSubsidyPanelConfig = {
     kind: "contract" | "settlement" | "refund";
     index: number;
     tierId: string;
+    /** 이 차수 고유 id 가 형제 차수와 겹치는가(겹치면 받는 쪽이 표시를 감춘다) */
+    tierIdDuplicated?: boolean;
   }) => ReactNode;
   /** 보기 전용(하이브): 작성/수정/삭제 차단. */
   commentsReadOnly?: boolean;
@@ -387,19 +389,19 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
           {subTab === "contract" && (
             <div className="p-4">
-              <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string) => config.renderTierBadge!({ entryId, kind: "contract", index: i, tierId: tid }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" />
+              <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "contract", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" />
             </div>
           )}
 
           {subTab === "settlement" && (
             <div className="p-4">
-              <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string) => config.renderTierBadge!({ entryId, kind: "settlement", index: i, tierId: tid }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" />
+              <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "settlement", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" />
             </div>
           )}
 
           {subTab === "refund" && (
             <div className="p-4">
-              <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string) => config.renderTierBadge!({ entryId, kind: "refund", index: i, tierId: tid }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" />
+              <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "refund", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" />
             </div>
           )}
 
