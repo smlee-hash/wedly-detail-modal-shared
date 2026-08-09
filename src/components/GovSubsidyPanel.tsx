@@ -18,7 +18,7 @@
 //   달라, 본 패널은 같은 코드가 두 갈래에서 모두 빌드되도록 ComponentType<any> 로 느슨히 받는다
 //   (기존 어댑터 components 캐스팅 관행과 동일). 미지원 prop 은 런타임에서 해당 컴포넌트가 무시한다.
 
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   HistoryPanel,
   timeAgo,
@@ -63,6 +63,17 @@ export type GovSubsidyPanelConfig = {
   conditionFieldOptions?: (row: Record<string, unknown>) => unknown;
   /** 히스토리 댓글 경로. */
   commentsPath: (entryId: string) => string;
+  /**
+   * 차수 카드 제목 옆에 그릴 것(선택). 이 패널은 계약·정산·환불 차수 카드를 직접 그리므로,
+   * 공용 SettlementInfoTab 의 renderTierBadge 를 여기서 한 번 더 이어 준다.
+   * 미주입이면 지금과 100% 동일 — 다른 앱에는 영향이 없다.
+   */
+  renderTierBadge?: (ctx: {
+    entryId: string;
+    kind: "contract" | "settlement" | "refund";
+    index: number;
+    tierId: string;
+  }) => ReactNode;
   /** 보기 전용(하이브): 작성/수정/삭제 차단. */
   commentsReadOnly?: boolean;
   /** 이미지 붙여넣기 업로드 경로(기본 /api/upload). */
@@ -376,19 +387,19 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
           {subTab === "contract" && (
             <div className="p-4">
-              <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" />
+              <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string) => config.renderTierBadge!({ entryId, kind: "contract", index: i, tierId: tid }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" />
             </div>
           )}
 
           {subTab === "settlement" && (
             <div className="p-4">
-              <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" />
+              <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string) => config.renderTierBadge!({ entryId, kind: "settlement", index: i, tierId: tid }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" />
             </div>
           )}
 
           {subTab === "refund" && (
             <div className="p-4">
-              <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" />
+              <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string) => config.renderTierBadge!({ entryId, kind: "refund", index: i, tierId: tid }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" />
             </div>
           )}
 
