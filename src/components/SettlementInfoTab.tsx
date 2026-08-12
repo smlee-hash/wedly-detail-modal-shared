@@ -798,21 +798,26 @@ export default function SettlementInfoTab({
       const next = fields.map((f) => {
         if (f.key !== key) return f;
         const keepScope = (f as { scope?: "common" | "custom" }).scope;
+        // 칸 종류를 바꾸면 필드를 새로 만들기 때문에, 덤으로 붙은 값은 손으로 옮겨 담지 않으면 사라진다.
+        const keepDescription = (f as { description?: string }).description;
         if (newType === "formula") {
           const nf: FieldDef = { key: f.key, label: f.label, type: "formula" as FieldType, formula: formulaTerms, formulaResult: draftFormulaResult };
           if (formulaConditional) nf.conditional = formulaConditional;
           if (keepScope) (nf as unknown as Record<string, unknown>).scope = keepScope;
+          if (keepDescription) (nf as unknown as Record<string, unknown>).description = keepDescription;
           return nf;
         }
         // select 로 바꾸면 보기 목록을 싣는다 (범위 scope 는 유지)
         if (newType === "select") {
           const sel = { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
           if (keepScope) (sel as unknown as Record<string, unknown>).scope = keepScope;
+          if (keepDescription) (sel as unknown as Record<string, unknown>).description = keepDescription;
           return sel;
         }
         // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거 (범위 scope 는 유지)
         const convField: FieldDef = { key: f.key, label: f.label, type: newType };
         if (keepScope) (convField as unknown as Record<string, unknown>).scope = keepScope;
+        if (keepDescription) (convField as unknown as Record<string, unknown>).description = keepDescription;
         return convField;
       });
       setFields(next);
@@ -2466,6 +2471,7 @@ function TierCard({
                     <FieldRow
                       key={f.key}
                       label={f.label}
+                      description={(f as { description?: string }).description}
                       type={f.type}
                       value={isFormula && !isDateFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null)}
                       dateValue={isDateFormula ? evalDateFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : undefined}
@@ -2781,9 +2787,11 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
+  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
 }: {
   label: string;
+  /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
+  description?: string;
   type: FieldType;
   value: string | number | null;
   dateValue?: string | null;
@@ -2847,7 +2855,7 @@ function FieldRow({
 
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-wedly-bd/40 bg-wedly-bg-gray/20 px-3 py-2 min-h-[58px]">
-      <div className="text-[11px] text-wedly-muted truncate">
+      <div className="text-[11px] text-wedly-muted truncate" title={description ? `${label} — ${description}` : label}>
         {label}
         {isAuto && <span className="ml-1 text-[10px] text-wedly-accent">(자동)</span>}
         {type === "formula" && <span className="ml-1 text-[10px] text-wedly-purple">(수식)</span>}
