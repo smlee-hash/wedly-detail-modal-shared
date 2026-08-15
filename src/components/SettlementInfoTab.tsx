@@ -1422,10 +1422,10 @@ export default function SettlementInfoTab({
           <div className="flex items-center gap-2">
             <p className="text-[11px] text-wedly-muted">{tiersInActive.length}개 차수 · {scoreCards.length}개 카드</p>
             {/* 통합 편집 버튼 (카드 편집 + 컬럼 편집을 한 번에 ON/OFF) — 전체 합계 카드 머리에 배치 */}
-            {canEditColumns && (
+            {(canEditCards || canEditColumns) && (
               <button
                 type="button"
-                onClick={() => { const next = !(editCards || editFields); setEditCards(next); setEditFields(next); }}
+                onClick={() => { const next = !(editCards || editFields); setEditCards(next && canEditCards); setEditFields(next && canEditColumns); }}
                 className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border transition-colors whitespace-nowrap ${
                   (editCards || editFields)
                     ? "border-wedly-accent text-wedly-accent bg-wedly-bg-blue/40"
@@ -1507,7 +1507,7 @@ export default function SettlementInfoTab({
       )}
 
       {/* 어드민 카드 편집 패널 */}
-      {editCards && canEditColumns && (
+      {editCards && canEditCards && (
         <div className="rounded-2xl border-2 border-wedly-accent/30 bg-wedly-bg-blue/10 p-4 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-[12px] font-semibold text-wedly-accent">스코어카드 편집 (전체 사용자에게 적용됨)</p>
