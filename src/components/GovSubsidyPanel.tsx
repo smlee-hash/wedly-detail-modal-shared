@@ -26,7 +26,6 @@ import {
   type UnifiedComment,
   type SectionPanelProps,
   type ScoreCardDef,
-  basicFieldOptionsFromRow,
   COMMON_BASIC_FIELD_SPECS,
 } from "@wedly/ui-shared";
 import SettlementInfoTabBase from "./SettlementInfoTab";
@@ -264,6 +263,14 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     }, [adapter, config.conditionBasicDomain, config.enableConditionalFormula]);
 
     const onSaveFor = (key: string) => (canEditValues ? (json: string) => saveOrCreate(key, json) : () => {});
+    // 조건 "기준 칸" 표준 후보를 만드는 함수 — 앱(어댑터)이 넘겨줄 때만 쓴다.
+    // 화면 부품(@wedly/ui-shared)에서 직접 가져오면, 그 함수가 없는 판을 무는 앱(하이브·일루아 v0.29)이
+    // 화면을 열기도 전에 빌드에서 죽는다. 그래서 앱이 주입하는 형태로 받는다.
+    // 안 넘기면 빈 목록 → 커스텀 후보만 남아 지금 하이브·일루아 동작과 똑같다.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const basicOptsFn = (adapter as any)?.basicConditionOptionsFromRow as
+      | ((row: Record<string, unknown>) => Array<{ key: string; label: string }>)
+      | undefined;
     const condOpts = (() => {
       if (condFromDefs) {
         // ERP 경로: 표준 기본정보 칸 + 커스텀(enrich) 합산.
@@ -273,7 +280,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         // 기준 칸이 늘 비어 영영 미발동(항상 기본식)한다.
         // data 는 entry?.row ?? {} 라 항상 객체 — "계약 행 없음" 폴백은 빈 객체 검사로 해야 실제로 동작한다(리뷰 M-3).
         const condRow = data && Object.keys(data).length > 0 ? data : primaryRow;
-        const std = basicFieldOptionsFromRow(condRow as Record<string, unknown>);
+        const std = basicOptsFn?.(condRow as Record<string, unknown>) ?? [];
         const customKeys = new Set(condFromDefs.map((o) => o.key));
         return [...std.filter((o) => !customKeys.has(o.key)), ...condFromDefs];
       }
