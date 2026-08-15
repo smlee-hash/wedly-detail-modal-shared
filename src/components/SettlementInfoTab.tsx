@@ -158,6 +158,10 @@ export default function SettlementInfoTab({
   // 이 차수 칸을 도메인 "표"에 차수별 줄로 노출하는 "표 노출" 토글 버튼 허용 여부 — 기본 false.
   //   실제 표 렌더가 구현된 도메인(1단계=경정청구)에서만 true 로 켠다. 다른 도메인은 버튼 자체가 안 뜬다.
   allowTableExpose = false,
+  // 수수료 계산식에 '반올림·내림' 항을 더할 수 있게 할지 — 기본 false(단추 자체가 안 뜬다).
+  //   사장님 결정(2026-08-15): 수수료 계산식은 ERP 에서만 관리한다. 그래서 ERP 래퍼에서만 켠다.
+  //   이미 저장된 반올림·내림 항의 계산·표시는 이 값과 무관하게 그대로다(금액이 바뀌지 않는다).
+  allowStepTerms = false,
   // ── 영역 분리 prop (A-1 모듈화) ──
   // 정산정보 외 계약·환불 같은 다른 영역에서도 같은 차수 카드 부품 재사용 가능
   // 기본값은 정산 — 기존 호출 호환
@@ -198,6 +202,8 @@ export default function SettlementInfoTab({
   columnScopeMode?: "off" | "erp" | "partner-custom";
   // "표 노출" 토글 버튼 허용(표 렌더 구현 도메인 전용). 기본 false = 버튼 숨김.
   allowTableExpose?: boolean;
+  // 수수료 계산식의 '반올림 추가'·'내림 추가' 단추 허용. 기본 false = 단추 숨김(ERP 만 켠다).
+  allowStepTerms?: boolean;
   storagePrefix?: string;
   fieldsApiPath?: string;
   sectionTitle?: string;
@@ -2297,6 +2303,7 @@ export default function SettlementInfoTab({
                       editingFieldKey={editingFieldKey}
                       columnOptions={formulaColumnOptions}
                       resultFormat={draftFormulaResult}
+                      allowStepTerms={allowStepTerms}
                     />
                   )}
 
@@ -2478,6 +2485,7 @@ export default function SettlementInfoTab({
                                 editingFieldKey={editingFieldKey}
                                 columnOptions={formulaColumnOptions}
                                 resultFormat={draftFormulaResult}
+                                allowStepTerms={allowStepTerms}
                               />
                             </div>
                           ))}
@@ -2872,6 +2880,7 @@ function checkFormulaTermColumns(t: FormulaTerm, fields: FieldDef[]): string | n
 
 function FormulaTermsEditor({
   terms, onChange, fields, editingFieldKey, columnOptions, resultFormat, allowGroup = true,
+  allowStepTerms = false,
 }: {
   terms: FormulaTerm[];
   onChange: (next: FormulaTerm[]) => void;
@@ -2880,6 +2889,8 @@ function FormulaTermsEditor({
   columnOptions: { value: string; label: string }[];
   resultFormat: FormulaResultFormat;
   allowGroup?: boolean;
+  // '반올림 추가'·'내림 추가' 단추 허용 — 기본 false(안 뜬다). ERP 만 켠다.
+  allowStepTerms?: boolean;
 }) {
   const addTerm = () => {
     const firstCol = fields.find((f) => isNumericFieldType(f.type) && f.key !== editingFieldKey);
@@ -2958,6 +2969,7 @@ function FormulaTermsEditor({
                     columnOptions={columnOptions}
                     resultFormat={resultFormat}
                     allowGroup={false}
+                    allowStepTerms={allowStepTerms}
                   />
                 </div>
               </div>
@@ -3082,7 +3094,7 @@ function FormulaTermsEditor({
       </button>
       {/* 반올림은 '원 단위'를 전제한다. 지금까지의 값이 비율(퍼센트)이면 1,000원 단위로
           반올림하는 순간 0 이 되므로 버튼 자체를 안 띄운다(저장 검증은 그 뒤의 그물). */}
-      {resultFormat !== "percent" && terms.length > 0 && chainKind(terms, fields) === "money" && (
+      {allowStepTerms && resultFormat !== "percent" && terms.length > 0 && chainKind(terms, fields) === "money" && (
         <button
           type="button"
           onClick={addRound}
@@ -3091,7 +3103,7 @@ function FormulaTermsEditor({
           ≈ 반올림 추가
         </button>
       )}
-      {resultFormat !== "percent" && terms.length > 0 && chainKind(terms, fields) === "money" && (
+      {allowStepTerms && resultFormat !== "percent" && terms.length > 0 && chainKind(terms, fields) === "money" && (
         <button
           type="button"
           onClick={addFloor}
