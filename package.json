@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "lint": "echo 'lint pending'",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "next": ">=15.0.0",
