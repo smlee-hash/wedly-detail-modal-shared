@@ -54,6 +54,9 @@ export type GovSubsidyPanelConfig = {
   /** 관리자가 아니어도 값(계약정보·정산 등) 수정·신규 추가 허용(옵트인). 미설정 시 기존대로 관리자만.
    *  구조/칸 정의 편집은 이 플래그와 무관하게 항상 실제 관리자만(allowStructureEdit && isAdmin). */
   allowNonAdminEdit?: boolean;
+  /** 수수료 계산식에 '반올림·내림' 항을 더할 수 있게 할지. 기본 꺼짐 — ERP 만 켠다.
+   *  (사장님 결정 2026-08-15: 수수료 계산식은 ERP 에서만 관리) */
+  allowStepTerms?: boolean;
   /** 히스토리 출처 라벨: "erp" | "hive" | "illua". */
   ownSource: string;
   /** ERP만 조건부 수식 UI. */
@@ -300,6 +303,8 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       readOnly: !canEditValues,
       allowStructureEdit: config.allowStructureEdit && isAdmin,
       columnScopeMode: config.allowStructureEdit ? "erp" : "off",
+      // 반올림·내림 항 추가 단추 — 앱이 켤 때만. 안 켜면 단추가 안 뜬다(하이브·일루아).
+      allowStepTerms: config.allowStepTerms === true,
       ratioBaseKey: RATIO.baseKey,
       ratioFeeKey: RATIO.feeKey,
       ratioBaseLabel: RATIO.baseLabel,
