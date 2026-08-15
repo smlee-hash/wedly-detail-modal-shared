@@ -3212,7 +3212,9 @@ function FieldRow({
         return <span className="tabular-nums font-medium">{dateValue || "-"}</span>;
       }
       const num = typeof value === "number" ? value : Number(value);
-      if (!Number.isFinite(num)) {
+      // ⚠️ 빈값(null·빈 글자)을 먼저 걸러야 한다 — Number(null)·Number("")은 0 이라
+      //    "계산 불가"가 "0원"으로 찍힌다(NO.132 와 같은 사고, 세 갈래 통합 때 되살아날 뻔했다).
+      if (value === null || value === undefined || value === "" || !Number.isFinite(num)) {
         return <span className="text-wedly-muted">-</span>;
       }
       return <span className="tabular-nums font-medium">{formatFormulaResult(num, formulaResult)}</span>;
