@@ -1,3 +1,4 @@
+// cache-bust 2026-07-10: illua 계약탭 합계카드 재작업 — 배포 재설치 강제(동작 무변경, f5ee993 후손)
 "use client";
 
 // 경정청구 정산정보 탭 — 정책자금(policy-fund/SettlementInfoTab.tsx) 와 동일한 UX/로직.
@@ -3179,6 +3180,8 @@ function FieldRow({
   formulaResult?: FormulaResultFormat;
   options?: string[];
   optionColors?: Record<string, { bg: string; text: string }>;
+  /** 이 칸만 잠겼을 때 이름 옆에 (글자) 로 붙는 꼬리표. 없으면 안 붙는다. */
+  lockedNote?: string;
 }) {
   const [editing, setEditing] = useState(false);
   // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
@@ -3202,7 +3205,7 @@ function FieldRow({
         return <span className="tabular-nums font-medium">{dateValue || "-"}</span>;
       }
       const num = typeof value === "number" ? value : Number(value);
-      if (value === null || value === undefined || value === "" || !Number.isFinite(num)) {
+      if (!Number.isFinite(num)) {
         return <span className="text-wedly-muted">-</span>;
       }
       return <span className="tabular-nums font-medium">{formatFormulaResult(num, formulaResult)}</span>;
@@ -3237,6 +3240,7 @@ function FieldRow({
         {label}
         {isAuto && <span className="ml-1 text-[10px] text-wedly-accent">(자동)</span>}
         {type === "formula" && <span className="ml-1 text-[10px] text-wedly-purple">(수식)</span>}
+        {lockedNote && <span className="ml-1 text-[10px] text-wedly-muted">({lockedNote})</span>}
       </div>
       <div ref={anchorRef} className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
         {editing && isEditable ? (
