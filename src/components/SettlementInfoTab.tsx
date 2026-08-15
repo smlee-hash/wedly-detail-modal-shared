@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
+import { tierFieldLock, carryFieldLock } from "./tier-field-lock";
 import { roundTermIssue, chainKind, applyTermPatch } from "./round-term-rules";
 import { createPortal } from "react-dom";
 import {
@@ -890,7 +891,9 @@ export default function SettlementInfoTab({
           if (keepScope) (nf as unknown as Record<string, unknown>).scope = keepScope;
           if (keepTableExposed) (nf as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
           if (keepDescription) (nf as unknown as Record<string, unknown>).description = keepDescription;
-          return nf;
+          // 칸 잠금 표시도 함께 옮긴다 — 안 옮기면 잠긴 칸이 다시 열려
+          // "고를 수는 있는데 저장은 안 되는" 상태가 된다(일루아 08-07 수정분).
+          return carryFieldLock(f, nf);
         }
         // select 로 바꾸면 보기 목록을 싣는다 (범위 scope 는 유지)
         if (newType === "select") {
@@ -898,14 +901,14 @@ export default function SettlementInfoTab({
           if (keepScope) (sel as unknown as Record<string, unknown>).scope = keepScope;
           if (keepTableExposed) (sel as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
           if (keepDescription) (sel as unknown as Record<string, unknown>).description = keepDescription;
-          return sel;
+          return carryFieldLock(f, sel);
         }
         // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거 (범위 scope 는 유지)
         const convField: FieldDef = { key: f.key, label: f.label, type: newType };
         if (keepScope) (convField as unknown as Record<string, unknown>).scope = keepScope;
         if (keepTableExposed) (convField as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
         if (keepDescription) (convField as unknown as Record<string, unknown>).description = keepDescription;
-        return convField;
+        return carryFieldLock(f, convField);
       });
       setFields(next);
       persistFields(next);
@@ -2842,6 +2845,9 @@ function TierCard({
                 {grp.items.map((f) => {
                   const isFormula = f.type === "formula";
                   const isDateFormula = isFormula && f.formulaResult === "date";
+                  // 이 칸만 잠그라는 표시(앱별 정책)가 붙어 있으면 탭 전체 잠금과 같게 취급한다.
+                  // 표시가 없으면 { locked: false } 라 다른 앱 동작은 한 톨도 안 바뀐다.
+                  const lock = tierFieldLock(f);
                   return (
                     <FieldRow
                       key={f.key}
@@ -2850,7 +2856,8 @@ function TierCard({
                       type={f.type}
                       value={isDateFormula ? null : (isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null))}
                       dateValue={isDateFormula ? evalDateFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : undefined}
-                      readOnly={readOnly}
+                      readOnly={readOnly || lock.locked}
+                      lockedNote={lock.locked ? lock.note : undefined}
                       isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       formulaResult={f.formulaResult}
                       options={f.options}
@@ -3166,7 +3173,7 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors,
+  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote,
 }: {
   label: string;
   /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
