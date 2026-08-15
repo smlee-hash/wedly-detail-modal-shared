@@ -158,10 +158,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 값 편집 가능 = 앱이 편집 허용 && (관리자 || 일반 사용자 편집 옵트인). 하이브는 editable=false → 항상 보기 전용.
     // NO.119: allowNonAdminEdit(ERP·일루아) 로 일반 사용자도 값 수정·신규 추가 가능. 구조 편집은 아래 259행에서 실제 isAdmin 유지.
     const canEditValues = config.editable && (isAdmin || config.allowNonAdminEdit === true);
+    // 댓글(히스토리) 작성 가능 = 보기전용 앱이 아니면 허용 — 값 편집(canEditValues)과 분리.
+    // 하이브는 editable:false(값 잠금) + commentsReadOnly 미설정(댓글 개방)으로 여기만 열린다.
+    const canWriteHistory = config.commentsReadOnly !== true;
     // 히스토리 게이트 — 항목 없어도 편집 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
     // 식별값(사업자번호/연락처)이 없어도 열린다 — 자동생성 항목은 앵커 꼬리표(_anchorRef, 각 앱 prefill 부여)로
     // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
-    const historyGate = resolveHistoryGate({ entryId, canEditValues, hasCreateContract: Boolean(config.createContract) });
+    const historyGate = resolveHistoryGate({ entryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract) });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
@@ -366,7 +369,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   pageId={entryId}
                   adapter={historyAdapter}
                   currentUserName={userName}
-                  isAdmin={config.editable ? isAdmin : false}
+                  isAdmin={config.editable || canWriteHistory ? isAdmin : false}
                   ownSource={config.ownSource}
                   enableImagePaste={!config.commentsReadOnly}
                   readOnly={config.commentsReadOnly === true}

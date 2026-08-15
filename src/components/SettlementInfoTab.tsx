@@ -151,6 +151,9 @@ export default function SettlementInfoTab({
   //   본부(ERP)만 true 로 켠다. 파트너 앱(하이브·일루아)은 값 입력만 하고, 구조는 ERP 에서만 바꾼다.
   //   기본이 false 라서 파트너 앱이 실수로 isAdmin=true 를 넘겨도 구조 편집 버튼은 안 나온다(안전장치).
   allowStructureEdit = false,
+  // 스코어카드(전체합계 카드)만 편집 허용 — 파트너 앱이 자기 앱 스코어카드를 관리.
+  //   미지정 시 allowStructureEdit 를 따른다(ERP·다른분야 호출부 무변경).
+  allowCardEdit,
   // 칸(컬럼) 목록 편집만 허용 — 세부섹션/차수접미사(allowStructureEdit)와 분리. 미지정 시 allowStructureEdit 폴백.
   allowColumnEdit,
   // 칸 범위 모드: off(현행·토글없음) | erp(공통/커스텀 선택) | partner-custom(커스텀고정·공통잠금)
@@ -196,6 +199,8 @@ export default function SettlementInfoTab({
   hideSummaryCards?: boolean;
   // 구조(차수 카드·컬럼) 편집 허용 — 본부(ERP) 전용. 미지정 시 false (파트너 앱 = 값 입력만).
   allowStructureEdit?: boolean;
+  // 스코어카드 편집만 허용(칸 구조 편집과 분리). 미지정 시 allowStructureEdit 폴백.
+  allowCardEdit?: boolean;
   // 칸 목록 편집 게이트(세부섹션·차수접미사와 분리). 미지정 시 allowStructureEdit 폴백.
   allowColumnEdit?: boolean;
   // 칸 범위 모드(공통/커스텀). 기본 off = 현행 동작.
@@ -340,6 +345,9 @@ export default function SettlementInfoTab({
   const canEditColumns = !readOnly && isAdmin && (allowColumnEdit ?? allowStructureEdit);
   // 세부섹션·차수접미사 등 "무거운 구조" 편집 — 본부(ERP)만(allowStructureEdit).
   const canEditStructure = !readOnly && isAdmin && allowStructureEdit;
+  // 스코어카드 편집 게이트 — 칸 구조와 분리. 파트너 앱은 카드만(allowCardEdit), 칸 구조는 ERP만.
+  //   allowCardEdit 미지정이면 allowStructureEdit 로 폴백 → 기존 호출부(ERP·다른분야) 100% 동일.
+  const canEditCards = !readOnly && isAdmin && (allowCardEdit ?? allowStructureEdit);
   // ⚠️ 마운트 시 초기값을 빈 배열로 — 서버 fetch 응답 전까지 옛 기본 컬럼이 잠깐 보이는
   // 깜빡임 방지. 서버 응답이 진실의 원천.
   const [fields, setFields] = useState<FieldDef[]>([]);
