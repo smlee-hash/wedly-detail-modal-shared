@@ -748,7 +748,7 @@ export function FilesTab({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-5 pt-5 pb-3 border-b border-wedly-bd/60">
-              <h3 className="text-[15px] font-bold text-wedly-navy">파일 제거</h3>
+              <h3 className="text-wedly-sub font-bold text-wedly-navy">파일 제거</h3>
             </div>
             <div className="px-5 py-4 text-[13px] text-wedly-t2">
               {`'${pendingRemove.fileName || "파일"}'을(를) 목록에서 제거하시겠습니까?`}
@@ -784,7 +784,7 @@ export function FilesTab({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-5 pt-5 pb-3 border-b border-wedly-bd/60">
-              <h3 className="text-[15px] font-bold text-wedly-navy">일부 파일 제외</h3>
+              <h3 className="text-wedly-sub font-bold text-wedly-navy">일부 파일 제외</h3>
             </div>
             <div className="px-5 py-4 text-[13px] text-wedly-t2 whitespace-pre-line">{noticeMsg}</div>
             <div className="px-5 py-3 bg-wedly-bg-gray/50 border-t border-wedly-bd/60 flex justify-end">

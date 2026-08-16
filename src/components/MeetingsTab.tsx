@@ -400,7 +400,7 @@ export default function MeetingsTab({
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-[15px] font-bold text-wedly-navy">{label} 방문 일정 삭제</h3>
+                  <h3 className="text-wedly-sub font-bold text-wedly-navy">{label} 방문 일정 삭제</h3>
                   {when && (
                     <p className="mt-1 text-[12px] text-wedly-muted">예정 일시: {when}</p>
                   )}
@@ -474,7 +474,7 @@ export default function MeetingsTab({
             <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in flex flex-col max-h-[90vh]">
               <div className="px-5 pt-4 pb-3 border-b border-wedly-bd flex items-center justify-between">
                 <div>
-                  <h3 className="text-[15px] font-bold text-wedly-navy">방문 일정 캘린더</h3>
+                  <h3 className="text-wedly-sub font-bold text-wedly-navy">방문 일정 캘린더</h3>
                   <p className="text-[11px] text-wedly-muted mt-0.5">
                     {year}년 {month + 1}월 · {meetings.filter((m) => m.datetime).length}개 일정
                   </p>

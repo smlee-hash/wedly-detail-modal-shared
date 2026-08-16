@@ -2061,7 +2061,7 @@ export default function SettlementInfoTab({
           <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setSubSectionAddOpen(false)} />
           <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
             <div className="px-5 pt-5 pb-3 border-b border-wedly-bd/60">
-              <h3 className="text-[15px] font-bold text-wedly-navy">세부 섹션 추가</h3>
+              <h3 className="text-wedly-sub font-bold text-wedly-navy">세부 섹션 추가</h3>
               <p className="mt-1 text-[11px] text-wedly-muted">예: 경정청구 / 정부지원금 / 기업인증제도</p>
             </div>
             <div className="px-5 py-4">
@@ -2105,7 +2105,7 @@ export default function SettlementInfoTab({
           <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setSubSectionRename(null)} />
           <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
             <div className="px-5 pt-5 pb-3 border-b border-wedly-bd/60">
-              <h3 className="text-[15px] font-bold text-wedly-navy">세부 섹션 이름 수정</h3>
+              <h3 className="text-wedly-sub font-bold text-wedly-navy">세부 섹션 이름 수정</h3>
             </div>
             <div className="px-5 py-4">
               <label className="block">
@@ -2149,7 +2149,7 @@ export default function SettlementInfoTab({
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setSubSectionDeleteConfirm(null)} />
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 border-b border-wedly-bd/60">
-                <h3 className="text-[15px] font-bold text-wedly-navy">세부 섹션 삭제</h3>
+                <h3 className="text-wedly-sub font-bold text-wedly-navy">세부 섹션 삭제</h3>
               </div>
               <div className="px-5 py-4 text-[13px] text-wedly-t2 space-y-2">
                 <p>&quot;{subSectionDeleteConfirm.label}&quot; 세부 섹션을 삭제하시겠습니까?</p>
@@ -2182,7 +2182,7 @@ export default function SettlementInfoTab({
           <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setFieldEditModal(null)} />
           <div className={`relative w-full ${fieldEditModal.mode !== "rename" && draftType === "formula" ? "max-w-lg" : "max-w-sm"} bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in`}>
             <div className="px-5 pt-5 pb-3 border-b border-wedly-bd/60">
-              <h3 className="text-[15px] font-bold text-wedly-navy">
+              <h3 className="text-wedly-sub font-bold text-wedly-navy">
                 {fieldEditModal.mode === "add" ? "새 컬럼 추가"
                   : fieldEditModal.mode === "rename" ? "컬럼 이름 변경"
                   : "컬럼 타입 변경"}
@@ -2538,7 +2538,7 @@ export default function SettlementInfoTab({
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-[15px] font-bold text-wedly-navy">스코어카드 삭제</h3>
+                  <h3 className="text-wedly-sub font-bold text-wedly-navy">스코어카드 삭제</h3>
                   <p className="mt-1 text-[12px] text-wedly-muted truncate">{target?.label || pendingDeleteCardId}</p>
                 </div>
               </div>
@@ -2572,7 +2572,7 @@ export default function SettlementInfoTab({
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-[15px] font-bold text-wedly-navy">정산 컬럼 삭제</h3>
+                  <h3 className="text-wedly-sub font-bold text-wedly-navy">정산 컬럼 삭제</h3>
                   <p className="mt-1 text-[12px] text-wedly-muted truncate">{target?.label || pendingDeleteFieldKey}</p>
                 </div>
               </div>
@@ -2618,7 +2618,7 @@ export default function SettlementInfoTab({
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-[15px] font-bold text-wedly-navy">칸 범위 변경</h3>
+                  <h3 className="text-wedly-sub font-bold text-wedly-navy">칸 범위 변경</h3>
                   <p className="mt-1 text-[12px] text-wedly-muted truncate">{target?.label || pendingScopeToggleKey}</p>
                 </div>
               </div>
@@ -2660,7 +2660,7 @@ export default function SettlementInfoTab({
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-[15px] font-bold text-wedly-navy">{on ? "표 노출 취소" : "표 노출"}</h3>
+                  <h3 className="text-wedly-sub font-bold text-wedly-navy">{on ? "표 노출 취소" : "표 노출"}</h3>
                   <p className="mt-1 text-[12px] text-wedly-muted truncate">{target?.label || pendingExposeKey}</p>
                 </div>
               </div>
@@ -2692,7 +2692,7 @@ export default function SettlementInfoTab({
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setNoticeMsg(null)}>
           <div className="w-full max-w-sm rounded-2xl border border-wedly-bd bg-white shadow-2xl animate-modal-in" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 pt-5 pb-3 border-b border-wedly-bd/60">
-              <h3 className="text-[15px] font-bold text-wedly-navy">{noticeMsg.title}</h3>
+              <h3 className="text-wedly-sub font-bold text-wedly-navy">{noticeMsg.title}</h3>
             </div>
             <div className="px-5 py-4 text-[13px] text-wedly-t2 whitespace-pre-line">{noticeMsg.body}</div>
             <div className="px-5 py-3 bg-wedly-bg-gray/50 border-t border-wedly-bd/60 flex justify-end">
@@ -2789,7 +2789,7 @@ function TierCard({
             </span>
           </button>
           {/* 차수 라벨 — "1차"(고정) + 공통 꼬리표(어드민이 한 번 수정하면 모든 차수에 적용) */}
-          <h4 className="text-[13px] font-bold text-wedly-navy flex-1 min-w-0 flex items-center gap-1 truncate">
+          <h4 className="text-wedly-sub font-bold text-wedly-navy flex-1 min-w-0 flex items-center gap-1 truncate">
             <span className="flex-shrink-0">{ordinal}</span>
             {editingSuffix && onTierSuffixChange ? (
               <input
