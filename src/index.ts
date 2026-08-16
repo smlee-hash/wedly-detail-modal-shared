@@ -10,11 +10,23 @@ export { default as MeetingsTab } from "./components/MeetingsTab";
 
 export { default as SettlementInfoTab } from "./components/SettlementInfoTab";
 
+// 정부지원금 상세 섹션 공용 패널(3앱 공통) — 어댑터가 createGovSubsidyPanel(config) 로 주입.
+export { createGovSubsidyPanel } from "./components/GovSubsidyPanel";
+export type { GovSubsidyPanelConfig } from "./components/GovSubsidyPanel";
+
 // 분야(섹션)별 정산 탭 래퍼 — 앱별 정산 칸/설정 주소(settlementApiBase) 주입.
 export { default as SectionSettlementTab } from "./components/SectionSettlementTab";
 
 export { FilesTab, detectFileTag } from "./components/FilesTab";
 export type { FileMeta } from "./components/FilesTab";
+
+// 파일 용량 표기·키 헬퍼 — 앱 패널이 옛 파일 용량 보강(resolveSizes) 연결에 사용.
+export {
+  formatFileSize,
+  fileSizeKey,
+  filesMissingSize,
+  DEFAULT_MAX_UPLOAD_BYTES,
+} from "./lib/file-size";
 
 export { default as SelectDropdownBody } from "./components/SelectDropdown";
 export type {

@@ -13,6 +13,15 @@
 
 import { useState, useRef, useEffect } from "react";
 import { cn } from "../lib/cn";
+import { isFileDrag } from "../lib/files-drag";
+import {
+  formatFileSize,
+  partitionFilesBySize,
+  oversizeMessage,
+  fileSizeKey,
+  filesMissingSize,
+  DEFAULT_MAX_UPLOAD_BYTES,
+} from "../lib/file-size";
 
 // 파일 한 건의 메타. 모든 필드 선택 — 앱별 로컬 타입과 구조 호환.
 export interface FileMeta {
@@ -23,6 +32,10 @@ export interface FileMeta {
   // ERP에서 업로드한 파일은 url 필드로 직접 링크 (proxy 미사용)
   url?: string;
   category?: string;
+  // 업로드 시 기록한 파일 용량(바이트). 과거 파일엔 없을 수 있음(표시 생략).
+  size?: number;
+  // 업로드(첨부)한 시각(ISO 문자열). 과거 파일엔 없을 수 있음(표시 생략 — size 와 동일 관례).
+  at?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +68,15 @@ export function detectFileTag(filename: string): string {
 }
 function getFileTagDef(key: string) {
   return FILE_TAG_DEFS.find((t) => t.key === key) || FILE_TAG_DEFS[FILE_TAG_DEFS.length - 1];
+}
+
+// 첨부 시각(ISO) → "YYYY.MM.DD HH:mm". 값 없음·깨진 값이면 null(표시 생략 — size 와 동일 관례).
+function formatAttachedAt(at?: string): string | null {
+  if (!at) return null;
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 // 실제 파일 컬럼 카테고리(검토보고서·경정청구 신고서 등) 용 동적 색상.
@@ -99,7 +121,11 @@ export function FilesTab({
   uploadApiPath = "/api/upload",
   proxyApiBase = "/api/files/proxy",
   downloadApiPath,
+  downloadAllApiPath,
+  downloadAllLabel,
   onOpenFile,
+  maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES,
+  resolveSizes,
 }: {
   files: FileMeta[];
   pageId: string;
@@ -118,11 +144,21 @@ export function FilesTab({
   proxyApiBase?: string;
   // 주어지면 각 파일 행에 다운로드 버튼 표시(이 경로로 링크). 없으면 다운로드 버튼 숨김.
   downloadApiPath?: string;
+  // 주어지면 상단에 "전체 다운로드" 버튼 표시 — 이 경로로 목록 전체를 POST 하면 ZIP 을 돌려준다.
+  downloadAllApiPath?: string;
+  // 전체 다운로드 ZIP 파일명 라벨(업체명 등). 없으면 "첨부파일".
+  downloadAllLabel?: string;
   // 주어지면 파일 열기 클릭을 가로채 이 함수로 처리(노션 임시 링크 만료 자동 갱신 등).
   // 없으면 a 태그가 평범하게 새 탭으로 연다.
   onOpenFile?: (args: { href: string; entryId: string; fileName: string; category?: string }) => void;
+  // 업로드 최대 용량(바이트). 기본 100MB — 앱 서버 한도와 일치. 올리기 전 화면에서 즉시 검사.
+  maxUploadBytes?: number;
+  // 옛 파일(용량 미기록)의 실제 크기를 저장소에서 불러오는 콜백(선택). 키 = fileSizeKey(f).
+  // 없으면 보강 안 함(하위호환). 반환 실패는 무시(용량 칸만 비고 동작 무영향).
+  resolveSizes?: (items: FileMeta[]) => Promise<Record<string, number>>;
 }) {
   const [uploading, setUploading] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingCategoryIdx, setEditingCategoryIdx] = useState<number | null>(null);
   // 위들리 자체 모달 상태 (window.confirm/alert 금지)
@@ -130,9 +166,48 @@ export function FilesTab({
   const [noticeMsg, setNoticeMsg] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // 끌어다 놓기 상태 — 자식 위를 지날 때 깜빡이지 않도록 깊이 카운터로 관리.
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepthRef = useRef(0);
+  // 드롭 박스 표시 조건: 읽기전용이 아니고, 저장된 항목(pageId 존재)일 때.
+  const dropZoneVisible = !disabled && !!pageId;
+  // 실제 드래그·드롭을 받는 조건: 업로드 중이면 무시한다.
+  // (기존 업로드 버튼이 uploading 동안 비활성인 것과 동일 — 업로드가 끝나기 전 또 떨어뜨려
+  //  두 업로드가 겹치면서 먼저 올린 파일이 목록에서 누락되는 충돌을 막는다.)
+  const canAcceptDrop = dropZoneVisible && !uploading;
+
   const visible = filterCategory
     ? files.filter((f) => (f.category || "기타자료") === filterCategory)
     : files;
+
+  // 옛 파일 용량 보강 — 용량(size)이 없는 파일이 있으면 저장소에서 1회 조회해 화면에만 채운다.
+  // 부모가 넘긴 files·실제 저장 데이터는 건드리지 않는다(NO.64 교훈: _files 운영 쓰기 회피).
+  const [resolvedSizes, setResolvedSizes] = useState<Record<string, number>>({});
+  const missingKeySig = filesMissingSize(files).map(fileSizeKey).join("|");
+  useEffect(() => {
+    if (!resolveSizes) return;
+    const missing = filesMissingSize(files);
+    if (missing.length === 0) return;
+    let alive = true;
+    resolveSizes(missing)
+      .then((map) => {
+        if (alive && map) setResolvedSizes((prev) => ({ ...prev, ...map }));
+      })
+      .catch(() => {
+        /* 보강 실패는 조용히 무시 — 용량 칸만 비고 나머지 동작엔 영향 없음 */
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missingKeySig]);
+
+  // 표시·합계용 실제 용량 — 기록값 우선, 없으면 저장소 보강값.
+  const sizeOf = (f: FileMeta): number | undefined => {
+    if (typeof f.size === "number") return f.size;
+    const k = fileSizeKey(f);
+    return k && typeof resolvedSizes[k] === "number" ? resolvedSizes[k] : undefined;
+  };
 
   // 카테고리 드롭다운 외부 클릭 시 닫기 — mousedown 이 click 보다 먼저 발생해 다른 드롭다운 토글과 race 가 없음
   useEffect(() => {
@@ -160,19 +235,25 @@ export function FilesTab({
       setError("저장된 항목에만 파일을 업로드할 수 있습니다 (먼저 등록 후 시도)");
       return;
     }
-    setError(null);
+    // 올리기 전 즉시 용량 검사 — 초과분은 서버로 보내지 않고 바로 안내(느린 실패 방지).
+    const { accepted, rejected } = partitionFilesBySize(Array.from(fileList), maxUploadBytes);
+    setError(rejected.length > 0 ? oversizeMessage(rejected, maxUploadBytes) : null);
+    if (accepted.length === 0) {
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
     setUploading(true);
     let totalSkipped = 0;
     try {
       const next: FileMeta[] = [...files];
-      for (const file of Array.from(fileList)) {
+      for (const file of accepted) {
         const fd = new FormData();
         fd.append("file", file);
         const res = await fetch(uploadApiPath, { method: "POST", body: fd });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.error || `${file.name} 업로드 실패`);
         // ZIP 자동 해제 — 압축 안의 여러 파일이면 각각 추가 (단일 파일 응답이면 data 하나)
-        const uploaded: Array<{ id: string; fileName: string; url: string; mimeType?: string }> =
+        const uploaded: Array<{ id: string; fileName: string; url: string; mimeType?: string; size?: number }> =
           Array.isArray(json.files) ? json.files : (json.data ? [json.data] : []);
         if (typeof json.skipped === "number") totalSkipped += json.skipped;
         for (const u of uploaded) {
@@ -185,6 +266,8 @@ export function FilesTab({
             url: u.url,
             contentType: u.mimeType,
             category,
+            size: u.size,
+            at: new Date().toISOString(), // 첨부 시각 기록(클라 런타임) — 저장 경로가 그대로 보존.
           });
         }
       }
@@ -211,8 +294,82 @@ export function FilesTab({
     onFilesChange(next);
   };
 
+  // 끌어다 놓은 파일을 기존 업로드 함수로 그대로 넘긴다(업로드·저장 경로 재사용).
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptDrop || !isFileDrag(e.dataTransfer?.types)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsDragging(true);
+  };
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptDrop || !isFileDrag(e.dataTransfer?.types)) return;
+    e.preventDefault(); // 드롭 허용 + 브라우저가 파일을 새 탭으로 여는 기본동작 차단
+    try {
+      e.dataTransfer.dropEffect = "copy";
+    } catch {
+      /* 일부 환경에서 dropEffect 설정 불가 — 무시 */
+    }
+  };
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptDrop) return;
+    if (dragDepthRef.current === 0) return; // 파일 드래그를 추적 중이 아니면 무시
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current === 0) setIsDragging(false);
+  };
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!canAcceptDrop || !isFileDrag(e.dataTransfer?.types)) return;
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+    const dropped = e.dataTransfer?.files ?? null;
+    if (dropped && dropped.length > 0) handleSelectFiles(dropped);
+  };
+
+  // 전체 다운로드 — 현재 화면에 보이는 파일들을 서버로 보내 하나의 ZIP 으로 받아 저장한다.
+  const handleDownloadAll = async () => {
+    if (!downloadAllApiPath || downloadingAll || visible.length === 0) return;
+    setDownloadingAll(true);
+    setError(null);
+    try {
+      const label = downloadAllLabel || "첨부파일";
+      const res = await fetch(downloadAllApiPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label,
+          files: visible.map((f) => ({
+            fileName: f.fileName || "파일",
+            url: f.url,
+            objectKey: f.objectKey,
+            entryId: pageId,
+          })),
+        }),
+      });
+      if (!res.ok) throw new Error("전체 다운로드에 실패했어요. 잠시 후 다시 시도해 주세요.");
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `${label}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (e) {
+      setNoticeMsg(e instanceof Error ? e.message : "전체 다운로드에 실패했어요.");
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   return (
-    <div className="space-y-3">
+    <div
+      className="space-y-3"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Upload button */}
       <div className="flex items-center gap-2">
         <input
@@ -250,8 +407,65 @@ export function FilesTab({
             </>
           )}
         </button>
-        <span className="text-[11px] text-wedly-muted">최대 50MB · 여러 파일 동시 선택 가능</span>
+        {downloadAllApiPath && visible.length >= 2 && (
+          <button
+            type="button"
+            onClick={handleDownloadAll}
+            disabled={downloadingAll}
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-semibold transition border",
+              downloadingAll
+                ? "bg-wedly-bg-gray text-wedly-muted border-wedly-bd cursor-not-allowed"
+                : "bg-white text-wedly-accent border-wedly-accent/40 hover:border-wedly-accent hover:bg-wedly-bg-blue/30",
+            )}
+            title="첨부파일 전체를 압축파일(ZIP)로 내려받기"
+          >
+            {downloadingAll ? (
+              <>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="animate-spin">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeOpacity="0.25" />
+                  <path d="M14 8a6 6 0 00-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <span>압축 중…</span>
+              </>
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                  <path d="M8 2.5v8M5 7.5l3 3 3-3M3 13.5h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>전체 다운로드</span>
+              </>
+            )}
+          </button>
+        )}
+        <span className="text-[11px] text-wedly-muted">최대 {formatFileSize(maxUploadBytes)} · 여러 파일 동시 선택 가능</span>
       </div>
+
+      {/* 끌어다 놓기 영역 — 항상 표시(저장된 항목·편집 가능일 때), 드래그 중 강조. 클릭=파일 선택창.
+          업로드 중에는 보이되 비활성(disabled)로 흐려지고, 드롭도 무시된다(canAcceptDrop). */}
+      {dropZoneVisible && (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          aria-label="파일을 끌어다 놓거나 클릭해서 업로드"
+          className={cn(
+            "w-full flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-4 py-5 text-[12.5px] transition-colors",
+            isDragging
+              ? "border-wedly-accent bg-wedly-bg-blue/50 text-wedly-accent"
+              : "border-wedly-bd bg-wedly-bg-gray/30 text-wedly-muted hover:border-wedly-accent hover:bg-wedly-bg-blue/30",
+            uploading && "opacity-60 cursor-not-allowed",
+          )}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 16V4M7 9l5-5 5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M4 14v4a2 2 0 002 2h12a2 2 0 002-2v-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="font-medium">
+            {isDragging ? "여기에 파일을 놓으세요" : "파일을 끌어다 놓거나 클릭해서 업로드"}
+          </span>
+        </button>
+      )}
 
       {error && (
         <p className="text-[12px] text-wedly-red bg-wedly-bg-red/40 rounded-md px-3 py-1.5">{error}</p>
@@ -316,10 +530,28 @@ export function FilesTab({
                     <path d="M9 2H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1V6L9 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
                     <path d="M9 2v4h4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
                   </svg>
-                  <span className="flex-1 truncate text-wedly-t1 group-hover:text-wedly-accent">
-                    {f.fileName || "파일"}
+                  <span className="flex flex-col min-w-0 flex-1">
+                    <span className="truncate text-wedly-t1 group-hover:text-wedly-accent">
+                      {f.fileName || "파일"}
+                    </span>
+                    {(() => {
+                      const ts = formatAttachedAt(f.at);
+                      return ts ? (
+                        <span className="text-[11px] text-wedly-muted truncate tabular-nums">
+                          {ts}
+                        </span>
+                      ) : null;
+                    })()}
                   </span>
                 </a>
+                {(() => {
+                  const s = sizeOf(f);
+                  return typeof s === "number" && s >= 0 ? (
+                    <span className="text-[11px] text-wedly-muted flex-shrink-0 tabular-nums">
+                      {formatFileSize(s)}
+                    </span>
+                  ) : null;
+                })()}
                 {(() => {
                   const useRealCategories = Array.isArray(categoryOptions) && categoryOptions.length > 0;
                   const isEditing = editingCategoryIdx === i;
@@ -487,6 +719,21 @@ export function FilesTab({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* 총 개수·합계 용량 — 기록값 또는 저장소 보강값이 있는 파일만 합산 */}
+      {visible.length > 0 && (
+        <div className="text-[11px] text-wedly-muted px-1">
+          총 {visible.length}개
+          {(() => {
+            const sizes = visible
+              .map(sizeOf)
+              .filter((n): n is number => typeof n === "number" && n >= 0);
+            if (sizes.length === 0) return null;
+            const sum = sizes.reduce((acc, n) => acc + n, 0);
+            return <> · 합계 {formatFileSize(sum)}</>;
+          })()}
         </div>
       )}
 

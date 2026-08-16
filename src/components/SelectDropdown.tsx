@@ -8,6 +8,7 @@
 // 예: 하이브는 addCustomOption(fieldKey, opt) → localStorage + /api/hive-config PUT
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../lib/cn";
 
 export type SelectDropdownColor = { bg: string; text: string };
@@ -46,6 +47,8 @@ export type SelectDropdownBodyProps = {
   globalChangeEvent?: string;
   /** 옵션 삭제 버튼 노출 여부 (어드민만 보이게 하려면 false) — 기본 false 안전 */
   allowDelete?: boolean;
+  /** 옵션 → 인라인 색상({bg,text}). 있으면 className(getColorClass) 대신 우선 적용 — 차수카드 등 고정색 칸용 */
+  optionColors?: Record<string, { bg: string; text: string }>;
 };
 
 export default function SelectDropdownBody({
@@ -60,10 +63,15 @@ export default function SelectDropdownBody({
   colorFamilies,
   globalChangeEvent,
   allowDelete = false,
+  optionColors,
 }: SelectDropdownBodyProps) {
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState(initialOptions);
   const [colorPickerOpt, setColorPickerOpt] = useState<string | null>(null);
+  // 색 고르는 판을 띄울 자리(화면 기준 좌표). 판을 드롭다운 **바깥(portal)** 에 그리기 위해 필요하다 —
+  // 드롭다운은 스크롤 상자(overflow:auto)라, 판을 그 안에 그리면 상자 밖으로 나간 부분이 잘려
+  // 눌리지 않는다(2026-08-14 실측: 색 50개 중 45개가 클릭 자체가 막혀 있었다).
+  const [pickerPos, setPickerPos] = useState<{ top: number; left: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const focusedOnceRef = useRef(false);
   // 옵션 색상이 외부에서 바뀌었을 때(같은 화면 다른 셀) 자기 자신도 다시 그리기 위한 트리거
@@ -130,10 +138,44 @@ export default function SelectDropdownBody({
 
   const handleSetColor = (opt: string, color: SelectDropdownColor) => {
     onSetColor?.(opt, color);
-    setColorPickerOpt(null);
+    closeColorPicker();
     forceRerender((n) => n + 1);
     fireGlobal();
   };
+
+  // ── 색 고르는 판 열고 닫기 ────────────────────────────────────────────────
+  // 판 크기(대략) — 10계열 × 5농도. 화면 밖으로 나가지 않게 이 값으로 자리를 잡는다.
+  const PICKER_W = 176;
+  const PICKER_H = 262;
+
+  const closeColorPicker = () => {
+    setColorPickerOpt(null);
+    setPickerPos(null);
+  };
+
+  const openColorPicker = (opt: string, anchor: HTMLElement) => {
+    const r = anchor.getBoundingClientRect();
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1280;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+    // 기본은 단추 아래·오른쪽 맞춤. 아래가 좁으면 위로 뒤집고, 좌우는 화면 안으로 밀어 넣는다.
+    const openUp = r.bottom + 6 + PICKER_H > vh - 8 && r.top - 6 - PICKER_H >= 8;
+    const top = openUp ? r.top - 6 - PICKER_H : Math.min(r.bottom + 6, Math.max(8, vh - PICKER_H - 8));
+    const left = Math.min(Math.max(8, r.right - PICKER_W), Math.max(8, vw - PICKER_W - 8));
+    setColorPickerOpt(opt);
+    setPickerPos({ top, left });
+  };
+
+  // 판을 띄운 뒤 화면이 굴러가거나 크기가 바뀌면 자리가 어긋난다 → 그냥 닫는다.
+  useEffect(() => {
+    if (!colorPickerOpt) return;
+    const close = () => closeColorPicker();
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [colorPickerOpt]);
 
   const canShowColorPicker = !!colorFamilies && colorFamilies.length > 0 && !!onSetColor;
   const colorClassFor = (opt: string) => getColorClass ? getColorClass(opt) : "bg-wedly-bg-gray text-wedly-muted";
@@ -186,8 +228,9 @@ export default function SelectDropdownBody({
                 <span
                   className={cn(
                     "inline-block rounded-md px-2 py-0.5 text-[11.5px] font-medium truncate",
-                    colorClassFor(opt),
+                    !optionColors?.[opt] && colorClassFor(opt),
                   )}
+                  style={optionColors?.[opt] ? { backgroundColor: optionColors[opt].bg, color: optionColors[opt].text } : undefined}
                 >
                   {opt}
                 </span>
@@ -200,7 +243,11 @@ export default function SelectDropdownBody({
                   type="button"
                   className="w-6 h-6 rounded-md inline-flex items-center justify-center text-wedly-muted hover:bg-wedly-bg-blue/40 hover:text-wedly-accent transition flex-shrink-0"
                   title="색상 변경"
-                  onClick={(e) => { e.stopPropagation(); setColorPickerOpt(isPickerOpen ? null : opt); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isPickerOpen) closeColorPicker();
+                    else openColorPicker(opt, e.currentTarget);
+                  }}
                 >
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                     <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
@@ -222,28 +269,41 @@ export default function SelectDropdownBody({
                   </svg>
                 </button>
               )}
-              {isPickerOpen && canShowColorPicker && colorFamilies && (
-                <div className="absolute right-1 top-full mt-1 z-50 rounded-xl border border-wedly-bd bg-white p-2 shadow-[0_8px_24px_-4px_rgba(10,34,68,0.18)]">
-                  <div className="space-y-1">
-                    {colorFamilies.map((family) => (
-                      <div key={family.name} className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-wedly-muted w-7 shrink-0">{family.name}</span>
-                        <div className="flex gap-1">
-                          {family.shades.map((s) => (
-                            <button
-                              key={s.shade}
-                              onClick={(e) => { e.stopPropagation(); handleSetColor(opt, { bg: s.bg, text: s.text }); }}
-                              className="w-5 h-5 rounded-full border border-wedly-bd hover:scale-110 transition-transform"
-                              title={`${family.name} · ${s.shade}`}
-                              style={{ backgroundColor: s.bgHex }}
-                            />
-                          ))}
+              {/*
+                색 고르는 판은 **드롭다운 바깥(portal)** 에 화면 기준 좌표로 띄운다.
+                드롭다운 안(absolute)에 두면 스크롤 상자 밖으로 나간 부분이 잘려 눌리지 않는다.
+                mousedown 을 여기서 멈추는 이유: 바깥 클릭 감시(부모가 document 에 걸어 둔 것)가
+                이 판을 "바깥"으로 보고 드롭다운을 닫아버리면, 색을 고르는 클릭이 아예 발생하지 못한다.
+              */}
+              {isPickerOpen && canShowColorPicker && colorFamilies && pickerPos && typeof document !== "undefined" &&
+                createPortal(
+                  <div
+                    className="fixed rounded-xl border border-wedly-bd bg-white p-2 shadow-[0_8px_24px_-4px_rgba(10,34,68,0.18)]"
+                    style={{ top: pickerPos.top, left: pickerPos.left, width: PICKER_W, zIndex: 10000 }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <div className="space-y-1">
+                      {colorFamilies.map((family) => (
+                        <div key={family.name} className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-wedly-muted w-7 shrink-0">{family.name}</span>
+                          <div className="flex gap-1">
+                            {family.shades.map((s) => (
+                              <button
+                                key={s.shade}
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleSetColor(opt, { bg: s.bg, text: s.text }); }}
+                                className="w-5 h-5 rounded-full border border-wedly-bd hover:scale-110 transition-transform"
+                                title={`${family.name} · ${s.shade}`}
+                                style={{ backgroundColor: s.bgHex }}
+                              />
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                      ))}
+                    </div>
+                  </div>,
+                  document.body,
+                )}
             </div>
           );
         })}
