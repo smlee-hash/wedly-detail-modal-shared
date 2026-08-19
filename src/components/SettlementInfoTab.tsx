@@ -3363,6 +3363,10 @@ function FieldRow({
                 defaultValue={value === null || value === undefined ? "" : String(value)}
                 onBlur={(e) => {
                   const raw = e.target.value;
+                  // 값을 안 바꾸고 초점만 떠나면 아무 일도 안 한다 — 확인차 클릭한 계산값이
+                  // 그대로 수동값으로 굳는 사고 방지(적대적 리뷰 2차 중요 지적).
+                  const initial = value === null || value === undefined ? "" : String(value);
+                  if (raw === initial) { setEditing(false); return; }
                   const n = Number(raw);
                   onOverrideChange?.(raw === "" || !Number.isFinite(n) ? null : n);
                   setEditing(false);
