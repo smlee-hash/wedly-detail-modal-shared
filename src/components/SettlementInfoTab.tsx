@@ -47,6 +47,8 @@ import CustomSelect from "./CustomSelect";
 import DateFormulaEditor from "./DateFormulaEditor";
 import SelectDropdownBody from "./SelectDropdown";
 import { buildCondTargets } from "./cond-targets-helpers";
+import { typeChangeNeedsSave } from "./type-change-save";
+import { appendFieldOption } from "./field-option-append";
 
 type RowData = Record<string, string | number | boolean | null>;
 
@@ -581,6 +583,14 @@ export default function SettlementInfoTab({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 드롭다운에서 새 보기를 칸 정의(options)에 영구 저장. canEditColumns 일 때만 아래로 넘긴다.
+  const addOptionToField = useCallback((fieldKey: string, opt: string) => {
+    const next = appendFieldOption(fields, fieldKey, opt);
+    if (!next) return;
+    setFields(next);
+    persistFields(next);
+  }, [fields, persistFields]);
+
   useEffect(() => {
     if (!successField || !consultFeeField) return;
     let changed = false;
@@ -865,8 +875,8 @@ export default function SettlementInfoTab({
     } else if (fieldEditModal.mode === "changeType") {
       const newType = draftType;
       const key = fieldEditModal.key;
-      // 수식이 아니고 타입도 그대로면 변경 없음 (수식은 식 내용이 바뀌었을 수 있어 항상 저장)
-      if (newType !== "formula" && newType === fieldEditModal.type) { setFieldEditModal(null); return; }
+      // 수식·선택은 내용(식·보기 목록)이 바뀌었을 수 있어 항상 저장
+      if (!typeChangeNeedsSave(fieldEditModal.type, newType)) { setFieldEditModal(null); return; }
       let formulaTerms: FormulaTerm[] = [];
       let formulaConditional: FieldDef["conditional"] | undefined;
       if (newType === "formula" && draftFormulaResult !== "date") {
@@ -897,10 +907,11 @@ export default function SettlementInfoTab({
         }
         // select 로 바꾸면 보기 목록을 싣는다 (범위 scope 는 유지)
         if (newType === "select") {
-          const sel = { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
+          const sel: FieldDef = { key: f.key, label: f.label, type: "select" as FieldType, options: cleanedOptions };
           if (keepScope) (sel as unknown as Record<string, unknown>).scope = keepScope;
           if (keepTableExposed) (sel as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
           if (keepDescription) (sel as unknown as Record<string, unknown>).description = keepDescription;
+          if (f.optionColors) sel.optionColors = f.optionColors;
           return carryFieldLock(f, sel);
         }
         // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거 (범위 scope 는 유지)
@@ -1993,6 +2004,7 @@ export default function SettlementInfoTab({
             } : undefined}
             rowLayout={rowLayout}
             conditionValues={row ?? undefined}
+            onAddFieldOption={canEditColumns ? addOptionToField : undefined}
           />
         );
 
@@ -2725,7 +2737,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, renderTierBadge, tierIdDuplicated,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, renderTierBadge, tierIdDuplicated, onAddFieldOption,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2751,6 +2763,8 @@ function TierCard({
   renderTierBadge?: (index: number, tierId: string, tierIdDuplicated?: boolean) => ReactNode;
   /** 이 차수의 고유 id 가 형제 차수와 겹치는가(겹치면 받는 쪽이 표시를 감춰 오표시를 막는다) */
   tierIdDuplicated?: boolean;
+  /** 선택 칸에 새 보기를 칸 정의에 영구 저장. 없으면 드롭다운에 추가 단추를 안 그린다. */
+  onAddFieldOption?: (fieldKey: string, opt: string) => void;
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2863,6 +2877,7 @@ function TierCard({
                       options={f.options}
                       optionColors={f.optionColors}
                       onChange={(v) => onChange(f.key, v)}
+                      onAddFieldOption={onAddFieldOption ? (opt) => onAddFieldOption(f.key, opt) : undefined}
                     />
                   );
                 })}
@@ -3173,7 +3188,7 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote,
+  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption,
 }: {
   label: string;
   /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
@@ -3189,6 +3204,8 @@ function FieldRow({
   optionColors?: Record<string, { bg: string; text: string }>;
   /** 이 칸만 잠겼을 때 이름 옆에 (글자) 로 붙는 꼬리표. 없으면 안 붙는다. */
   lockedNote?: string;
+  /** 이 칸 보기 목록에 새 항목을 영구 저장. 없으면 드롭다운에 추가 단추를 안 그린다. */
+  onAddFieldOption?: (opt: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
@@ -3267,6 +3284,7 @@ function FieldRow({
                     onSave={(next) => { onChange(next); setEditing(false); }}
                     onClose={() => setEditing(false)}
                     optionColors={optionColors}
+                    onAddOption={onAddFieldOption ? (opt) => onAddFieldOption(opt) : undefined}
                   />
                 </div>,
                 document.body,

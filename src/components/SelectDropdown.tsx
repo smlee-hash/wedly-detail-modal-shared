@@ -118,6 +118,8 @@ export default function SelectDropdownBody({
   };
 
   const handleAddNew = () => {
+    // 영구 저장 콜백이 없는 곳에서 추가하면 "추가했는데 다시 열면 사라지는" 가짜 동작이 된다.
+    if (!onAddOption) return;
     const trimmed = search.trim();
     if (!trimmed || options.includes(trimmed)) {
       inputRef.current?.focus();
@@ -308,25 +310,27 @@ export default function SelectDropdownBody({
           );
         })}
 
-        {/* + 새 옵션 추가 — 항상 표시. 검색 글자 있고 옵션에 없으면 즉시 추가, 없으면 검색칸 포커스 */}
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] font-semibold text-wedly-accent hover:bg-wedly-bg-blue/40 transition mt-0.5 border-t border-wedly-bd/40 pt-2"
-          onClick={() => {
-            if (search.trim() && !options.includes(search.trim())) {
-              handleAddNew();
-            } else {
-              inputRef.current?.focus();
-            }
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-            <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-          {search.trim() && !options.includes(search.trim())
-            ? <>&ldquo;{search.trim()}&rdquo; 추가</>
-            : "새 옵션 추가"}
-        </button>
+        {/* + 새 옵션 추가 — 영구 저장 콜백이 없으면 그리지 않는다. 없으면 "추가했는데 다시 열면 사라지는" 가짜 동작이 된다. */}
+        {onAddOption && (
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] font-semibold text-wedly-accent hover:bg-wedly-bg-blue/40 transition mt-0.5 border-t border-wedly-bd/40 pt-2"
+            onClick={() => {
+              if (search.trim() && !options.includes(search.trim())) {
+                handleAddNew();
+              } else {
+                inputRef.current?.focus();
+              }
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+              <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            {search.trim() && !options.includes(search.trim())
+              ? <>&ldquo;{search.trim()}&rdquo; 추가</>
+              : "새 옵션 추가"}
+          </button>
+        )}
       </div>
     </>
   );
