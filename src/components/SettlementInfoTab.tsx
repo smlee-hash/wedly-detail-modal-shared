@@ -49,6 +49,7 @@ import SelectDropdownBody from "./SelectDropdown";
 import { buildCondTargets } from "./cond-targets-helpers";
 import { typeChangeNeedsSave } from "./type-change-save";
 import { appendFieldOption } from "./field-option-append";
+import { splitHiddenFields, mergeHiddenFields } from "./hidden-fields-merge";
 
 type RowData = Record<string, string | number | boolean | null>;
 
@@ -460,6 +461,7 @@ export default function SettlementInfoTab({
   // 자동 갱신 effect 가 항상 최신 편집/저장 상태를 보도록 ref 동기(effect 의존성에서 분리).
   const editFieldsRef = useRef(editFields);
   const savingFieldsRef = useRef(savingFields);
+  const hiddenFieldsRef = useRef<Array<{ field: FieldDef; index: number }>>([]);
   useEffect(() => { editFieldsRef.current = editFields; }, [editFields]);
   useEffect(() => { savingFieldsRef.current = savingFields; }, [savingFields]);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -520,7 +522,8 @@ export default function SettlementInfoTab({
           if (cancelled) return;
           if (j.success && Array.isArray(j.data)) {
             // 서버 값을 그대로 신뢰. Hive 화면에서는 WEDLY 매출 컬럼만 시각적으로 제외.
-            const visible = (j.data as FieldDef[]).filter((f) => !isHiddenRevenueField(f));
+            const { visible, hidden } = splitHiddenFields(j.data as FieldDef[], isHiddenRevenueField);
+            hiddenFieldsRef.current = hidden;
             // 바뀐 게 없으면 setState 생략 — 불필요한 재렌더/입력 흔들림 방지.
             setFields((prev) =>
               tierFieldsEqual(
@@ -562,10 +565,12 @@ export default function SettlementInfoTab({
   const persistFields = useCallback(async (next: FieldDef[]) => {
     setSavingFields(true);
     try {
+      // 숨김은 표시 전용 — 전체 교체 PUT 에서 숨김 칸이 지워지지 않게 되끼운다.
+      const toSave = mergeHiddenFields(next, hiddenFieldsRef.current);
       const res = await fetch(fieldsApiPath, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fields: next }),
+        body: JSON.stringify({ fields: toSave }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) {
