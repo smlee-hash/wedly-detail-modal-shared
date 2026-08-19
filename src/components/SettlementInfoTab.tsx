@@ -42,6 +42,8 @@ import {
   formatFormulaResult,
   isNumericFieldType,
   isStepOp,
+  getTierOverride,
+  overrideKeyOf,
 } from "@wedly/ui-shared";
 import CustomSelect from "./CustomSelect";
 import DateFormulaEditor from "./DateFormulaEditor";
@@ -156,6 +158,9 @@ export default function SettlementInfoTab({
   //   본부(ERP)만 true 로 켠다. 파트너 앱(하이브·일루아)은 값 입력만 하고, 구조는 ERP 에서만 바꾼다.
   //   기본이 false 라서 파트너 앱이 실수로 isAdmin=true 를 넘겨도 구조 편집 버튼은 안 나온다(안전장치).
   allowStructureEdit = false,
+  // 수식 칸 수동 수정(관리자 전용) — 호출부가 명시적으로 켠 곳(ERP 경정청구 계약정보 탭)에서만.
+  //   기본 false 라 다른 앱·다른 탭은 한 톨도 안 바뀐다. 실제 편집은 isAdmin 도 함께 필요.
+  allowFormulaOverride = false,
   // 스코어카드(전체합계 카드)만 편집 허용 — 파트너 앱이 자기 앱 스코어카드를 관리.
   //   미지정 시 allowStructureEdit 를 따른다(ERP·다른분야 호출부 무변경).
   allowCardEdit,
@@ -204,6 +209,7 @@ export default function SettlementInfoTab({
   hideSummaryCards?: boolean;
   // 구조(차수 카드·컬럼) 편집 허용 — 본부(ERP) 전용. 미지정 시 false (파트너 앱 = 값 입력만).
   allowStructureEdit?: boolean;
+  allowFormulaOverride?: boolean;
   // 스코어카드 편집만 허용(칸 구조 편집과 분리). 미지정 시 allowStructureEdit 폴백.
   allowCardEdit?: boolean;
   // 칸 목록 편집 게이트(세부섹션·차수접미사와 분리). 미지정 시 allowStructureEdit 폴백.
@@ -694,6 +700,22 @@ export default function SettlementInfoTab({
   const updateTierLabel = useCallback((idx: number, newLabel: string) => {
     setTiers((prev) => {
       const next = prev.map((t, i) => i === idx ? { ...t, label: newLabel } : t);
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  // 수식 칸 수동 수정값 저장/해제 — value === null 이면 수식값으로 복원(키 삭제).
+  const updateOverride = useCallback((idx: number, fieldKey: string, value: number | null) => {
+    setTiers((prev) => {
+      const ok = overrideKeyOf(fieldKey);
+      const next = prev.map((t, i) => {
+        if (i !== idx) return t;
+        const copy: TierData = { ...t };
+        if (value === null) delete copy[ok];
+        else copy[ok] = value;
+        return copy;
+      });
       persist(next);
       return next;
     });
@@ -1989,6 +2011,8 @@ export default function SettlementInfoTab({
             autoRevenueNetKey={revenueNetField?.key || null}
             successKey={successField?.key || null}
             onChange={(key, value) => updateField(idx, key, value)}
+            allowOverride={allowFormulaOverride && isAdmin && !readOnly}
+            onOverrideChange={(key, value) => updateOverride(idx, key, value)}
             onLabelChange={(label) => updateTierLabel(idx, label)}
             onRemove={() => removeTier(idx)}
             renderTierBadge={renderTierBadge}
@@ -2742,7 +2766,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, renderTierBadge, tierIdDuplicated, onAddFieldOption,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2764,6 +2788,8 @@ function TierCard({
   rowLayout?: number[];
   /** 조건별 수식의 기준값 — 이 행의 평면 값(row). 없으면 기존(조건 미적용)과 동일 */
   conditionValues?: RowData | null;
+  allowOverride?: boolean;
+  onOverrideChange?: (fieldKey: string, value: number | null) => void;
   /** 차수 카드 제목 옆에 그릴 것(선택). tierId 는 차수 고유 id — 배열 위치와 달리 삭제·순서변경에 안 흔들린다 */
   renderTierBadge?: (index: number, tierId: string, tierIdDuplicated?: boolean) => ReactNode;
   /** 이 차수의 고유 id 가 형제 차수와 겹치는가(겹치면 받는 쪽이 표시를 감춰 오표시를 막는다) */
@@ -2867,6 +2893,18 @@ function TierCard({
                   // 이 칸만 잠그라는 표시(앱별 정책)가 붙어 있으면 탭 전체 잠금과 같게 취급한다.
                   // 표시가 없으면 { locked: false } 라 다른 앱 동작은 한 톨도 안 바뀐다.
                   const lock = tierFieldLock(f);
+                  // 수식 칸 수동 수정 — 저장된 수동값·"(수정됨)" 배지·툴팁용 수식 계산값.
+                  const manual = isFormula ? getTierOverride(tier, f.key) : null;
+                  const overridden = manual !== null;
+                  // 툴팁의 "수식 계산값" — 이 칸의 수동값만 뺀 사본으로 계산(다른 칸 수동값은 반영).
+                  let formulaValue: number | null = null;
+                  if (overridden) {
+                    const base: TierData = { ...tier };
+                    delete base[overrideKeyOf(f.key)];
+                    formulaValue = evalFormulaForTier(f, base, fields, undefined, conditionValues ?? undefined);
+                  }
+                  const canOverride = allowOverride && isFormula && !isDateFormula
+                    && (f.formulaResult === undefined || f.formulaResult === "number") && !lock.locked;
                   return (
                     <FieldRow
                       key={f.key}
@@ -2883,6 +2921,10 @@ function TierCard({
                       optionColors={f.optionColors}
                       onChange={(v) => onChange(f.key, v)}
                       onAddFieldOption={onAddFieldOption ? (opt) => onAddFieldOption(f.key, opt) : undefined}
+                      overridden={overridden}
+                      formulaValue={formulaValue}
+                      canOverride={canOverride}
+                      onOverrideChange={onOverrideChange ? (v) => onOverrideChange(f.key, v) : undefined}
                     />
                   );
                 })}
@@ -3193,7 +3235,7 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption,
+  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, overridden = false, formulaValue = null, canOverride = false, onOverrideChange,
 }: {
   label: string;
   /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
@@ -3211,6 +3253,14 @@ function FieldRow({
   lockedNote?: string;
   /** 이 칸 보기 목록에 새 항목을 영구 저장. 없으면 드롭다운에 추가 단추를 안 그린다. */
   onAddFieldOption?: (opt: string) => void;
+  /** 이 수식 칸에 관리자 수동값이 저장돼 있는지 — "(수정됨)" 배지·툴팁 표시용 */
+  overridden?: boolean;
+  /** 수동값이 있을 때의 원래 수식 계산값 — 툴팁 "수식 계산값" 표시용 */
+  formulaValue?: number | null;
+  /** 관리자 수동 수정 허용(수식 칸 편집 게이트) */
+  canOverride?: boolean;
+  /** 수동값 저장(숫자)·복원(null) */
+  onOverrideChange?: (v: number | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
   // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
@@ -3239,7 +3289,17 @@ function FieldRow({
       if (value === null || value === undefined || value === "" || !Number.isFinite(num)) {
         return <span className="text-wedly-muted">-</span>;
       }
-      return <span className="tabular-nums font-medium">{formatFormulaResult(num, formulaResult)}</span>;
+      return (
+        <span
+          className="tabular-nums font-medium"
+          title={overridden
+            ? `현재 저장값: ${formatFormulaResult(num, formulaResult)}\n수식 계산값: ${formulaValue === null || formulaValue === undefined ? "-" : formatFormulaResult(formulaValue, formulaResult)}`
+            : undefined}
+        >
+          {formatFormulaResult(num, formulaResult)}
+          {overridden && <span className="ml-1 text-[10px] font-semibold text-wedly-orange">(수정됨)</span>}
+        </span>
+      );
     }
     if (value === null || value === undefined || value === "") {
       return <span className="text-wedly-muted">{"-"}</span>;
@@ -3260,10 +3320,10 @@ function FieldRow({
       return <span className="tabular-nums font-medium">{fmtCurrency(value)}원</span>;
     }
     return <span>{String(value)}</span>;
-  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors]);
+  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue]);
 
-  // 수식 컬럼은 사람이 입력하지 않음 (자동 계산 읽기전용)
-  const isEditable = !readOnly && !isAuto && type !== "formula";
+  // 수식 컬럼은 사람이 입력하지 않음(자동 계산 읽기전용) — 단 관리자 수동 수정이 허용된 곳은 예외.
+  const isEditable = !readOnly && !isAuto && (type !== "formula" || (canOverride && !!onOverrideChange));
 
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-wedly-bd/40 bg-wedly-bg-gray/20 px-3 py-2 min-h-[58px]">
@@ -3295,6 +3355,30 @@ function FieldRow({
                 document.body,
               )}
             </>
+          ) : (type === "formula" && canOverride) ? (
+            <div className="flex flex-col gap-1">
+              <input
+                type="number"
+                autoFocus
+                defaultValue={value === null || value === undefined ? "" : String(value)}
+                onBlur={(e) => {
+                  const raw = e.target.value;
+                  const n = Number(raw);
+                  onOverrideChange?.(raw === "" || !Number.isFinite(n) ? null : n);
+                  setEditing(false);
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(false); }}
+                className="w-full px-2.5 sm:px-2 py-2 sm:py-1 text-[15px] sm:text-[13px] tabular-nums border border-wedly-accent/40 rounded-md outline-none focus:ring-2 focus:ring-wedly-accent/20 bg-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              {overridden && (
+                <button
+                  type="button"
+                  // onMouseDown + preventDefault: input 의 onBlur 보다 먼저 잡아 복원이 씹히지 않게.
+                  onMouseDown={(ev) => { ev.preventDefault(); onOverrideChange?.(null); setEditing(false); }}
+                  className="self-start text-[11px] px-2 py-0.5 rounded-md border border-wedly-bd bg-wedly-bg-gray/60 text-wedly-t2 hover:bg-wedly-bg-yellow transition-colors"
+                >수식값으로 복원</button>
+              )}
+            </div>
           ) : (type === "number" || type === "percent") ? (
             <div className="relative">
               <input
