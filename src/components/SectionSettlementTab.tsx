@@ -5,6 +5,7 @@
 // 비율 자동계산은 분야 공통 의미가 없어 끄고(더미 키), 합계카드 기본값도 비워 둔다(관리자가 분야별로 추가).
 import SharedSettlementInfoTab from "./SettlementInfoTab";
 import type { ScoreCardDef } from "../lib/settlement-info-helpers";
+import type { SelectDropdownColorFamily } from "./SelectDropdown";
 
 const EMPTY_CARDS: ScoreCardDef[] = [];
 
@@ -17,6 +18,7 @@ export default function SectionSettlementTab({
   enableConditionalFormula,
   conditionFieldOptions,
   row,
+  colorFamilies,
 }: {
   section: string;
   rawValue: unknown;
@@ -29,6 +31,7 @@ export default function SectionSettlementTab({
   conditionFieldOptions?: Array<{ key: string; label: string }>;
   // 조건 평가용 기본정보 행 값 — conditionValues 로 전달돼 기본정보 칸 조건 매칭에 사용.
   row?: Record<string, unknown> | null;
+  colorFamilies?: SelectDropdownColorFamily[];
 }) {
   const base = `${settlementApiBase}/${encodeURIComponent(section)}`;
   return (
@@ -47,6 +50,7 @@ export default function SectionSettlementTab({
       enableConditionalFormula={enableConditionalFormula}
       conditionFieldOptions={conditionFieldOptions}
       row={row as Record<string, string | number | boolean | null> | null | undefined}
+      colorFamilies={colorFamilies}
     />
   );
 }

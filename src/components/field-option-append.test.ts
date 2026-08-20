@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FieldDef } from "@wedly/ui-shared";
-import { appendFieldOption } from "./field-option-append";
+import { appendFieldOption, setFieldOptionColorDef } from "./field-option-append";
 
 function selectField(extra: Partial<FieldDef> & Record<string, unknown> = {}): FieldDef {
   return {
@@ -89,5 +89,46 @@ describe("appendFieldOption — 선택 칸 보기 목록에 영구 추가", () =
     expect(f.readOnly).toBe(true);
     expect(f.readOnlyNote).toBe("ERP에서 관리");
     expect(f.label).toBe("담당 컨설턴트");
+  });
+});
+
+describe("setFieldOptionColorDef — 선택 칸 보기 색 저장", () => {
+  const color = { bg: "#f00", text: "#fff" };
+
+  it("해당 보기의 optionColors 를 넣은 새 배열을 준다", () => {
+    const fields = [selectField(), amount];
+    const next = setFieldOptionColorDef(fields, "담당", "하이브", color);
+    expect(next).not.toBeNull();
+    expect(next!.find((f) => f.key === "담당")!.optionColors).toEqual({
+      일루아: { bg: "#eee", text: "#111" },
+      하이브: color,
+    });
+  });
+
+  it("칸이 없으면 null", () => {
+    expect(setFieldOptionColorDef([selectField()], "없는칸", "일루아", color)).toBeNull();
+  });
+
+  it("선택 칸이 아니면 null", () => {
+    expect(setFieldOptionColorDef([selectField(), amount], "금액", "일루아", color)).toBeNull();
+  });
+
+  it("options 에 없는 보기면 null", () => {
+    expect(setFieldOptionColorDef([selectField()], "담당", "ERP", color)).toBeNull();
+  });
+
+  it("기존 다른 보기 색은 그대로 둔다", () => {
+    const next = setFieldOptionColorDef([selectField()], "담당", "하이브", { bg: "#0a0", text: "#fff" });
+    expect(next!.find((f) => f.key === "담당")!.optionColors).toEqual({
+      일루아: { bg: "#eee", text: "#111" },
+      하이브: { bg: "#0a0", text: "#fff" },
+    });
+  });
+
+  it("원본 배열과 원본 칸 객체는 바꾸지 않는다", () => {
+    const fields = [selectField(), amount];
+    const snapshot = JSON.parse(JSON.stringify(fields));
+    setFieldOptionColorDef(fields, "담당", "하이브", color);
+    expect(fields).toEqual(snapshot);
   });
 });

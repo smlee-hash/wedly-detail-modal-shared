@@ -48,9 +48,10 @@ import {
 import CustomSelect from "./CustomSelect";
 import DateFormulaEditor from "./DateFormulaEditor";
 import SelectDropdownBody from "./SelectDropdown";
+import type { SelectDropdownColorFamily } from "./SelectDropdown";
 import { buildCondTargets } from "./cond-targets-helpers";
 import { typeChangeNeedsSave } from "./type-change-save";
-import { appendFieldOption } from "./field-option-append";
+import { appendFieldOption, setFieldOptionColorDef } from "./field-option-append";
 import { splitHiddenFields, mergeHiddenFields } from "./hidden-fields-merge";
 
 type RowData = Record<string, string | number | boolean | null>;
@@ -199,6 +200,7 @@ export default function SettlementInfoTab({
   conditionFieldOptions,
   enableConditionalFormula,
   renderTierBadge,
+  colorFamilies,
 }: {
   rawValue: unknown;
   row?: RowData | null;
@@ -254,6 +256,8 @@ export default function SettlementInfoTab({
    * 미주입이면 지금과 100% 동일 — 주입하는 앱에서만 보인다(ERP 파트너 정산 뱃지용).
    */
   renderTierBadge?: (index: number, tierId: string, tierIdDuplicated?: boolean) => ReactNode;
+  // 선택 칸 보기 색 고르는 판. 내려주면 드롭다운에 「색상 변경」이 뜬다(호스트 앱이 팔레트 주입).
+  colorFamilies?: SelectDropdownColorFamily[];
 }) {
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
@@ -597,6 +601,14 @@ export default function SettlementInfoTab({
   // 드롭다운에서 새 보기를 칸 정의(options)에 영구 저장. canEditColumns 일 때만 아래로 넘긴다.
   const addOptionToField = useCallback((fieldKey: string, opt: string) => {
     const next = appendFieldOption(fields, fieldKey, opt);
+    if (!next) return;
+    setFields(next);
+    persistFields(next);
+  }, [fields, persistFields]);
+
+  // 드롭다운에서 보기 색을 칸 정의(optionColors)에 영구 저장. canEditColumns 일 때만 아래로 넘긴다.
+  const setFieldOptionColor = useCallback((fieldKey: string, opt: string, color: { bg: string; text: string }) => {
+    const next = setFieldOptionColorDef(fields, fieldKey, opt, color);
     if (!next) return;
     setFields(next);
     persistFields(next);
@@ -2034,6 +2046,8 @@ export default function SettlementInfoTab({
             rowLayout={rowLayout}
             conditionValues={row ?? undefined}
             onAddFieldOption={canEditColumns ? addOptionToField : undefined}
+            onSetFieldOptionColor={canEditColumns ? setFieldOptionColor : undefined}
+            colorFamilies={colorFamilies}
           />
         );
 
@@ -2766,7 +2780,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, onSetFieldOptionColor, colorFamilies,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2796,6 +2810,9 @@ function TierCard({
   tierIdDuplicated?: boolean;
   /** 선택 칸에 새 보기를 칸 정의에 영구 저장. 없으면 드롭다운에 추가 단추를 안 그린다. */
   onAddFieldOption?: (fieldKey: string, opt: string) => void;
+  /** 선택 칸 보기의 색({bg, text})을 칸 정의에 영구 저장. 없으면 색상 변경 단추를 안 그린다. */
+  onSetFieldOptionColor?: (fieldKey: string, opt: string, color: { bg: string; text: string }) => void;
+  colorFamilies?: SelectDropdownColorFamily[];
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2921,6 +2938,8 @@ function TierCard({
                       optionColors={f.optionColors}
                       onChange={(v) => onChange(f.key, v)}
                       onAddFieldOption={onAddFieldOption ? (opt) => onAddFieldOption(f.key, opt) : undefined}
+                      onSetFieldOptionColor={onSetFieldOptionColor ? (opt, color) => onSetFieldOptionColor(f.key, opt, color) : undefined}
+                      colorFamilies={colorFamilies}
                       overridden={overridden}
                       formulaValue={formulaValue}
                       canOverride={canOverride}
@@ -3235,7 +3254,7 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, overridden = false, formulaValue = null, canOverride = false, onOverrideChange,
+  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, onSetFieldOptionColor, colorFamilies, overridden = false, formulaValue = null, canOverride = false, onOverrideChange,
 }: {
   label: string;
   /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
@@ -3253,6 +3272,9 @@ function FieldRow({
   lockedNote?: string;
   /** 이 칸 보기 목록에 새 항목을 영구 저장. 없으면 드롭다운에 추가 단추를 안 그린다. */
   onAddFieldOption?: (opt: string) => void;
+  /** 이 칸 보기의 색({bg, text})을 영구 저장. 없으면 색상 변경 단추를 안 그린다. */
+  onSetFieldOptionColor?: (opt: string, color: { bg: string; text: string }) => void;
+  colorFamilies?: SelectDropdownColorFamily[];
   /** 이 수식 칸에 관리자 수동값이 저장돼 있는지 — "(수정됨)" 배지·툴팁 표시용 */
   overridden?: boolean;
   /** 수동값이 있을 때의 원래 수식 계산값 — 툴팁 "수식 계산값" 표시용 */
@@ -3350,6 +3372,8 @@ function FieldRow({
                     onClose={() => setEditing(false)}
                     optionColors={optionColors}
                     onAddOption={onAddFieldOption ? (opt) => onAddFieldOption(opt) : undefined}
+                    colorFamilies={colorFamilies}
+                    onSetColor={onSetFieldOptionColor}
                   />
                 </div>,
                 document.body,
