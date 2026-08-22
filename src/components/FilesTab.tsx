@@ -49,10 +49,15 @@ export function selfHostedFileUrl(url: string): string {
   if (typeof location === "undefined") return url; // 서버에서 그릴 때는 그대로
   try {
     const u = new URL(url, location.href);
+    // 형제 함수(internal-file-token.ts·ui-shared 의 같은 이름 함수)와 같은 규칙 —
+    // https 만, 표준 포트만. 「정확한 집 목록」의 뜻을 흐리지 않으려면 잣대가 같아야 한다
+    // (2026-08-23 적대적 리뷰: 같은 규칙이 세 벌 서로 다르게 적혀 있었다).
+    if (u.protocol !== "https:") return url;
+    if (u.port !== "") return url;
     if (u.origin === location.origin) return url;
     if (!WEDLY_APP_HOSTS.has(u.hostname.toLowerCase())) return url;
     if (!/^\/api\/upload\/[^/]+$/.test(u.pathname)) return url;
-    return u.pathname + u.search;
+    return u.pathname + u.search + u.hash; // 자리표(#)를 잃지 않는다 — PDF 쪽번호
   } catch {
     return url;
   }
