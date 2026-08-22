@@ -23,6 +23,41 @@ import {
   DEFAULT_MAX_UPLOAD_BYTES,
 } from "../lib/file-size";
 
+/**
+ * 형제 WEDLY 앱(ERP·하이브·일루아)의 집 주소 목록. 「.wedly.kr 로 끝나면」 같은 뭉뚱그린 판정을
+ * 쓰지 않는다 — 버려진 하위 도메인이 생겨도 그리로 새지 않게(ERP internal-file-token.ts 와 같은 규칙).
+ */
+const WEDLY_APP_HOSTS = new Set([
+  "erp.wedly.kr",
+  "wedly-erp-production.up.railway.app",
+  "wedly-hive-collab-production-1dce.up.railway.app",
+  "wedly-illua-collab-production.up.railway.app",
+]);
+
+/**
+ * 형제 앱의 첨부파일 주소를 **지금 보고 있는 앱의 주소로** 바꾼다.
+ *
+ * 왜: 세 앱은 같은 자료 창고와 같은 파일 보관소를 쓴다(2026-08-22 실측). 그래서 하이브에서
+ * ERP 가 올린 파일을 볼 때도 하이브에게 물으면 같은 파일이 나온다. 그렇게 해야 ERP 를
+ * 로그인 뒤로 잠가도 미리보기가 안 깨진다 — 브라우저에는 지금 보고 있는 앱의 로그인만 있고
+ * 다른 앱의 로그인은 없기 때문이다.
+ *
+ * 그대로 두는 경우: 이미 자기 앱 주소일 때 · 우리 앱이 아닌 곳(노션 임시 링크 등)일 때 ·
+ * 파일 서빙 주소 모양(/api/upload/<번호>)이 아닐 때.
+ */
+export function selfHostedFileUrl(url: string): string {
+  if (typeof location === "undefined") return url; // 서버에서 그릴 때는 그대로
+  try {
+    const u = new URL(url, location.href);
+    if (u.origin === location.origin) return url;
+    if (!WEDLY_APP_HOSTS.has(u.hostname.toLowerCase())) return url;
+    if (!/^\/api\/upload\/[^/]+$/.test(u.pathname)) return url;
+    return u.pathname + u.search;
+  } catch {
+    return url;
+  }
+}
+
 // 파일 한 건의 메타. 모든 필드 선택 — 앱별 로컬 타입과 구조 호환.
 export interface FileMeta {
   id?: number | string;
@@ -486,7 +521,7 @@ export function FilesTab({
         <div className="space-y-1.5">
           {visible.map((f, i) => {
             const href = f.url
-              ? f.url
+              ? selfHostedFileUrl(f.url)
               : `${proxyApiBase}?objectKey=${encodeURIComponent(f.objectKey || "")}`;
             // 동기화로 들어온 외부 첨부파일(objectKey 보유)은 여기서 삭제 못함 (소유권 다름)
             const canRemove = !!f.id || !!f.url;
