@@ -364,7 +364,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 계약 {i + 1}
               </button>
             ))}
-            {canEditValues && config.createContract && (
+            {canEditValues && config.createContract && !historyOnly && (
               <button
                 onClick={addContract}
                 disabled={busy}
@@ -394,6 +394,11 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         )}
 
         <div className="flex-1">
+          {historyOnly && policyRows.length > 1 && (
+            <div className="px-4 pt-3 text-[11px] font-semibold text-wedly-t2 break-keep">
+              「계약 {idx + 1}」의 기록 — 위 알약으로 다른 계약의 기록을 볼 수 있어요
+            </div>
+          )}
           {shownSubTab === "history" && (
             <div className="p-4">
               {historyGate === "panel" ? (
