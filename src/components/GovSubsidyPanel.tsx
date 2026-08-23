@@ -135,11 +135,14 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     adapter,
     historyOnly,
     hiddenSubTabs,
+    hideSubTabBar,
   }: SectionPanelProps & {
     /** true 면 히스토리만 그린다(3분할 오른쪽 패널용). 미전달이면 기존 전체 패널 그대로. */
     historyOnly?: boolean;
     /** 숨길 하위 탭 키(예: 3분할 가운데에서 히스토리를 오른쪽으로 옮길 때 ["history"]). 미전달이면 불변. */
     hiddenSubTabs?: string[];
+    /** true 면 이 패널의 하위 탭 줄을 그리지 않는다 — 바깥(오른쪽 한 줄)으로 끌어올렸을 때. 미전달 불변. */
+    hideSubTabBar?: boolean;
   }) {
     const policyRows = config.filterPolicyRows(rows);
     // 항목이 없어도 히스토리로 먼저 연다 — 첫 메모 입력칸(또는 안내)이 바로 보이게(재작업 2026-07-15).
@@ -377,7 +380,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         )}
 
         {/* 하위 탭 바 — 알약형 (히스토리 전용 모드에서는 탭 자체가 없다) */}
-        {!historyOnly && (
+        {!historyOnly && !hideSubTabBar && (
           <div className="flex items-center gap-1 overflow-x-auto border-b border-wedly-bd/60 bg-wedly-bg-gray/50 px-4 py-2">
             {displaySubTabs.map(({ key, label }) => (
               <button
