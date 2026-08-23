@@ -127,11 +127,33 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
 
 /** 앱별 설정을 받아 정부지원금 섹션 패널 컴포넌트를 만든다(sectionPanels 에 주입). */
 export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
-  function GovSubsidyPanel({ rows, primaryRow, isAdmin, onSaved, adapter }: SectionPanelProps) {
+  function GovSubsidyPanel({
+    rows,
+    primaryRow,
+    isAdmin,
+    onSaved,
+    adapter,
+    historyOnly,
+    hiddenSubTabs,
+  }: SectionPanelProps & {
+    /** true 면 히스토리만 그린다(3분할 오른쪽 패널용). 미전달이면 기존 전체 패널 그대로. */
+    historyOnly?: boolean;
+    /** 숨길 하위 탭 키(예: 3분할 가운데에서 히스토리를 오른쪽으로 옮길 때 ["history"]). 미전달이면 불변. */
+    hiddenSubTabs?: string[];
+  }) {
     const policyRows = config.filterPolicyRows(rows);
     // 항목이 없어도 히스토리로 먼저 연다 — 첫 메모 입력칸(또는 안내)이 바로 보이게(재작업 2026-07-15).
     // 기존엔 항목 없으면 '계약정보'로 열려, 첫 메모 입력이 가능한지 알기 어려웠다.
     const [subTab, setSubTab] = useState<SubTab>("history");
+    // ★ 폴백은 prop 을 넘긴 쪽(3분할)에서만 — 미전달이면 subTab 그대로(기존 앱 렌더 불변).
+    const displaySubTabs = hiddenSubTabs?.length
+      ? SUB_TABS.filter((t) => !hiddenSubTabs.includes(t.key))
+      : SUB_TABS;
+    const shownSubTab: SubTab = historyOnly
+      ? "history"
+      : !hiddenSubTabs?.length || displaySubTabs.some((t) => t.key === subTab)
+        ? subTab
+        : ((displaySubTabs[0]?.key as SubTab | undefined) ?? subTab);
     const [sel, setSel] = useState(0);
     const [err, setErr] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
@@ -354,23 +376,25 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           </div>
         )}
 
-        {/* 하위 탭 바 — 알약형 */}
-        <div className="flex items-center gap-1 overflow-x-auto border-b border-wedly-bd/60 bg-wedly-bg-gray/50 px-4 py-2">
-          {SUB_TABS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setSubTab(key)}
-              className={`flex-shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
-                subTab === key ? "bg-wedly-bg-blue text-wedly-accent" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {/* 하위 탭 바 — 알약형 (히스토리 전용 모드에서는 탭 자체가 없다) */}
+        {!historyOnly && (
+          <div className="flex items-center gap-1 overflow-x-auto border-b border-wedly-bd/60 bg-wedly-bg-gray/50 px-4 py-2">
+            {displaySubTabs.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setSubTab(key)}
+                className={`flex-shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
+                  shownSubTab === key ? "bg-wedly-bg-blue text-wedly-accent" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex-1">
-          {subTab === "history" && (
+          {shownSubTab === "history" && (
             <div className="p-4">
               {historyGate === "panel" ? (
                 <HistoryPanel
@@ -405,25 +429,25 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
             </div>
           )}
 
-          {subTab === "contract" && (
+          {shownSubTab === "contract" && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "contract", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
-          {subTab === "settlement" && (
+          {shownSubTab === "settlement" && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "settlement", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
-          {subTab === "refund" && (
+          {shownSubTab === "refund" && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "refund", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
-          {subTab === "meetings" && (
+          {shownSubTab === "meetings" && (
             <div className="p-4">
               <MeetingsTab readOnly={!canEditValues} rawValue={data["_meetings"] ?? null} onSave={canEditValues ? (json: string) => saveOrCreate("_meetings", json) : () => {}} />
             </div>
