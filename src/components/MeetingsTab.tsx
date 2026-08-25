@@ -54,7 +54,7 @@ function AssigneeSelect({
             onClick={() => { onChange(""); setOpen(false); }}
             className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-wedly-bg-gray flex items-center gap-2 ${!value ? "bg-wedly-bg-blue" : ""}`}
           >
-            <span className="text-wedly-muted">선택 안 함</span>
+            <span className="text-wedly-t2">선택 안 함</span>
             {!value && <span className="ml-auto text-wedly-accent-ink text-xs">✓</span>}
           </button>
           {options.map((n) => {
