@@ -348,7 +348,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     return (
       <div className="flex flex-col">
         {err && (
-          <div role="alert" className="mx-4 mt-3 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red">
+          <div role="alert" className="mx-4 mt-3 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red-ink">
             {err}
           </div>
         )}
@@ -361,7 +361,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 key={r.entryId}
                 onClick={() => setSel(i)}
                 className={`flex-shrink-0 rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${
-                  i === idx ? "bg-wedly-bg-blue text-wedly-accent" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
+                  i === idx ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
                 }`}
               >
                 계약 {i + 1}
@@ -387,7 +387,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 key={key}
                 onClick={() => setSubTab(key)}
                 className={`flex-shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
-                  shownSubTab === key ? "bg-wedly-bg-blue text-wedly-accent" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
+                  shownSubTab === key ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
                 }`}
               >
                 {label}
@@ -494,11 +494,11 @@ function FirstHistoryComposer({ onAdd }: { onAdd: (text: string) => Promise<void
     <div className="space-y-2">
       <p className="text-[12px] text-wedly-muted">계약이 없어도 히스토리를 바로 남길 수 있어요. 첫 메모를 남기면 정부지원금 항목이 자동으로 만들어집니다.</p>
       {saved && (
-        <div className="rounded-lg border border-wedly-bd-green bg-wedly-bg-green px-3 py-2 text-[13px] text-wedly-green">
+        <div className="rounded-lg border border-wedly-bd-green bg-wedly-bg-green px-3 py-2 text-[13px] text-wedly-green-ink">
           저장했습니다. 히스토리를 불러오는 중…
         </div>
       )}
-      {err && <div role="alert" className="rounded-lg border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red">{err}</div>}
+      {err && <div role="alert" className="rounded-lg border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red-ink">{err}</div>}
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

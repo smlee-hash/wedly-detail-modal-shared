@@ -94,7 +94,7 @@ export default function MultiPersonEditor({
               <span
                 key={n}
                 title={tipFor(n)}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-wedly-bg-blue text-wedly-accent"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-wedly-bg-blue text-wedly-accent-ink"
               >
                 {labelFor(n)}
                 <button type="button" onClick={() => toggle(n)} className="hover:text-wedly-red">✕</button>

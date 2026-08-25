@@ -247,7 +247,7 @@ export default function MeetingsTab({
         {meetings.map((m, idx) => (
           <div key={idx} className="rounded-xl border border-wedly-bd bg-white p-3.5 shadow-sm space-y-2.5">
             <div className="flex items-center justify-between">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-wedly-bg-blue text-wedly-accent text-[11px] font-bold">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-wedly-bg-blue text-wedly-accent-ink text-[11px] font-bold">
                 {ORDINAL_KO[idx] ?? `${idx + 1}차`} 방문
               </span>
               {!readOnly && (
@@ -373,7 +373,7 @@ export default function MeetingsTab({
       {!readOnly && (
         <button
           onClick={addMeeting}
-          className="w-full py-2.5 text-[13px] font-medium text-wedly-accent border border-wedly-accent/30 rounded-xl hover:bg-wedly-bg-blue transition-colors"
+          className="w-full py-2.5 text-[13px] font-medium text-wedly-accent-ink border border-wedly-accent/30 rounded-xl hover:bg-wedly-bg-blue transition-colors"
         >
           + 방문 추가 ({ORDINAL_KO[meetings.length] ?? `${meetings.length + 1}차`} 방문)
         </button>

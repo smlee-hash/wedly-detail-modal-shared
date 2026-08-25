@@ -86,7 +86,7 @@ export default function DateFormulaEditor({ value, onChange, fields, editingFiel
                 <button
                   type="button"
                   onClick={() => onChange({ mode: "offset", baseKey: value.baseKey, offsets: offsets.filter((_, j) => j !== i) })}
-                  className="p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red"
+                  className="p-1 rounded text-wedly-muted hover:text-wedly-red-ink hover:bg-wedly-bg-red"
                 >✕</button>
               )}
             </div>
@@ -94,7 +94,7 @@ export default function DateFormulaEditor({ value, onChange, fields, editingFiel
           <button
             type="button"
             onClick={() => onChange({ mode: "offset", baseKey: value.baseKey, offsets: [...offsets, { amount: 1, unit: "day" }] })}
-            className="w-full py-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue"
+            className="w-full py-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent-ink hover:bg-wedly-bg-blue"
           >+ 더하기·빼기 추가</button>
         </div>
       ) : (

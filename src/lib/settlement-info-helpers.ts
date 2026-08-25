@@ -42,11 +42,11 @@ export const DEFAULT_SCORECARDS: ScoreCardDef[] = [
 // 카드 색상 → Tailwind 클래스 토큰 매핑 (위들리 디자인)
 export const SCORECARD_COLOR_CLASSES: Record<ScoreCardColor, { bg: string; valueText: string; labelText: string }> = {
   gray:   { bg: "bg-wedly-bg-gray",   valueText: "text-wedly-navy",   labelText: "text-wedly-muted" },
-  blue:   { bg: "bg-wedly-bg-blue",   valueText: "text-wedly-accent", labelText: "text-wedly-accent" },
+  blue:   { bg: "bg-wedly-bg-blue",   valueText: "text-wedly-accent-ink", labelText: "text-wedly-accent-ink" },
   yellow: { bg: "bg-wedly-bg-yellow", valueText: "text-wedly-orange", labelText: "text-wedly-orange" },
-  green:  { bg: "bg-wedly-bg-green",  valueText: "text-wedly-green",  labelText: "text-wedly-green" },
-  purple: { bg: "bg-wedly-bg-purple", valueText: "text-wedly-purple", labelText: "text-wedly-purple" },
-  red:    { bg: "bg-wedly-bg-red",    valueText: "text-wedly-red",    labelText: "text-wedly-red" },
+  green:  { bg: "bg-wedly-bg-green",  valueText: "text-wedly-green-ink",  labelText: "text-wedly-green-ink" },
+  purple: { bg: "bg-wedly-bg-purple", valueText: "text-wedly-purple-ink", labelText: "text-wedly-purple-ink" },
+  red:    { bg: "bg-wedly-bg-red",    valueText: "text-wedly-red-ink",    labelText: "text-wedly-red-ink" },
 };
 
 export function makeScoreCardId(): string {
