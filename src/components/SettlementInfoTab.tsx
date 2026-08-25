@@ -1313,7 +1313,7 @@ export default function SettlementInfoTab({
                 onClick={() => setEditSubMode((v) => !v)}
                 className={`ml-auto flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border transition-colors whitespace-nowrap ${
                   editSubMode
-                    ? "border-wedly-accent text-wedly-accent bg-wedly-bg-blue/40"
+                    ? "border-wedly-accent text-wedly-accent-ink bg-wedly-bg-blue/40"
                     : "border-wedly-bd text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1"
                 }`}
               >
@@ -1393,7 +1393,7 @@ export default function SettlementInfoTab({
             <button
               type="button"
               onClick={() => { setSubSectionDraftLabel(""); setSubSectionAddOpen(true); }}
-              className="flex-shrink-0 px-3.5 py-2 text-[13px] sm:text-[12px] font-bold text-wedly-accent bg-white border-2 border-dashed border-wedly-bd-blue/70 rounded-full hover:bg-wedly-bg-blue/30 hover:border-wedly-accent transition-colors min-h-[40px] sm:min-h-[34px]"
+              className="flex-shrink-0 px-3.5 py-2 text-[13px] sm:text-[12px] font-bold text-wedly-accent-ink bg-white border-2 border-dashed border-wedly-bd-blue/70 rounded-full hover:bg-wedly-bg-blue/30 hover:border-wedly-accent transition-colors min-h-[40px] sm:min-h-[34px]"
               title="세부 섹션 추가"
               role="presentation"
             >
@@ -1429,7 +1429,7 @@ export default function SettlementInfoTab({
                 <button
                   type="button"
                   onClick={() => setSubSectionDeleteConfirm({ id: target.id, label: target.label })}
-                  className="px-3 py-1.5 text-[12px] font-medium text-wedly-red bg-white border border-wedly-bd-red/70 rounded-lg hover:bg-wedly-bg-red/40 transition-colors min-h-[40px] sm:min-h-[34px]"
+                  className="px-3 py-1.5 text-[12px] font-medium text-wedly-red-ink bg-white border border-wedly-bd-red/70 rounded-lg hover:bg-wedly-bg-red/40 transition-colors min-h-[40px] sm:min-h-[34px]"
                 >🗑 삭제</button>
                 <button
                   type="button"
@@ -1456,7 +1456,7 @@ export default function SettlementInfoTab({
                 onClick={() => { const next = !(editCards || editFields); setEditCards(next && canEditCards); setEditFields(next && canEditColumns); }}
                 className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border transition-colors whitespace-nowrap ${
                   (editCards || editFields)
-                    ? "border-wedly-accent text-wedly-accent bg-wedly-bg-blue/40"
+                    ? "border-wedly-accent text-wedly-accent-ink bg-wedly-bg-blue/40"
                     : "border-wedly-bd text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1"
                 }`}
               >
@@ -1593,7 +1593,7 @@ export default function SettlementInfoTab({
                     </div>
                     <button
                       onClick={() => removeScoreCard(card.id)}
-                      className="self-start text-[11px] px-2 py-1 rounded text-wedly-red hover:bg-wedly-bg-red"
+                      className="self-start text-[11px] px-2 py-1 rounded text-wedly-red-ink hover:bg-wedly-bg-red"
                       title="카드 삭제"
                     >
                       ✕ 삭제
@@ -1621,7 +1621,7 @@ export default function SettlementInfoTab({
                                   <button
                                     key={k}
                                     onClick={() => updateCardFormula(card.id, sign, "remove", k)}
-                                    className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-wedly-bd bg-white hover:bg-wedly-bg-red/40 hover:border-wedly-red hover:text-wedly-red transition"
+                                    className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-wedly-bd bg-white hover:bg-wedly-bg-red/40 hover:border-wedly-red hover:text-wedly-red-ink transition"
                                     title="제거"
                                   >
                                     {f?.label || k}
@@ -1696,7 +1696,7 @@ export default function SettlementInfoTab({
                                     <button
                                       type="button"
                                       onClick={() => removeCustomFormula(card.id, idx, slot)}
-                                      className="text-[10px] text-wedly-muted hover:text-wedly-red w-5 h-5 flex items-center justify-center rounded hover:bg-wedly-bg-red"
+                                      className="text-[10px] text-wedly-muted hover:text-wedly-red-ink w-5 h-5 flex items-center justify-center rounded hover:bg-wedly-bg-red"
                                       title="제거"
                                     >✕</button>
                                   </div>
@@ -1704,7 +1704,7 @@ export default function SettlementInfoTab({
                                 <button
                                   type="button"
                                   onClick={() => addCustomFormula(card.id, slot)}
-                                  className="w-full py-1 text-[10px] font-medium text-wedly-accent border border-dashed border-wedly-accent/30 rounded hover:bg-wedly-bg-blue/30"
+                                  className="w-full py-1 text-[10px] font-medium text-wedly-accent-ink border border-dashed border-wedly-accent/30 rounded hover:bg-wedly-bg-blue/30"
                                 >
                                   + {sumLabel} 직접 수식
                                 </button>
@@ -1766,7 +1766,7 @@ export default function SettlementInfoTab({
                             <button
                               type="button"
                               onClick={() => removeCustomFormula(card.id, idx, "custom")}
-                              className="text-[10px] text-wedly-muted hover:text-wedly-red w-6 h-6 flex items-center justify-center rounded hover:bg-wedly-bg-red"
+                              className="text-[10px] text-wedly-muted hover:text-wedly-red-ink w-6 h-6 flex items-center justify-center rounded hover:bg-wedly-bg-red"
                               title="이 수식 제거"
                             >✕</button>
                           </div>
@@ -1774,7 +1774,7 @@ export default function SettlementInfoTab({
                         <button
                           type="button"
                           onClick={() => addCustomFormula(card.id, "custom")}
-                          className="w-full py-1.5 text-[11px] font-medium text-wedly-accent border border-dashed border-wedly-accent/40 rounded-md hover:bg-wedly-bg-blue/30 transition-colors"
+                          className="w-full py-1.5 text-[11px] font-medium text-wedly-accent-ink border border-dashed border-wedly-accent/40 rounded-md hover:bg-wedly-bg-blue/30 transition-colors"
                         >
                           + 전체 직접 수식 추가
                         </button>
@@ -1863,7 +1863,7 @@ export default function SettlementInfoTab({
                         <button
                           type="button"
                           onClick={() => saveLayout(rowLayout.filter((_, k) => k !== ri))}
-                          className="p-1 rounded-md text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors flex-shrink-0"
+                          className="p-1 rounded-md text-wedly-muted hover:text-wedly-red-ink hover:bg-wedly-bg-red transition-colors flex-shrink-0"
                           title="이 줄 삭제"
                         >
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1877,7 +1877,7 @@ export default function SettlementInfoTab({
                 <button
                   type="button"
                   onClick={() => saveLayout([...rowLayout, 1])}
-                  className="w-full py-1.5 text-[11px] font-medium text-wedly-accent border border-dashed border-wedly-accent/40 rounded-md hover:bg-wedly-bg-blue/30 transition-colors"
+                  className="w-full py-1.5 text-[11px] font-medium text-wedly-accent-ink border border-dashed border-wedly-accent/40 rounded-md hover:bg-wedly-bg-blue/30 transition-colors"
                 >
                   + 줄 추가
                 </button>
@@ -1926,10 +1926,10 @@ export default function SettlementInfoTab({
                 )}
                 {(columnScopeMode !== "partner-custom" || (f as { scope?: string }).scope === "custom") && (
                   <>
-                    <button onClick={() => renameFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-accent hover:bg-wedly-bg-blue">이름 변경</button>
-                    <button onClick={() => changeFieldType(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-purple hover:bg-wedly-bg-purple">타입</button>
+                    <button onClick={() => renameFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-accent-ink hover:bg-wedly-bg-blue">이름 변경</button>
+                    <button onClick={() => changeFieldType(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-purple-ink hover:bg-wedly-bg-purple">타입</button>
                     {columnScopeMode === "erp" && (
-                      <button onClick={() => changeFieldScope(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-green hover:bg-wedly-bg-green">범위</button>
+                      <button onClick={() => changeFieldScope(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-green-ink hover:bg-wedly-bg-green">범위</button>
                     )}
                     {columnScopeMode === "erp" && allowTableExpose && (
                       <button
@@ -1937,14 +1937,14 @@ export default function SettlementInfoTab({
                         className={
                           (f as { tableExposed?: boolean }).tableExposed
                             ? "text-[11px] px-2 py-1 rounded text-wedly-orange hover:bg-wedly-bg-yellow"
-                            : "text-[11px] px-2 py-1 rounded text-wedly-accent hover:bg-wedly-bg-blue"
+                            : "text-[11px] px-2 py-1 rounded text-wedly-accent-ink hover:bg-wedly-bg-blue"
                         }
                         title="이 칸을 경정청구 표에 차수별 줄로 노출/취소 (ERP 전용)"
                       >
                         {(f as { tableExposed?: boolean }).tableExposed ? "표 노출 취소" : "표 노출"}
                       </button>
                     )}
-                    <button onClick={() => removeFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-red hover:bg-wedly-bg-red">삭제</button>
+                    <button onClick={() => removeFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-red-ink hover:bg-wedly-bg-red">삭제</button>
                   </>
                 )}
               </div>
@@ -1952,7 +1952,7 @@ export default function SettlementInfoTab({
           })}
           <button
             onClick={addFieldDef}
-            className="w-full py-2 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[12px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+            className="w-full py-2 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[12px] font-bold text-wedly-accent-ink hover:bg-wedly-bg-blue transition-colors"
           >
             + 컬럼 추가
           </button>
@@ -2038,7 +2038,7 @@ export default function SettlementInfoTab({
                 <button
                   type="button"
                   onClick={() => addTier(activeSubSectionId)}
-                  className="w-full py-3 rounded-2xl border-2 border-dashed border-wedly-bd hover:border-wedly-accent hover:bg-wedly-bg-blue/30 transition-colors text-[13px] font-bold text-wedly-muted hover:text-wedly-accent flex items-center justify-center gap-1.5"
+                  className="w-full py-3 rounded-2xl border-2 border-dashed border-wedly-bd hover:border-wedly-accent hover:bg-wedly-bg-blue/30 transition-colors text-[13px] font-bold text-wedly-muted hover:text-wedly-accent-ink flex items-center justify-center gap-1.5"
                 >
                   + {ORDINAL_KO[itemsInGroup.length] || `${itemsInGroup.length + 1}차`} 추가
                 </button>
@@ -2054,7 +2054,7 @@ export default function SettlementInfoTab({
             {!readOnly && (
               <button
                 onClick={() => addTier()}
-                className="w-full py-3 rounded-2xl border-2 border-dashed border-wedly-bd hover:border-wedly-accent hover:bg-wedly-bg-blue/30 transition-colors text-[13px] font-bold text-wedly-muted hover:text-wedly-accent flex items-center justify-center gap-1.5"
+                className="w-full py-3 rounded-2xl border-2 border-dashed border-wedly-bd hover:border-wedly-accent hover:bg-wedly-bg-blue/30 transition-colors text-[13px] font-bold text-wedly-muted hover:text-wedly-accent-ink flex items-center justify-center gap-1.5"
               >
                 + {ORDINAL_KO[tiers.length] || `${tiers.length + 1}차`} {addButtonSuffixOverride ?? tierSuffix} 추가
               </button>
@@ -2063,7 +2063,7 @@ export default function SettlementInfoTab({
               <button
                 type="button"
                 onClick={() => { setSubSectionDraftLabel(""); setSubSectionAddOpen(true); }}
-                className="w-full mt-1 py-2 rounded-xl border border-dashed border-wedly-bd-blue/60 text-[12px] font-medium text-wedly-accent hover:bg-wedly-bg-blue/30 transition-colors min-h-[40px] sm:min-h-[32px]"
+                className="w-full mt-1 py-2 rounded-xl border border-dashed border-wedly-bd-blue/60 text-[12px] font-medium text-wedly-accent-ink hover:bg-wedly-bg-blue/30 transition-colors min-h-[40px] sm:min-h-[32px]"
               >
                 + 세부 섹션으로 나눠 관리 시작
               </button>
@@ -2272,7 +2272,7 @@ export default function SettlementInfoTab({
                         <button
                           type="button"
                           onClick={() => setDraftOptions((prev) => prev.filter((_, j) => j !== i))}
-                          className="px-2 py-1.5 text-[12px] text-wedly-red hover:bg-wedly-bg-red/40 rounded-lg"
+                          className="px-2 py-1.5 text-[12px] text-wedly-red-ink hover:bg-wedly-bg-red/40 rounded-lg"
                         >삭제</button>
                       </div>
                     ))}
@@ -2493,7 +2493,7 @@ export default function SettlementInfoTab({
                                   <button
                                     type="button"
                                     onClick={() => removeClause(ri, ci)}
-                                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red-ink hover:bg-wedly-bg-red transition-colors"
                                     title={rule.clauses.length <= 1 ? "이 경우 삭제" : "이 조건 삭제"}
                                   >
                                     ✕
@@ -2503,7 +2503,7 @@ export default function SettlementInfoTab({
                               <button
                                 type="button"
                                 onClick={() => addClause(ri)}
-                                className="w-full py-1 rounded-lg border border-dashed border-wedly-accent/50 text-[10px] font-semibold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+                                className="w-full py-1 rounded-lg border border-dashed border-wedly-accent/50 text-[10px] font-semibold text-wedly-accent-ink hover:bg-wedly-bg-blue transition-colors"
                               >
                                 + 조건 더하기
                               </button>
@@ -2649,7 +2649,7 @@ export default function SettlementInfoTab({
                       : "하이브·일루아 등 다른 앱에서도 함께 보이는 공통 칸이 됩니다. 입력값은 그대로 유지됩니다."}
                   </span>
                 </p>
-                <p className="mt-2 text-[12px] text-wedly-gold bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                <p className="mt-2 text-[12px] text-wedly-gold-ink bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
                   ※ 이 칸은 이 분야의 <b>모든 회사가 함께 쓰는 칸</b>입니다. 범위를 바꾸면 모든 회사 상세창에 똑같이 적용됩니다. (회사마다 따로 두는 설정이 아닙니다)
                 </p>
               </div>
@@ -2691,7 +2691,7 @@ export default function SettlementInfoTab({
                       : "표에 이 차수 칸이 나타나고, 여러 차수는 줄로 나뉘어 표시·편집됩니다. 입력값은 그대로 유지됩니다."}
                   </span>
                 </p>
-                <p className="mt-2 text-[12px] text-wedly-gold bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                <p className="mt-2 text-[12px] text-wedly-gold-ink bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
                   ※ 이 설정은 이 분야 <b>모든 회사 표</b>에 함께 적용됩니다. (ERP에서만 보이고 하이브·일루아엔 영향 없음)
                 </p>
               </div>
@@ -2803,7 +2803,7 @@ function TierCard({
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={`text-wedly-muted transition-transform ${open ? "rotate-90" : ""}`}>
               <path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] font-black bg-wedly-bg-blue text-wedly-accent">
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] font-black bg-wedly-bg-blue text-wedly-accent-ink">
               {index + 1}
             </span>
           </button>
@@ -2840,7 +2840,7 @@ function TierCard({
             <span className="text-[11px] font-bold text-wedly-accent tabular-nums">성공보수 {fmtCurrency(success)}원</span>
           )}
           {!readOnly && canRemove && (
-            <button onClick={onRemove} className="p-1 rounded-md text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors" title="이 차수 삭제">
+            <button onClick={onRemove} className="p-1 rounded-md text-wedly-muted hover:text-wedly-red-ink hover:bg-wedly-bg-red transition-colors" title="이 차수 삭제">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6"/>
               </svg>
@@ -2990,7 +2990,7 @@ function FormulaTermsEditor({
                   <button
                     type="button"
                     onClick={() => removeTerm(i)}
-                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red-ink hover:bg-wedly-bg-red transition-colors"
                     title="이 묶음 삭제"
                   >
                     ✕
@@ -3030,7 +3030,7 @@ function FormulaTermsEditor({
                   <button
                     type="button"
                     onClick={() => removeTerm(i)}
-                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                    className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red-ink hover:bg-wedly-bg-red transition-colors"
                     title="이 항목 삭제"
                   >
                     ✕
@@ -3082,7 +3082,7 @@ function FormulaTermsEditor({
                 <button
                   type="button"
                   onClick={() => removeTerm(i)}
-                  className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red hover:bg-wedly-bg-red transition-colors"
+                  className="flex-shrink-0 p-1 rounded text-wedly-muted hover:text-wedly-red-ink hover:bg-wedly-bg-red transition-colors"
                   title="이 항목 삭제"
                 >
                   ✕
@@ -3124,7 +3124,7 @@ function FormulaTermsEditor({
       <button
         type="button"
         onClick={addTerm}
-        className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+        className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent-ink hover:bg-wedly-bg-blue transition-colors"
       >
         + 항목 추가
       </button>
@@ -3134,7 +3134,7 @@ function FormulaTermsEditor({
         <button
           type="button"
           onClick={addRound}
-          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent-ink hover:bg-wedly-bg-blue transition-colors"
         >
           ≈ 반올림 추가
         </button>
@@ -3143,7 +3143,7 @@ function FormulaTermsEditor({
         <button
           type="button"
           onClick={addFloor}
-          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent-ink hover:bg-wedly-bg-blue transition-colors"
         >
           ↓ 내림 추가
         </button>
@@ -3152,7 +3152,7 @@ function FormulaTermsEditor({
         <button
           type="button"
           onClick={addGroup}
-          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent hover:bg-wedly-bg-blue transition-colors"
+          className="w-full py-1.5 mt-1 rounded-lg border-2 border-dashed border-wedly-accent/40 text-[11px] font-bold text-wedly-accent-ink hover:bg-wedly-bg-blue transition-colors"
         >
           + 묶음(괄호) 추가
         </button>

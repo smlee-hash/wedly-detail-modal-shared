@@ -243,7 +243,7 @@ export default function SelectDropdownBody({
               {canShowColorPicker && (
                 <button
                   type="button"
-                  className="w-6 h-6 rounded-md inline-flex items-center justify-center text-wedly-muted hover:bg-wedly-bg-blue/40 hover:text-wedly-accent transition flex-shrink-0"
+                  className="w-6 h-6 rounded-md inline-flex items-center justify-center text-wedly-muted hover:bg-wedly-bg-blue/40 hover:text-wedly-accent-ink transition flex-shrink-0"
                   title="색상 변경"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -262,7 +262,7 @@ export default function SelectDropdownBody({
               {allowDelete && onDeleteOption && (
                 <button
                   type="button"
-                  className="w-6 h-6 mr-1 rounded-md inline-flex items-center justify-center text-wedly-muted hover:bg-wedly-bg-red/40 hover:text-wedly-red transition flex-shrink-0"
+                  className="w-6 h-6 mr-1 rounded-md inline-flex items-center justify-center text-wedly-muted hover:bg-wedly-bg-red/40 hover:text-wedly-red-ink transition flex-shrink-0"
                   title="옵션 삭제"
                   onClick={(e) => { e.stopPropagation(); handleDelete(opt); }}
                 >
@@ -314,7 +314,7 @@ export default function SelectDropdownBody({
         {onAddOption && (
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] font-semibold text-wedly-accent hover:bg-wedly-bg-blue/40 transition mt-0.5 border-t border-wedly-bd/40 pt-2"
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] font-semibold text-wedly-accent-ink hover:bg-wedly-bg-blue/40 transition mt-0.5 border-t border-wedly-bd/40 pt-2"
             onClick={() => {
               if (search.trim() && !options.includes(search.trim())) {
                 handleAddNew();
