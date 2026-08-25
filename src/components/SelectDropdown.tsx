@@ -237,7 +237,7 @@ export default function SelectDropdownBody({
                   {opt}
                 </span>
                 {isActive && (
-                  <span className="ml-auto text-wedly-accent text-[11px] flex-shrink-0">✓</span>
+                  <span className="ml-auto text-wedly-accent-ink text-[11px] flex-shrink-0">✓</span>
                 )}
               </button>
               {canShowColorPicker && (
