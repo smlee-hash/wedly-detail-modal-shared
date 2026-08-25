@@ -1303,7 +1303,7 @@ export default function SettlementInfoTab({
       {subSectionsSafe.length > 0 && (
         <div className="rounded-xl border border-wedly-bd bg-wedly-bg-blue/20 px-3 pt-2.5 pb-2.5 shadow-sm">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-[11px] font-bold text-wedly-accent uppercase tracking-wider">📂 세부 섹션 선택</span>
+            <span className="text-[11px] font-bold text-wedly-accent-ink uppercase tracking-wider">📂 세부 섹션 선택</span>
             <span className="text-[10px] text-wedly-muted">탭을 눌러 영역별 합계와 차수를 봅니다</span>
             {/* 어드민 — "세부 섹션 편집" 토글. 켜면 활성 탭에 ⋮ 등장.
                 디자인 통일: 히스토리/상세정보 "탭 편집" 과 같은 작은 테두리 버튼 + 연필 아이콘. */}
@@ -1538,7 +1538,7 @@ export default function SettlementInfoTab({
       {editCards && canEditCards && (
         <div className="rounded-2xl border-2 border-wedly-accent/30 bg-wedly-bg-blue/10 p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-[12px] font-semibold text-wedly-accent">스코어카드 편집 (전체 사용자에게 적용됨)</p>
+            <p className="text-[12px] font-semibold text-wedly-accent-ink">스코어카드 편집 (전체 사용자에게 적용됨)</p>
             <button
               onClick={addScoreCard}
               className="text-[11px] font-bold text-white bg-wedly-accent px-2.5 py-1 rounded-lg hover:brightness-110"
@@ -1801,7 +1801,7 @@ export default function SettlementInfoTab({
 
       {editFields && canEditColumns && (
         <div className="rounded-2xl border-2 border-wedly-accent/30 bg-wedly-bg-blue/10 p-4 space-y-2">
-          <p className="text-[12px] font-semibold text-wedly-accent mb-2">
+          <p className="text-[12px] font-semibold text-wedly-accent-ink mb-2">
             컬럼 정의 (전체 차수에 적용됨)
             <span className="ml-2 text-[10px] font-normal text-wedly-muted">⋮⋮ 드래그하여 순서 변경</span>
           </p>
@@ -2258,7 +2258,7 @@ export default function SettlementInfoTab({
               {/* ── 보기 목록 편집기 (type === "select" 일 때) ── */}
               {fieldEditModal.mode !== "rename" && draftType === "select" && (
                 <div className="rounded-xl border border-wedly-accent/30 bg-wedly-bg-blue/10 p-3 space-y-2">
-                  <span className="text-[11px] font-bold text-wedly-accent">📋 보기 목록 (하나 고르기)</span>
+                  <span className="text-[11px] font-bold text-wedly-accent-ink">📋 보기 목록 (하나 고르기)</span>
                   <div className="space-y-1.5">
                     {draftOptions.map((opt, i) => (
                       <div key={i} className="flex items-center gap-1.5">
@@ -2297,7 +2297,7 @@ export default function SettlementInfoTab({
               {fieldEditModal.mode !== "rename" && draftType === "formula" && (
                 <div className="rounded-xl border border-wedly-accent/30 bg-wedly-bg-blue/10 p-3 space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-wedly-accent">🧮 수식 만들기</span>
+                    <span className="text-[11px] font-bold text-wedly-accent-ink">🧮 수식 만들기</span>
                     <span className="text-[10px] text-wedly-muted">같은 차수의 컬럼끼리 자동 계산</span>
                   </div>
 
@@ -2550,7 +2550,7 @@ export default function SettlementInfoTab({
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 flex items-start gap-3">
                 <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-red flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red-ink">
                     <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                   </svg>
                 </div>
@@ -2584,7 +2584,7 @@ export default function SettlementInfoTab({
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 flex items-start gap-3">
                 <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-red flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red-ink">
                     <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                   </svg>
                 </div>
@@ -2630,7 +2630,7 @@ export default function SettlementInfoTab({
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 flex items-start gap-3">
                 <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-green flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-green">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-green-ink">
                     <path d="M3 12h18M3 6h18M3 18h18" />
                   </svg>
                 </div>
@@ -2649,7 +2649,7 @@ export default function SettlementInfoTab({
                       : "하이브·일루아 등 다른 앱에서도 함께 보이는 공통 칸이 됩니다. 입력값은 그대로 유지됩니다."}
                   </span>
                 </p>
-                <p className="mt-2 text-[12px] text-wedly-gold-ink bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                <p className="mt-2 text-[12px] text-wedly-t1 bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
                   ※ 이 칸은 이 분야의 <b>모든 회사가 함께 쓰는 칸</b>입니다. 범위를 바꾸면 모든 회사 상세창에 똑같이 적용됩니다. (회사마다 따로 두는 설정이 아닙니다)
                 </p>
               </div>
@@ -2672,7 +2672,7 @@ export default function SettlementInfoTab({
             <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
               <div className="px-5 pt-5 pb-3 flex items-start gap-3">
                 <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-blue flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-accent">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-accent-ink">
                     <path d="M3 9h18M3 15h18M9 3v18" />
                   </svg>
                 </div>
@@ -2691,7 +2691,7 @@ export default function SettlementInfoTab({
                       : "표에 이 차수 칸이 나타나고, 여러 차수는 줄로 나뉘어 표시·편집됩니다. 입력값은 그대로 유지됩니다."}
                   </span>
                 </p>
-                <p className="mt-2 text-[12px] text-wedly-gold-ink bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
+                <p className="mt-2 text-[12px] text-wedly-t1 bg-wedly-bg-yellow border border-[var(--wedly-gold)]/30 rounded-lg px-2.5 py-1.5 leading-relaxed">
                   ※ 이 설정은 이 분야 <b>모든 회사 표</b>에 함께 적용됩니다. (ERP에서만 보이고 하이브·일루아엔 영향 없음)
                 </p>
               </div>
@@ -3039,7 +3039,7 @@ function FormulaTermsEditor({
                 {/* 저장 버튼을 눌러야 아는 게 아니라, 잘못 놓인 순간 이 줄에서 바로 보이게 한다. */}
                 {(() => {
                   const warn = roundTermIssue(terms.slice(0, i + 1), fields, resultFormat);
-                  if (warn) return <p className="text-[10px] text-wedly-red px-1">{warn}</p>;
+                  if (warn) return <p className="text-[10px] text-wedly-red-ink px-1">{warn}</p>;
                   return (
                     <p className="text-[10px] text-wedly-muted px-1">
                       {allowGroup ? "여기까지 계산한 값을" : "이 묶음 안에서 여기까지 계산한 값을"} 이 단위로 {t.op === "floor" ? "내립니다(단위 미만은 버립니다)" : "반올림합니다"}.

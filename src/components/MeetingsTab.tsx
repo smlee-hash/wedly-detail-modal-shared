@@ -55,7 +55,7 @@ function AssigneeSelect({
             className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-wedly-bg-gray flex items-center gap-2 ${!value ? "bg-wedly-bg-blue" : ""}`}
           >
             <span className="text-wedly-muted">선택 안 함</span>
-            {!value && <span className="ml-auto text-wedly-accent text-xs">✓</span>}
+            {!value && <span className="ml-auto text-wedly-accent-ink text-xs">✓</span>}
           </button>
           {options.map((n) => {
             const active = n === value;
@@ -67,7 +67,7 @@ function AssigneeSelect({
                 className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-wedly-bg-gray flex items-center gap-2 ${active ? "bg-wedly-bg-blue" : ""}`}
               >
                 <span className="text-wedly-t1">{n}</span>
-                {active && <span className="ml-auto text-wedly-accent text-xs">✓</span>}
+                {active && <span className="ml-auto text-wedly-accent-ink text-xs">✓</span>}
               </button>
             );
           })}
@@ -512,7 +512,7 @@ export default function MeetingsTab({
                       >
                         <div className={cn(
                           "text-[11px] font-medium leading-tight",
-                          cell.isToday ? "text-wedly-accent font-bold" : "text-wedly-t2",
+                          cell.isToday ? "text-wedly-accent-ink font-bold" : "text-wedly-t2",
                         )}>{cell.date}</div>
                         <div className="flex-1 min-h-0 space-y-0.5 mt-0.5">
                           {cell.items.slice(0, 3).map((it) => {
