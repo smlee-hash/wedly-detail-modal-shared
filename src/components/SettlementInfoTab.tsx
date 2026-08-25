@@ -1936,7 +1936,7 @@ export default function SettlementInfoTab({
                         onClick={() => toggleTableExpose(f.key)}
                         className={
                           (f as { tableExposed?: boolean }).tableExposed
-                            ? "text-[11px] px-2 py-1 rounded text-wedly-orange hover:bg-wedly-bg-yellow"
+                            ? "text-[11px] px-2 py-1 rounded text-wedly-t1 hover:bg-wedly-bg-yellow"
                             : "text-[11px] px-2 py-1 rounded text-wedly-accent-ink hover:bg-wedly-bg-blue"
                         }
                         title="이 칸을 경정청구 표에 차수별 줄로 노출/취소 (ERP 전용)"
@@ -2171,7 +2171,7 @@ export default function SettlementInfoTab({
               <div className="px-5 py-4 text-[13px] text-wedly-t2 space-y-2">
                 <p>&quot;{subSectionDeleteConfirm.label}&quot; 세부 섹션을 삭제하시겠습니까?</p>
                 {targetTiers.length > 0 && (
-                  <p className="text-[12px] text-wedly-orange bg-wedly-bg-yellow/40 border border-wedly-orange/30 rounded p-2">
+                  <p className="text-[12px] text-wedly-t1 bg-wedly-bg-yellow/40 border border-wedly-orange/30 rounded p-2">
                     이 영역의 차수 {targetTiers.length}개는 첫 번째 영역으로 자동 이동됩니다. 데이터는 보존됩니다.
                   </p>
                 )}
@@ -2288,7 +2288,7 @@ export default function SettlementInfoTab({
               {/* 참조 중인 컬럼을 글자·날짜로 바꾸면 그 수식이 깨질 수 있음 — 사전 경고 */}
               {fieldEditModal.mode === "changeType" && (draftType === "text" || draftType === "date") && formulasReferencing(fieldEditModal.key).length > 0 && (
                 <div className="rounded-lg bg-wedly-bg-yellow border border-wedly-gold/40 px-3 py-2">
-                  <p className="text-[12px] font-semibold text-wedly-orange">⚠️ 이 컬럼을 쓰는 수식 컬럼이 있습니다</p>
+                  <p className="text-[12px] font-semibold text-wedly-t1">⚠️ 이 컬럼을 쓰는 수식 컬럼이 있습니다</p>
                   <p className="text-[11px] text-wedly-t2 mt-0.5">{formulasReferencing(fieldEditModal.key).map((f) => f.label).join(", ")} — 글자/날짜로 바꾸면 그 수식이 이 컬럼을 더 이상 계산에 쓸 수 없습니다.</p>
                 </div>
               )}
@@ -2521,7 +2521,7 @@ export default function SettlementInfoTab({
                           <button
                             type="button"
                             onClick={() => { setFormulaError(""); setDraftConditional((prev) => prev ? { ...prev, rules: [...prev.rules, newRule()] } : prev); }}
-                            className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-gold/50 text-[11px] font-bold text-wedly-orange hover:bg-wedly-bg-yellow transition-colors"
+                            className="w-full py-1.5 rounded-lg border-2 border-dashed border-wedly-gold/50 text-[11px] font-bold text-wedly-t1 hover:bg-wedly-bg-yellow transition-colors"
                           >
                             + 다른 경우 추가
                           </button>
@@ -2604,7 +2604,7 @@ export default function SettlementInfoTab({
                   if (refs.length === 0) return null;
                   return (
                     <div className="mt-2.5 rounded-lg bg-wedly-bg-yellow border border-wedly-gold/40 px-3 py-2">
-                      <p className="text-[12px] font-semibold text-wedly-orange">⚠️ 이 컬럼을 쓰는 수식 컬럼 {refs.length}개가 영향을 받습니다</p>
+                      <p className="text-[12px] font-semibold text-wedly-t1">⚠️ 이 컬럼을 쓰는 수식 컬럼 {refs.length}개가 영향을 받습니다</p>
                       <p className="text-[11px] text-wedly-t2 mt-0.5">{refs.map((f) => f.label).join(", ")} — 삭제 후 해당 수식을 다시 확인·수정하세요.</p>
                     </div>
                   );
