@@ -180,7 +180,7 @@ export default function SelectDropdownBody({
   }, [colorPickerOpt]);
 
   const canShowColorPicker = !!colorFamilies && colorFamilies.length > 0 && !!onSetColor;
-  const colorClassFor = (opt: string) => getColorClass ? getColorClass(opt) : "bg-wedly-bg-gray text-wedly-muted";
+  const colorClassFor = (opt: string) => getColorClass ? getColorClass(opt) : "bg-wedly-bg-gray text-wedly-t2";
 
   return (
     <>
@@ -189,7 +189,7 @@ export default function SelectDropdownBody({
         <input
           ref={inputRef}
           type="text"
-          className="w-full rounded-lg border border-wedly-bd bg-wedly-bg-gray px-3 py-1.5 text-[13px] text-wedly-t1 placeholder:text-wedly-muted outline-none focus:border-wedly-accent focus:bg-white focus:ring-2 focus:ring-wedly-accent/20 transition"
+          className="w-full rounded-lg border border-wedly-bd bg-wedly-bg-gray px-3 py-1.5 text-[13px] text-wedly-t1 placeholder:text-wedly-t2 outline-none focus:border-wedly-accent focus:bg-white focus:ring-2 focus:ring-wedly-accent/20 transition"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => {
@@ -205,7 +205,7 @@ export default function SelectDropdownBody({
         {/* 비우기 — 항상 표시. 이미 빈 값이면 저장 안 보내고 닫기만 */}
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-wedly-muted hover:bg-wedly-bg-gray transition"
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-wedly-t2 hover:bg-wedly-bg-gray transition"
           onClick={() => { if (value) onSave(""); onClose(); }}
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
@@ -243,7 +243,7 @@ export default function SelectDropdownBody({
               {canShowColorPicker && (
                 <button
                   type="button"
-                  className="w-6 h-6 rounded-md inline-flex items-center justify-center text-wedly-muted hover:bg-wedly-bg-blue/40 hover:text-wedly-accent-ink transition flex-shrink-0"
+                  className="w-6 h-6 rounded-md inline-flex items-center justify-center text-wedly-t2 hover:bg-wedly-bg-blue/40 hover:text-wedly-accent-ink transition flex-shrink-0"
                   title="색상 변경"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -262,7 +262,7 @@ export default function SelectDropdownBody({
               {allowDelete && onDeleteOption && (
                 <button
                   type="button"
-                  className="w-6 h-6 mr-1 rounded-md inline-flex items-center justify-center text-wedly-muted hover:bg-wedly-bg-red/40 hover:text-wedly-red-ink transition flex-shrink-0"
+                  className="w-6 h-6 mr-1 rounded-md inline-flex items-center justify-center text-wedly-t2 hover:bg-wedly-bg-red/40 hover:text-wedly-red-ink transition flex-shrink-0"
                   title="옵션 삭제"
                   onClick={(e) => { e.stopPropagation(); handleDelete(opt); }}
                 >

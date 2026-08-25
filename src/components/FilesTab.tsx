@@ -426,7 +426,7 @@ export function FilesTab({
           className={cn(
             "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-semibold transition",
             uploading || disabled || !pageId
-              ? "bg-wedly-bg-gray text-wedly-muted cursor-not-allowed"
+              ? "bg-wedly-bg-gray text-wedly-t2 cursor-not-allowed"
               : "bg-wedly-accent text-white hover:opacity-90",
           )}
         >
@@ -455,7 +455,7 @@ export function FilesTab({
             className={cn(
               "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] font-semibold transition border",
               downloadingAll
-                ? "bg-wedly-bg-gray text-wedly-muted border-wedly-bd cursor-not-allowed"
+                ? "bg-wedly-bg-gray text-wedly-t2 border-wedly-bd cursor-not-allowed"
                 : "bg-white text-wedly-accent-ink border-wedly-accent/40 hover:border-wedly-accent hover:bg-wedly-bg-blue/30",
             )}
             title="첨부파일 전체를 압축파일(ZIP)로 내려받기"
@@ -493,7 +493,7 @@ export function FilesTab({
             "w-full flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-4 py-5 text-[12.5px] transition-colors",
             isDragging
               ? "border-wedly-accent bg-wedly-bg-blue/50 text-wedly-accent-ink"
-              : "border-wedly-bd bg-wedly-bg-gray/30 text-wedly-muted hover:border-wedly-accent hover:bg-wedly-bg-blue/30",
+              : "border-wedly-bd bg-wedly-bg-gray/30 text-wedly-t2 hover:border-wedly-accent hover:bg-wedly-bg-blue/30",
             uploading && "opacity-60 cursor-not-allowed",
           )}
         >
@@ -734,7 +734,7 @@ export function FilesTab({
                     href={downloadHref}
                     download={f.fileName || "파일"}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-6 h-6 rounded text-wedly-muted hover:bg-wedly-bg-blue/40 hover:text-wedly-accent-ink inline-flex items-center justify-center flex-shrink-0 transition"
+                    className="w-6 h-6 rounded text-wedly-t2 hover:bg-wedly-bg-blue/40 hover:text-wedly-accent-ink inline-flex items-center justify-center flex-shrink-0 transition"
                     title="다운로드"
                     aria-label="다운로드"
                   >
@@ -747,7 +747,7 @@ export function FilesTab({
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setPendingRemove(f); }}
-                    className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded text-wedly-muted hover:bg-wedly-bg-red/40 hover:text-wedly-red-ink inline-flex items-center justify-center flex-shrink-0 transition"
+                    className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded text-wedly-t2 hover:bg-wedly-bg-red/40 hover:text-wedly-red-ink inline-flex items-center justify-center flex-shrink-0 transition"
                     title="파일 제거"
                     aria-label="파일 제거"
                   >

@@ -333,7 +333,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 key={r.entryId}
                 onClick={() => setSel(i)}
                 className={`flex-shrink-0 rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${
-                  i === idx ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
+                  i === idx ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t2"
                 }`}
               >
                 계약 {i + 1}
@@ -343,7 +343,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
               <button
                 onClick={addContract}
                 disabled={busy}
-                className="ml-1 flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t1 disabled:opacity-50"
+                className="ml-1 flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1 disabled:opacity-50"
               >
                 + 추가
               </button>
@@ -358,7 +358,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
               key={key}
               onClick={() => setSubTab(key)}
               className={`flex-shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
-                subTab === key ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
+                subTab === key ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t2"
               }`}
             >
               {label}

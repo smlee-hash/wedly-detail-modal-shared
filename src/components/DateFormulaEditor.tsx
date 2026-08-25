@@ -86,7 +86,7 @@ export default function DateFormulaEditor({ value, onChange, fields, editingFiel
                 <button
                   type="button"
                   onClick={() => onChange({ mode: "offset", baseKey: value.baseKey, offsets: offsets.filter((_, j) => j !== i) })}
-                  className="p-1 rounded text-wedly-muted hover:text-wedly-red-ink hover:bg-wedly-bg-red"
+                  className="p-1 rounded text-wedly-t2 hover:text-wedly-red-ink hover:bg-wedly-bg-red"
                 >✕</button>
               )}
             </div>
