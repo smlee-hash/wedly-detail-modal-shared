@@ -293,7 +293,7 @@ export default function MeetingsTab({
                   value={m.datetime}
                   onChange={(e) => updateField(idx, "datetime", e.target.value)}
                   readOnly={readOnly}
-                  className="mt-1 block w-full px-3 py-2.5 sm:py-2 text-[15px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent hover:border-wedly-accent/50 transition-colors disabled:bg-wedly-bg-gray disabled:text-wedly-muted disabled:cursor-not-allowed"
+                  className="mt-1 block w-full px-3 py-2.5 sm:py-2 text-[15px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-t2 focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent hover:border-wedly-accent/50 transition-colors disabled:bg-wedly-bg-gray disabled:text-wedly-t2 disabled:cursor-not-allowed"
                 />
               </label>
               {showAssignee && (
@@ -351,7 +351,7 @@ export default function MeetingsTab({
                 readOnly={readOnly}
                 rows={2}
                 placeholder="방문 목적이나 안건을 적어주세요"
-                className="mt-1 block w-full px-3 py-2.5 sm:py-2 text-[15px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-muted focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent hover:border-wedly-accent/50 transition-colors disabled:bg-wedly-bg-gray disabled:text-wedly-muted disabled:cursor-not-allowed resize-y"
+                className="mt-1 block w-full px-3 py-2.5 sm:py-2 text-[15px] sm:text-[13px] border border-wedly-bd rounded-lg bg-white text-wedly-t1 placeholder:text-wedly-t2 focus:outline-none focus:ring-2 focus:ring-wedly-accent/30 focus:border-wedly-accent hover:border-wedly-accent/50 transition-colors disabled:bg-wedly-bg-gray disabled:text-wedly-t2 disabled:cursor-not-allowed resize-y"
               />
             </label>
 
@@ -361,7 +361,7 @@ export default function MeetingsTab({
                 disabled={!isDirtyAt(idx)}
                 className={isDirtyAt(idx)
                   ? "w-full py-2 text-[13px] font-bold text-white bg-wedly-accent rounded-lg hover:brightness-110"
-                  : "w-full py-2 text-[13px] font-medium text-wedly-muted bg-wedly-bg-gray rounded-lg cursor-not-allowed"}
+                  : "w-full py-2 text-[13px] font-medium text-wedly-t2 bg-wedly-bg-gray rounded-lg cursor-not-allowed"}
               >
                 {isDirtyAt(idx) ? `${ORDINAL_KO[idx] ?? `${idx + 1}차`} 방문 저장` : justSavedIdx === idx ? "✓ 저장 완료" : "변경 사항 없음"}
               </button>

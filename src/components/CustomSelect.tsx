@@ -87,7 +87,7 @@ export default function CustomSelect({
           "flex items-center justify-between gap-2 w-full border rounded-lg bg-white transition-colors text-left",
           paddingX, paddingY, fontSize,
           disabled
-            ? "border-wedly-bd bg-wedly-bg-gray text-wedly-muted cursor-not-allowed"
+            ? "border-wedly-bd bg-wedly-bg-gray text-wedly-t2 cursor-not-allowed"
             : open
               ? "border-wedly-accent ring-2 ring-wedly-accent/30 text-wedly-t1"
               : "border-wedly-bd text-wedly-t1 hover:border-wedly-accent/50 cursor-pointer",

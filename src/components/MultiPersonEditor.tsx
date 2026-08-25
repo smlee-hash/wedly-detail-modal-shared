@@ -110,7 +110,7 @@ export default function MultiPersonEditor({
           <button
             type="button"
             onClick={() => { onSave(""); onClose(); }}
-            className="flex w-full items-center gap-2 px-2 py-1 rounded hover:bg-wedly-bg-gray text-left text-[12px] text-wedly-muted"
+            className="flex w-full items-center gap-2 px-2 py-1 rounded hover:bg-wedly-bg-gray text-left text-[12px] text-wedly-t2"
           >
             <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
               <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -172,7 +172,7 @@ export default function MultiPersonEditor({
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-2 text-[14px] sm:text-[12px] min-h-[40px] sm:min-h-[30px] text-wedly-muted border border-wedly-bd rounded hover:bg-wedly-bg-gray"
+            className="px-3 py-2 text-[14px] sm:text-[12px] min-h-[40px] sm:min-h-[30px] text-wedly-t2 border border-wedly-bd rounded hover:bg-wedly-bg-gray"
           >
             취소
           </button>
