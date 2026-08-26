@@ -28,6 +28,9 @@ import {
   type ScoreCardDef,
   COMMON_BASIC_FIELD_SPECS,
   useDetailLoadState,
+  checkApiResult,
+  makePersistError,
+  failureReason,
 } from "@wedly/ui-shared";
 import SettlementInfoTabBase from "./SettlementInfoTab";
 import { resolveHistoryGate } from "./gov-history-gate";
@@ -111,6 +114,12 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
   // 앱별 댓글 응답 형태 차이 흡수: ERP={data:[...]}, 일루아={data:{illuaComments:[...]}},
   // 하이브 읽기전용={data:[...]}, 그 외 {data:{comments:[...]}} / {data:{hiveComments:[...]}}.
   const j = await res.json().catch(() => null);
+  // ★실패를 "빈 목록 성공"으로 바꾸지 않는다(2026-08-26 배포본 브라우저 확인에서 발견).
+  //  로그인이 풀린 상태(401)에서 등록을 누르면 여기가 빈 배열을 돌려줘, 화면 목록이 통째로
+  //  비워지고 입력칸까지 지워져 **방금 쓴 글이 흔적 없이 사라졌다.** 실제로 재현했다.
+  //  오류를 던지면 위 부품이 친 글을 그대로 남기고 왜 실패했는지 안내한다.
+  const bad = checkApiResult(res, j);
+  if (bad !== "none") throw makePersistError(bad, failureReason(bad));
   const d = (j as { data?: unknown } | null)?.data as
     | UnifiedComment[]
     | { comments?: UnifiedComment[]; illuaComments?: UnifiedComment[]; hiveComments?: UnifiedComment[] }
