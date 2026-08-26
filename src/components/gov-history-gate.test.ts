@@ -36,3 +36,52 @@ describe("resolveHistoryGate", () => {
     expect(resolveHistoryGate({ entryId: "", canEditValues: false, canWriteHistory: true, hasCreateContract: false })).toBe("empty");
   });
 });
+
+describe("resolveHistoryGate — 불러오기 실패 (2026-08-26 히스토리 유실 2단계)", () => {
+  it("★못 불러온 상태면 첫 메모 입력칸을 열지 않는다 — 거기 저장하면 새 계약 줄이 생긴다", () => {
+    expect(
+      resolveHistoryGate({
+        entryId: "",
+        canEditValues: true,
+        canWriteHistory: true,
+        hasCreateContract: true,
+        rowsLoadFailed: true,
+      }),
+    ).toBe("loadFailed");
+  });
+
+  it("못 불러왔어도 이미 항목이 있으면 기존 히스토리 화면을 그대로 연다", () => {
+    expect(
+      resolveHistoryGate({
+        entryId: "e1",
+        canEditValues: true,
+        canWriteHistory: true,
+        hasCreateContract: true,
+        rowsLoadFailed: true,
+      }),
+    ).toBe("panel");
+  });
+
+  it("실패 표시를 안 넘기면 예전과 똑같이 동작한다(다른 앱·호출부 회귀 없음)", () => {
+    expect(
+      resolveHistoryGate({
+        entryId: "",
+        canEditValues: true,
+        canWriteHistory: false,
+        hasCreateContract: true,
+      }),
+    ).toBe("composer");
+  });
+
+  it("실패 표시가 거짓이면 예전과 똑같다", () => {
+    expect(
+      resolveHistoryGate({
+        entryId: "",
+        canEditValues: false,
+        canWriteHistory: true,
+        hasCreateContract: true,
+        rowsLoadFailed: false,
+      }),
+    ).toBe("composer");
+  });
+});

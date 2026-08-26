@@ -27,6 +27,7 @@ import {
   type SectionPanelProps,
   type ScoreCardDef,
   COMMON_BASIC_FIELD_SPECS,
+  useDetailLoadState,
 } from "@wedly/ui-shared";
 import SettlementInfoTabBase from "./SettlementInfoTab";
 import type { SelectDropdownColorFamily } from "./SelectDropdown";
@@ -195,7 +196,9 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 히스토리 게이트 — 항목 없어도 편집 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
     // 식별값(사업자번호/연락처)이 없어도 열린다 — 자동생성 항목은 앵커 꼬리표(_anchorRef, 각 앱 prefill 부여)로
     // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
-    const historyGate = resolveHistoryGate({ entryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract) });
+    // 상세창이 분야 행 목록을 못 불러왔나 — 상자가 없는 호출부는 항상 거짓이라 동작 그대로.
+    const { rowsLoadFailed } = useDetailLoadState();
+    const historyGate = resolveHistoryGate({ entryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
@@ -417,7 +420,25 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   pollingIntervalMs={5000}
                   shareEnabled={false}
                   hideCategories
+                  draftId={entryId}
                 />
+              ) : historyGate === "loadFailed" ? (
+                <div className="flex items-start gap-2.5 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-3">
+                  <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-wedly-red">
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                      <path d="M12 9v4" />
+                      <path d="M12 17h.01" />
+                    </svg>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold text-wedly-red-ink break-keep">계약 정보를 불러오지 못했어요</p>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-wedly-t2 break-keep">
+                      지금 글을 남기면 이 회사에 계약 줄이 새로 생길 수 있어 입력을 잠갔습니다.
+                      화면을 새로 고친 뒤 다시 열어 주세요.
+                    </p>
+                  </div>
+                </div>
               ) : historyGate === "composer" ? (
                 <FirstHistoryComposer
                   onAdd={async (text) => {
