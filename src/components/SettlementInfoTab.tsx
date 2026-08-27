@@ -1841,7 +1841,11 @@ export default function SettlementInfoTab({
         <div className="rounded-2xl border-2 border-wedly-accent/30 bg-wedly-bg-blue/10 p-4 space-y-2">
           <p className="text-[12px] font-semibold text-wedly-accent-ink mb-2">
             컬럼 정의 (전체 차수에 적용됨)
-            <span className="ml-2 text-[10px] font-normal text-wedly-muted">⋮⋮ 드래그하여 순서 변경</span>
+            {/* 순서 드래그가 잠긴 앱(하이브 정부지원금)에서는 안내도 띄우지 않는다 —
+                할 수 없는 조작을 안내하면 그 자체가 결함으로 보인다(배포본 QA 2026-08-27). */}
+            {allowColumnReorder && (
+              <span className="ml-2 text-[10px] font-normal text-wedly-muted">⋮⋮ 드래그하여 순서 변경</span>
+            )}
           </p>
           {allowRowLayoutEdit && (
             <>

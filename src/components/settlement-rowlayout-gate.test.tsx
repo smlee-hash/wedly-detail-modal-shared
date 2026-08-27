@@ -51,6 +51,13 @@ describe("allowRowLayoutEdit — 소스 구조", () => {
     expect(handle - guard).toBeLessThan(300);
   });
 
+  it("순서 안내 문구(⋮⋮ 드래그하여 순서 변경)도 같은 문지기 안에 있다", () => {
+    const idx = SRC.indexOf("⋮⋮ 드래그하여 순서 변경");
+    expect(idx).toBeGreaterThan(-1);
+    // 그 문구 바로 앞 300자 안에 문지기가 있어야 한다.
+    expect(SRC.slice(Math.max(0, idx - 300), idx)).toContain("{allowColumnReorder && (");
+  });
+
   it("삭제·순서 prop 기본값도 true 라 기존 호출부는 그대로다", () => {
     expect(SRC).toContain("allowColumnDelete = true,");
     expect(SRC).toContain("allowColumnReorder = true,");
