@@ -109,11 +109,27 @@ describe("visibleTierLayout — 정의는 두고 그릴 목록·배치만 다시
     expect(result.rowLayout).toEqual([3]);
   });
 
-  it("1·2·3 밖의 숫자는 한 줄 1칸으로 본다", () => {
+  it("1·2·3 밖의 숫자는 한 줄 1칸으로 본다 (마지막 [2] 줄은 칸이 하나뿐이어도 2칸 폭 그대로)", () => {
     const fields = numbered(4);
     const result = visibleTierLayout(fields, [0, 4, 1, 2], () => false);
     expect(result.fields).toEqual(fields);
-    expect(result.rowLayout).toEqual([1, 1, 1, 1]);
+    // 0·4 → 1칸, 1 → 1칸, 2 → 2칸(칸은 f4 하나뿐이지만 폭은 원래대로 절반).
+    expect(result.rowLayout).toEqual([1, 1, 1, 2]);
+  });
+
+  it("마지막 줄이 덜 차 있어도 숨김이 없으면 폭이 그대로다 (적대적 리뷰 지적 — 폭이 1/3→1/2 로 바뀌던 것)", () => {
+    const fields = numbered(2);
+    const result = visibleTierLayout(fields, [3], () => false);
+    expect(result.fields).toEqual(fields);
+    // 칸은 2개뿐이지만 그 줄은 원래 3칸 폭이었다 — 다시 세면 안 된다.
+    expect(result.rowLayout).toEqual([3]);
+  });
+
+  it("덜 찬 줄에서 하나를 숨기면 그때는 남은 칸 수로 좁힌다", () => {
+    const fields = numbered(2).map((f, i) => (i === 0 ? { ...f, hidden: true } : f));
+    const result = visibleTierLayout(fields, [3], tierFieldHidden);
+    expect(result.fields.map((f) => f.key)).toEqual(["f2"]);
+    expect(result.rowLayout).toEqual([1]);
   });
 
   it("fields 가 빈 배열이면 빈 결과를 돌려준다", () => {

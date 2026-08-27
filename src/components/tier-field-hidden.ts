@@ -29,6 +29,11 @@ export function carryFieldHidden<T extends object>(from: unknown, to: T): T {
  * 저장된 rowLayout 은 건드리지 않고, 화면에 그릴 목록과 배치를 새로 계산한다.
  * 줄 묶음을 유지한 채 그 줄의 칸 수만 줄인다 — 3칸씩 다시 채우지 않는다.
  * (그래야 「국세환급액 / 수수료율 / 수수료」 같은 뜻 묶음이 줄을 넘어 흩어지지 않는다.)
+ *
+ * ★ 그 줄에서 아무것도 안 숨겼으면 **원래 칸 수를 그대로** 넘긴다.
+ *   마지막 줄이 덜 찬 카드(예: 칸 2개인데 배치가 [3])에서 칸 수를 다시 세면
+ *   숨김을 안 쓰는 화면인데도 폭이 1/3 → 1/2 로 바뀐다(적대적 리뷰 지적).
+ *   숨긴 칸이 하나도 없으면 결과가 입력과 완전히 같아야 한다.
  */
 export function visibleTierLayout<T>(
   fields: T[],
@@ -46,7 +51,8 @@ export function visibleTierLayout<T>(
     const remaining = row.filter((f) => !isHidden(f));
     if (remaining.length === 0) continue;
     shown.push(...remaining);
-    layout.push(remaining.length);
+    // 이 줄에서 뺀 게 없으면 원래 칸 수(cols) 그대로 — 뺐을 때만 남은 칸 수로 좁힌다.
+    layout.push(remaining.length === row.length ? cols : remaining.length);
   }
   while (i < fields.length) {
     const f = fields[i];

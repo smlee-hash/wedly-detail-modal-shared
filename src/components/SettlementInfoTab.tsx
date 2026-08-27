@@ -2911,7 +2911,9 @@ function TierCard({
         </div>
       </div>
       {/* 차수 카드 칸 배치 — 줄별 칸 수(rowLayout)대로 가로 묶음. 위에서부터 채우고, 남는 칸은 한 줄 1칸씩. */}
-      {open && (
+      {/* 칸이 전부 숨김이면 몸통 자체를 그리지 않는다 — 안 그러면 제목 아래 빈 여백만 남는다.
+          (칸이 진짜로 0개인 경우와는 다르다. 그때는 아래 안내를 띄운다.) */}
+      {open && !(fields.length > 0 && visible.fields.length === 0) && (
         <div className="p-3 space-y-2">
           {fields.length === 0 ? (
             <div className="px-4 py-6 text-center text-[12px] text-wedly-muted">
