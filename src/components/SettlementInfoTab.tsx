@@ -168,6 +168,8 @@ export default function SettlementInfoTab({
   allowColumnEdit,
   // 칸 범위 모드: off(현행·토글없음) | erp(공통/커스텀 선택) | partner-custom(커스텀고정·공통잠금)
   columnScopeMode = "off",
+  // 「줄별 칸 수」 편집. 기본 true = 기존 호출부 그대로. 하이브 파트너 칸 편집에서는 끈다(3앱 공용 배치).
+  allowRowLayoutEdit = true,
   // 이 차수 칸을 도메인 "표"에 차수별 줄로 노출하는 "표 노출" 토글 버튼 허용 여부 — 기본 false.
   //   실제 표 렌더가 구현된 도메인(1단계=경정청구)에서만 true 로 켠다. 다른 도메인은 버튼 자체가 안 뜬다.
   allowTableExpose = false,
@@ -216,6 +218,8 @@ export default function SettlementInfoTab({
   allowColumnEdit?: boolean;
   // 칸 범위 모드(공통/커스텀). 기본 off = 현행 동작.
   columnScopeMode?: "off" | "erp" | "partner-custom";
+  // 「줄별 칸 수」 편집 허용. 기본 true — 기존 호출부는 그대로.
+  allowRowLayoutEdit?: boolean;
   // "표 노출" 토글 버튼 허용(표 렌더 구현 도메인 전용). 기본 false = 버튼 숨김.
   allowTableExpose?: boolean;
   // 수수료 계산식의 '반올림 추가'·'내림 추가' 단추 허용. 기본 false = 단추 숨김(ERP 만 켠다).
@@ -1827,6 +1831,8 @@ export default function SettlementInfoTab({
             컬럼 정의 (전체 차수에 적용됨)
             <span className="ml-2 text-[10px] font-normal text-wedly-muted">⋮⋮ 드래그하여 순서 변경</span>
           </p>
+          {allowRowLayoutEdit && (
+            <>
           {/* 줄별 칸 수 — 줄마다 가로 칸 수(1·2·3)를 따로 고른다. 위에서부터 순서대로 칸을 채움. 위들리 디자인 드롭다운 사용. */}
           {(() => {
             const saveLayout = (next: number[]) => {
@@ -1906,6 +1912,8 @@ export default function SettlementInfoTab({
               </div>
             );
           })()}
+            </>
+          )}
           {fields.map((f, idx) => {
             const isDragging = dragIdx === idx;
             const isDragOver = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;

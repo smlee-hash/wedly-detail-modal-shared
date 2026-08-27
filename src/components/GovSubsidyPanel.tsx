@@ -35,6 +35,7 @@ import {
 import SettlementInfoTabBase from "./SettlementInfoTab";
 import { resolveHistoryGate } from "./gov-history-gate";
 import { buildGovEvalBase } from "./gov-eval-context";
+import { resolveGovFieldEditProps, shouldShowAddContract } from "./gov-field-edit-gate";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
 const SettlementInfoTab = SettlementInfoTabBase as unknown as ComponentType<Record<string, unknown>>;
@@ -55,6 +56,8 @@ export type GovSubsidyPanelConfig = {
   editable: boolean;
   /** 칸/카드 정의(구조) 편집 허용. ERP만 true(정의는 한 곳에서). 일루아·하이브 false. */
   allowStructureEdit: boolean;
+  /** 하이브 전용: 자기 앱 커스텀 칸만 관리자가 추가·수정. ERP 구조 편집이 켜져 있으면 무시된다(기존 ERP 동작 보존). */
+  allowPartnerFieldEdit?: boolean;
   /** 관리자가 아니어도 값(계약정보·정산 등) 수정·신규 추가 허용(옵트인). 미설정 시 기존대로 관리자만.
    *  구조/칸 정의 편집은 이 플래그와 무관하게 항상 실제 관리자만(allowStructureEdit && isAdmin). */
   allowNonAdminEdit?: boolean;
@@ -309,12 +312,16 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 계약/정산/환불 공통 prop — 공용 저장소 설정·합계카드로 3앱 동일 렌더.
     // row: 평가 바탕 행(evalBase = 경정청구 행+primaryRow+공통 칸 채움) + 정산 행(data) — 정산 키가 우선(덮어씀).
     //   conditionValues 는 row 에서 오므로, 조건 기준 칸(27주소지·DB분류·영업담당)이 전 화면에서 채워진다(NO.125 반려 재작업).
+    const fieldEdit = resolveGovFieldEditProps({ allowStructureEdit: config.allowStructureEdit, allowPartnerFieldEdit: config.allowPartnerFieldEdit }, isAdmin);
     const settlementCommon: Record<string, unknown> = {
       row: { ...evalBase, ...(data ?? {}) },
       isAdmin: canEditValues,
       readOnly: !canEditValues,
       allowStructureEdit: config.allowStructureEdit && isAdmin,
-      columnScopeMode: config.allowStructureEdit ? "erp" : "off",
+      columnScopeMode: fieldEdit.columnScopeMode,
+      allowCardEdit: fieldEdit.allowCardEdit,
+      allowColumnEdit: fieldEdit.allowColumnEdit,
+      allowRowLayoutEdit: fieldEdit.allowRowLayoutEdit,
       // 반올림·내림 항 추가 단추 — 앱이 켤 때만. 안 켜면 단추가 안 뜬다(하이브·일루아).
       allowStepTerms: config.allowStepTerms === true,
       ratioBaseKey: RATIO.baseKey,
@@ -324,7 +331,6 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       configApiPath: config.configPath,
       defaultScoreCards: DEFAULT_SCORE_CARDS,
       seedDefaultCardsForAllPrefixes: true,
-      addButtonSuffixOverride: "정산",
       enableConditionalFormula: config.enableConditionalFormula,
       conditionFieldOptions: condOpts,
     };
@@ -337,10 +343,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           </div>
         )}
 
-        {/* 계약이 여러 건일 때만 선택바 */}
-        {policyRows.length > 1 && (
+        {/* 계약 선택바 — 2건 이상이면 알약, 추가 버튼은 0~1건에서도 보임(이번 결함 수정) */}
+        {(policyRows.length > 1 || shouldShowAddContract({rowCount: policyRows.length, canEditValues, hasCreateContract: Boolean(config.createContract)})) && (
           <div className="flex items-center gap-1 overflow-x-auto px-4 pt-3">
-            {policyRows.map((r, i) => (
+            {policyRows.length > 1 && policyRows.map((r, i) => (
               <button
                 key={r.entryId}
                 onClick={() => setSel(i)}
@@ -351,13 +357,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 계약 {i + 1}
               </button>
             ))}
-            {canEditValues && config.createContract && (
+            {shouldShowAddContract({rowCount: policyRows.length, canEditValues, hasCreateContract: Boolean(config.createContract)}) && (
               <button
                 onClick={addContract}
                 disabled={busy}
-                className="ml-1 flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1 disabled:opacity-50"
+                className="ml-1 flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1 disabled:opacity-50 border border-dashed border-wedly-bd"
               >
-                + 추가
+                {policyRows.length > 0 ? "+ 계약 추가" : "+ 첫 계약 만들기"}
               </button>
             )}
           </div>
