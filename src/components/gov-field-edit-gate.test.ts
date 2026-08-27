@@ -49,17 +49,18 @@ describe("shouldShowAddContract", () => {
   it("계약이 0건이어도 편집 가능하고 생성기가 있으면 보인다(이번 수정의 핵심)", () => {
     expect(shouldShowAddContract({ ...base, rowCount: 0 })).toBe(true);
   });
-  it("계약이 1건일 때도 보인다(예전엔 2건 이상만 보였다)", () => {
-    expect(shouldShowAddContract({ ...base, rowCount: 1 })).toBe(true);
+  it("★계약이 이미 1건 있으면 감춘다 — 두 번째 계약은 상세창에 자리가 없어 안 보인다", () => {
+    expect(shouldShowAddContract({ ...base, rowCount: 1 })).toBe(false);
+    expect(shouldShowAddContract({ ...base, rowCount: 3 })).toBe(false);
   });
   it("보기 전용 앱에서는 안 보인다", () => {
-    expect(shouldShowAddContract({ ...base, rowCount: 3, canEditValues: false })).toBe(false);
+    expect(shouldShowAddContract({ ...base, rowCount: 0, canEditValues: false })).toBe(false);
   });
   it("생성 통로가 없는 앱에서는 안 보인다", () => {
-    expect(shouldShowAddContract({ ...base, rowCount: 3, hasCreateContract: false })).toBe(false);
+    expect(shouldShowAddContract({ ...base, rowCount: 0, hasCreateContract: false })).toBe(false);
   });
   it("★폴백 줄(정부지원금·무상지원금)을 띄운 상태면 감춘다 — 누르면 그 줄과 히스토리가 사라진다", () => {
-    expect(shouldShowAddContract({ ...base, rowCount: 1, isFallbackRows: true })).toBe(false);
+    expect(shouldShowAddContract({ ...base, rowCount: 0, isFallbackRows: true })).toBe(false);
   });
   it("★분야 행을 못 불러온 상태면 감춘다 — 서버엔 이미 계약이 있을 수 있다", () => {
     expect(shouldShowAddContract({ ...base, rowsLoadFailed: true })).toBe(false);

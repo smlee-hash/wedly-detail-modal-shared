@@ -53,6 +53,16 @@ export function resolveGovFieldEditProps(
   };
 }
 
+/**
+ * 「계약 추가」 단추를 띄울까.
+ *
+ * ★계약이 이미 1건 이상이면 띄우지 않는다 (배포본 QA 2026-08-27 실측).
+ *   공용 상세창은 한 분야당 행을 **하나만** 집어 온다(ui-shared rowsOfGroup 의 find).
+ *   그래서 두 번째 계약을 만들면 서버엔 생기는데 상세창에는 자리가 없어 **보이지 않는다** —
+ *   누를수록 안 보이는 계약이 쌓인다. 실제로 만들어 보고 확인했고, 만든 줄은 ERP 통로로 지웠다.
+ *   계약이 0건일 때만(= 만들면 그 줄이 바로 보이는 경우만) 띄운다.
+ *   여러 계약을 상세창에서 다루려면 공용 상세창이 한 분야의 여러 줄을 받도록 먼저 고쳐야 한다.
+ */
 export function shouldShowAddContract(input: {
   rowCount: number;
   canEditValues: boolean;
@@ -68,5 +78,7 @@ export function shouldShowAddContract(input: {
   if (!input.canEditValues || !input.hasCreateContract) return false;
   if (input.rowsLoadFailed) return false;
   if (input.isFallbackRows) return false;
+  // 이미 계약이 있으면 새로 만들어도 상세창에 안 보인다 — 위 주석 참고.
+  if (input.rowCount > 0) return false;
   return true;
 }

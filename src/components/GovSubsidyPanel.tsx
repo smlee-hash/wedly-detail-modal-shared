@@ -375,7 +375,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 disabled={busy}
                 className="ml-1 flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1 disabled:opacity-50 border border-dashed border-wedly-bd"
               >
-                {policyRows.length > 0 ? "+ 계약 추가" : "+ 첫 계약 만들기"}
+                + 첫 계약 만들기
               </button>
             )}
           </div>
