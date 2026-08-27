@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { displayOrderNewestFirst } from "./tier-render-order";
 import { tierFieldLock, carryFieldLock } from "./tier-field-lock";
+import { tierFieldHidden, carryFieldHidden, visibleTierLayout } from "./tier-field-hidden";
 import { roundTermIssue, chainKind, applyTermPatch } from "./round-term-rules";
 import { createPortal } from "react-dom";
 import {
@@ -942,7 +943,7 @@ export default function SettlementInfoTab({
           if (keepDescription) (nf as unknown as Record<string, unknown>).description = keepDescription;
           // 칸 잠금 표시도 함께 옮긴다 — 안 옮기면 잠긴 칸이 다시 열려
           // "고를 수는 있는데 저장은 안 되는" 상태가 된다(일루아 08-07 수정분).
-          return carryFieldLock(f, nf);
+          return carryFieldHidden(f, carryFieldLock(f, nf));
         }
         // select 로 바꾸면 보기 목록을 싣는다 (범위 scope 는 유지)
         if (newType === "select") {
@@ -951,14 +952,14 @@ export default function SettlementInfoTab({
           if (keepTableExposed) (sel as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
           if (keepDescription) (sel as unknown as Record<string, unknown>).description = keepDescription;
           if (f.optionColors) sel.optionColors = f.optionColors;
-          return carryFieldLock(f, sel);
+          return carryFieldHidden(f, carryFieldLock(f, sel));
         }
         // 수식이 아닌 타입으로 바꾸면 수식·조건 옵션은 제거 (범위 scope 는 유지)
         const convField: FieldDef = { key: f.key, label: f.label, type: newType };
         if (keepScope) (convField as unknown as Record<string, unknown>).scope = keepScope;
         if (keepTableExposed) (convField as unknown as Record<string, unknown>).tableExposed = keepTableExposed;
         if (keepDescription) (convField as unknown as Record<string, unknown>).description = keepDescription;
-        return carryFieldLock(f, convField);
+        return carryFieldHidden(f, carryFieldLock(f, convField));
       });
       setFields(next);
       persistFields(next);
@@ -2838,6 +2839,13 @@ function TierCard({
   // 변수 미사용 경고 차단 (옛 onLabelChange 는 이제 안 호출 — 차수별 라벨 편집 폐기)
   void onLabelChange;
 
+  // 정의는 그대로 두고 그릴 목록·배치만 다시 계산한다. 숨긴 칸을 정의에서 빼면
+  // 다음 저장 때 값이 사라지고 수식이 0 으로 틀어진다.
+  const visible = useMemo(
+    () => visibleTierLayout(fields, rowLayout, (f) => tierFieldHidden(f)),
+    [fields, rowLayout],
+  );
+
   return (
     <div className="rounded-2xl border border-wedly-bd bg-white shadow-sm overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-wedly-bd/40 bg-wedly-bg-gray/30">
@@ -2899,7 +2907,7 @@ function TierCard({
               컬럼이 없습니다. 위의 &quot;컬럼 편집&quot;에서 추가하세요.
             </div>
           ) : (
-            groupFieldsByRowLayout(fields, rowLayout).map((grp, gi) => (
+            groupFieldsByRowLayout(visible.fields, visible.rowLayout).map((grp, gi) => (
               <div
                 key={gi}
                 className={`grid ${grp.cols === 3 ? "grid-cols-3" : grp.cols === 2 ? "grid-cols-2" : "grid-cols-1"} gap-2`}
