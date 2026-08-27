@@ -52,33 +52,3 @@ export function resolveGovFieldEditProps(
     allowColumnReorder: false,
   };
 }
-
-/**
- * 「계약 추가」 단추를 띄울까.
- *
- * ★계약이 이미 1건 이상이면 띄우지 않는다 (배포본 QA 2026-08-27 실측).
- *   공용 상세창은 한 분야당 행을 **하나만** 집어 온다(ui-shared rowsOfGroup 의 find).
- *   그래서 두 번째 계약을 만들면 서버엔 생기는데 상세창에는 자리가 없어 **보이지 않는다** —
- *   누를수록 안 보이는 계약이 쌓인다. 실제로 만들어 보고 확인했고, 만든 줄은 ERP 통로로 지웠다.
- *   계약이 0건일 때만(= 만들면 그 줄이 바로 보이는 경우만) 띄운다.
- *   여러 계약을 상세창에서 다루려면 공용 상세창이 한 분야의 여러 줄을 받도록 먼저 고쳐야 한다.
- */
-export function shouldShowAddContract(input: {
-  rowCount: number;
-  canEditValues: boolean;
-  hasCreateContract: boolean;
-  /** 지금 보여 주는 계약 줄이 「폴백」인가 — 정책자금 줄이 없어 정부지원금·무상지원금 줄을 대신 띄운 상태.
-   *  이때 새 정책자금 계약을 만들면 filterPolicyRows 가 정책 줄만 돌려주게 되어,
-   *  화면에 떠 있던 폴백 줄과 그 히스토리가 그 자리에서 사라진다(적대적 리뷰 지적). 그래서 단추를 감춘다. */
-  isFallbackRows: boolean;
-  /** 분야 행 목록을 못 불러온 상태인가 — 서버엔 이미 계약이 있는데 화면만 0건일 수 있어,
-   *  그때 누르면 있는 계약을 못 본 채 계약을 하나 더 만든다. 히스토리 입력 게이트와 같은 기준. */
-  rowsLoadFailed: boolean;
-}): boolean {
-  if (!input.canEditValues || !input.hasCreateContract) return false;
-  if (input.rowsLoadFailed) return false;
-  if (input.isFallbackRows) return false;
-  // 이미 계약이 있으면 새로 만들어도 상세창에 안 보인다 — 위 주석 참고.
-  if (input.rowCount > 0) return false;
-  return true;
-}

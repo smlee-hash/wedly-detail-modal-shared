@@ -35,7 +35,7 @@ import {
 import SettlementInfoTabBase from "./SettlementInfoTab";
 import { resolveHistoryGate } from "./gov-history-gate";
 import { buildGovEvalBase } from "./gov-eval-context";
-import { resolveGovFieldEditProps, shouldShowAddContract } from "./gov-field-edit-gate";
+import { resolveGovFieldEditProps } from "./gov-field-edit-gate";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
 const SettlementInfoTab = SettlementInfoTabBase as unknown as ComponentType<Record<string, unknown>>;
@@ -313,16 +313,6 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // row: 평가 바탕 행(evalBase = 경정청구 행+primaryRow+공통 칸 채움) + 정산 행(data) — 정산 키가 우선(덮어씀).
     //   conditionValues 는 row 에서 오므로, 조건 기준 칸(27주소지·DB분류·영업담당)이 전 화면에서 채워진다(NO.125 반려 재작업).
     const fieldEdit = resolveGovFieldEditProps({ allowStructureEdit: config.allowStructureEdit, allowPartnerFieldEdit: config.allowPartnerFieldEdit }, isAdmin);
-    // 지금 띄운 계약 줄이 정책자금(자기 분야)이 아니라 폴백(정부지원금·무상지원금)이면
-    // 계약을 새로 만드는 순간 그 줄과 히스토리가 화면에서 사라진다 — 그래서 단추를 감춘다.
-    const isFallbackRows = policyRows.length > 0 && policyRows.some((r) => r.domain !== "policy-fund");
-    const addContractGate = {
-      rowCount: policyRows.length,
-      canEditValues,
-      hasCreateContract: Boolean(config.createContract),
-      isFallbackRows,
-      rowsLoadFailed,
-    };
     const settlementCommon: Record<string, unknown> = {
       row: { ...evalBase, ...(data ?? {}) },
       isAdmin: canEditValues,
@@ -355,10 +345,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           </div>
         )}
 
-        {/* 계약 선택바 — 2건 이상이면 알약, 추가 버튼은 0~1건에서도 보임(이번 결함 수정) */}
-        {(policyRows.length > 1 || shouldShowAddContract(addContractGate)) && (
+        {/* 계약이 여러 건일 때만 선택바 */}
+        {policyRows.length > 1 && (
           <div className="flex items-center gap-1 overflow-x-auto px-4 pt-3">
-            {policyRows.length > 1 && policyRows.map((r, i) => (
+            {policyRows.map((r, i) => (
               <button
                 key={r.entryId}
                 onClick={() => setSel(i)}
@@ -369,13 +359,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 계약 {i + 1}
               </button>
             ))}
-            {shouldShowAddContract(addContractGate) && (
+            {canEditValues && config.createContract && (
               <button
                 onClick={addContract}
                 disabled={busy}
-                className="ml-1 flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1 disabled:opacity-50 border border-dashed border-wedly-bd"
+                className="ml-1 flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1 disabled:opacity-50"
               >
-                + 첫 계약 만들기
+                + 추가
               </button>
             )}
           </div>
