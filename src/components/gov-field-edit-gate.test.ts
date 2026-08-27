@@ -8,6 +8,8 @@ describe("resolveGovFieldEditProps", () => {
     expect(p.allowColumnEdit).toBeUndefined();
     expect(p.columnScopeMode).toBe("erp");
     expect(p.allowRowLayoutEdit).toBe(true);
+    expect(p.allowColumnDelete).toBe(true);
+    expect(p.allowColumnReorder).toBe(true);
   });
 
   it("옵션을 안 켠 앱(일루아)은 예전 그대로 잠김", () => {
@@ -24,6 +26,9 @@ describe("resolveGovFieldEditProps", () => {
     expect(p.allowColumnEdit).toBe(true);
     expect(p.columnScopeMode).toBe("partner-custom");
     expect(p.allowRowLayoutEdit).toBe(false);
+    // 사장님 지시는 "입력하고 수정" — 삭제와 순서 드래그는 열지 않는다.
+    expect(p.allowColumnDelete).toBe(false);
+    expect(p.allowColumnReorder).toBe(false);
   });
 
   it("하이브 비관리자는 칸 편집이 안 열린다(값 수정과 분리)", () => {

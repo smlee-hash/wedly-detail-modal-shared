@@ -31,6 +31,30 @@ describe("allowRowLayoutEdit — 소스 구조", () => {
   it("prop 기본값이 true 라 기존 호출부(ERP·경정청구·일루아)는 그대로다", () => {
     expect(SRC).toContain("allowRowLayoutEdit = true,");
   });
+
+  it("칸 「삭제」 단추가 allowColumnDelete 문지기 안에 있다", () => {
+    const guard = SRC.indexOf("{allowColumnDelete && (");
+    const btn = SRC.indexOf("removeFieldDef(f.key)");
+    expect(guard).toBeGreaterThan(-1);
+    expect(btn).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(btn);
+    expect(btn - guard).toBeLessThan(200);
+  });
+
+  it("드래그 핸들과 draggable 이 allowColumnReorder 문지기 안에 있다", () => {
+    expect(SRC).toContain("draggable={allowColumnReorder}");
+    const guard = SRC.indexOf("{allowColumnReorder && (");
+    expect(guard).toBeGreaterThan(-1);
+    // 같은 글귀가 앞쪽(칸 목록 안내문)에도 있어, 문지기 뒤에 오는 것을 집는다.
+    const handle = SRC.indexOf("드래그하여 순서 변경", guard);
+    expect(handle).toBeGreaterThan(-1);
+    expect(handle - guard).toBeLessThan(300);
+  });
+
+  it("삭제·순서 prop 기본값도 true 라 기존 호출부는 그대로다", () => {
+    expect(SRC).toContain("allowColumnDelete = true,");
+    expect(SRC).toContain("allowColumnReorder = true,");
+  });
 });
 
 describe("allowRowLayoutEdit — 렌더", () => {

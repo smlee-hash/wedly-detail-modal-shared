@@ -332,6 +332,8 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       allowCardEdit: fieldEdit.allowCardEdit,
       allowColumnEdit: fieldEdit.allowColumnEdit,
       allowRowLayoutEdit: fieldEdit.allowRowLayoutEdit,
+      allowColumnDelete: fieldEdit.allowColumnDelete,
+      allowColumnReorder: fieldEdit.allowColumnReorder,
       // 반올림·내림 항 추가 단추 — 앱이 켤 때만. 안 켜면 단추가 안 뜬다(하이브·일루아).
       allowStepTerms: config.allowStepTerms === true,
       ratioBaseKey: RATIO.baseKey,

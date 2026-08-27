@@ -21,6 +21,10 @@ export type GovFieldEditProps = {
   columnScopeMode: "off" | "erp" | "partner-custom";
   /** 「줄별 칸 수」 편집 허용 */
   allowRowLayoutEdit: boolean;
+  /** 칸 삭제 허용 — 파트너 앱은 「입력·수정」까지만 연다(사장님 지시 2026-08-27) */
+  allowColumnDelete: boolean;
+  /** 칸 순서 드래그 허용 — 파트너 앱은 저장이 안 되는 거짓 동작이라 잠근다 */
+  allowColumnReorder: boolean;
 };
 
 export function resolveGovFieldEditProps(
@@ -35,6 +39,8 @@ export function resolveGovFieldEditProps(
       allowColumnEdit: undefined,
       columnScopeMode: config.allowStructureEdit ? "erp" : "off",
       allowRowLayoutEdit: true,
+      allowColumnDelete: true,
+      allowColumnReorder: true,
     };
   }
   return {
@@ -42,6 +48,8 @@ export function resolveGovFieldEditProps(
     allowColumnEdit: isAdmin,
     columnScopeMode: "partner-custom",
     allowRowLayoutEdit: false,
+    allowColumnDelete: false,
+    allowColumnReorder: false,
   };
 }
 

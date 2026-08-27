@@ -170,6 +170,14 @@ export default function SettlementInfoTab({
   columnScopeMode = "off",
   // 「줄별 칸 수」 편집. 기본 true = 기존 호출부 그대로. 하이브 파트너 칸 편집에서는 끈다(3앱 공용 배치).
   allowRowLayoutEdit = true,
+  // 칸 「삭제」 허용. 기본 true = 기존 호출부 그대로.
+  //   하이브 파트너 칸 편집에서는 끈다 — 사장님 지시가 "입력하고 수정"이고, 삭제는 정의 저장과
+  //   값 지우기가 따로 돌아 한쪽만 실패하면 값이 영영 사라진다(적대적 리뷰 2026-08-27 지적).
+  allowColumnDelete = true,
+  // 칸 순서 드래그 허용. 기본 true = 기존 호출부 그대로.
+  //   파트너 모드에서는 끈다 — 읽을 때 항상 "공통 먼저, 커스텀 나중"으로 다시 합쳐서,
+  //   커스텀 칸을 공통 칸 위로 옮기면 화면만 움직이고 새로고침하면 되돌아간다(거짓 동작).
+  allowColumnReorder = true,
   // 이 차수 칸을 도메인 "표"에 차수별 줄로 노출하는 "표 노출" 토글 버튼 허용 여부 — 기본 false.
   //   실제 표 렌더가 구현된 도메인(1단계=경정청구)에서만 true 로 켠다. 다른 도메인은 버튼 자체가 안 뜬다.
   allowTableExpose = false,
@@ -220,6 +228,10 @@ export default function SettlementInfoTab({
   columnScopeMode?: "off" | "erp" | "partner-custom";
   // 「줄별 칸 수」 편집 허용. 기본 true — 기존 호출부는 그대로.
   allowRowLayoutEdit?: boolean;
+  // 칸 삭제 허용. 기본 true — 기존 호출부는 그대로.
+  allowColumnDelete?: boolean;
+  // 칸 순서 드래그 허용. 기본 true — 기존 호출부는 그대로.
+  allowColumnReorder?: boolean;
   // "표 노출" 토글 버튼 허용(표 렌더 구현 도메인 전용). 기본 false = 버튼 숨김.
   allowTableExpose?: boolean;
   // 수수료 계산식의 '반올림 추가'·'내림 추가' 단추 허용. 기본 false = 단추 숨김(ERP 만 켠다).
@@ -1925,7 +1937,7 @@ export default function SettlementInfoTab({
             return (
               <div
                 key={f.key}
-                draggable
+                draggable={allowColumnReorder}
                 onDragStart={handleDragStart(idx)}
                 onDragOver={handleDragOver(idx)}
                 onDragLeave={handleDragLeave}
@@ -1933,13 +1945,15 @@ export default function SettlementInfoTab({
                 onDragEnd={handleDragEnd}
                 className={rowCn}
               >
-                <span
-                  className="cursor-grab active:cursor-grabbing text-wedly-muted hover:text-wedly-accent select-none px-1 -mx-1 text-[14px] leading-none"
-                  title="드래그하여 순서 변경"
-                  aria-label="드래그 핸들"
-                >
-                  ⋮⋮
-                </span>
+                {allowColumnReorder && (
+                  <span
+                    className="cursor-grab active:cursor-grabbing text-wedly-muted hover:text-wedly-accent select-none px-1 -mx-1 text-[14px] leading-none"
+                    title="드래그하여 순서 변경"
+                    aria-label="드래그 핸들"
+                  >
+                    ⋮⋮
+                  </span>
+                )}
                 <span className="text-[13px] font-medium text-wedly-t1 flex-1 min-w-0 truncate">{f.label}</span>
                 <span className="text-[10px] uppercase font-mono text-wedly-t2 bg-wedly-bg-gray px-1.5 py-0.5 rounded">{f.type}</span>
                 {columnScopeMode !== "off" && (
@@ -1974,7 +1988,9 @@ export default function SettlementInfoTab({
                         {(f as { tableExposed?: boolean }).tableExposed ? "표 노출 취소" : "표 노출"}
                       </button>
                     )}
-                    <button onClick={() => removeFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-red-ink hover:bg-wedly-bg-red">삭제</button>
+                    {allowColumnDelete && (
+                      <button onClick={() => removeFieldDef(f.key)} className="text-[11px] px-2 py-1 rounded text-wedly-red-ink hover:bg-wedly-bg-red">삭제</button>
+                    )}
                   </>
                 )}
               </div>
