@@ -33,6 +33,7 @@ import {
   failureReason,
 } from "@wedly/ui-shared";
 import SettlementInfoTabBase from "./SettlementInfoTab";
+import { GOV_SUB_TABS, resolveGovSubTab, type GovSubTab } from "./gov-subtab";
 import type { SelectDropdownColorFamily } from "./SelectDropdown";
 import { resolveHistoryGate } from "./gov-history-gate";
 import { buildGovEvalBase } from "./gov-eval-context";
@@ -104,19 +105,8 @@ export type GovSubsidyPanelConfig = {
   colorFamilies?: SelectDropdownColorFamily[];
 };
 
-type SubTab = "history" | "contract" | "settlement" | "refund" | "meetings";
-const SUB_TABS: { key: SubTab; label: string }[] = [
-  { key: "history", label: "히스토리" },
-  { key: "contract", label: "계약정보" },
-  { key: "settlement", label: "정산정보" },
-  { key: "refund", label: "환불정보" },
-  { key: "meetings", label: "미팅정보" },
-];
-
-/** 바깥이 준 탭 키가 이 패널 하위 탭인지. 'files' 같은 바깥 전용 키는 폴백으로 넘긴다. */
-function isGovSubTab(value: string | undefined): value is SubTab {
-  return value === "history" || value === "contract" || value === "settlement" || value === "refund" || value === "meetings";
-}
+type SubTab = GovSubTab;
+const SUB_TABS = GOV_SUB_TABS;
 
 async function commentsJson(res: Response): Promise<UnifiedComment[]> {
   // 앱별 댓글 응답 형태 차이 흡수: ERP={data:[...]}, 일루아={data:{illuaComments:[...]}},
@@ -169,19 +159,19 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 항목이 없어도 히스토리로 먼저 연다 — 첫 메모 입력칸(또는 안내)이 바로 보이게(재작업 2026-07-15).
     // 기존엔 항목 없으면 '계약정보'로 열려, 첫 메모 입력이 가능한지 알기 어려웠다.
     const [subTab, setSubTab] = useState<SubTab>("history");
-    // 제어 모드는 콜백이 함수일 때만. 바깥 키가 이 패널 탭이 아니면(예: 'files') 내부 상태를 폴백에 넘긴다.
-    const isSubTabControlled = typeof onSubTabChange === "function";
-    const requestedSubTab: SubTab =
-      isSubTabControlled && isGovSubTab(subTabProp) ? subTabProp : subTab;
-    // ★ 폴백은 prop 을 넘긴 쪽(3분할)에서만 — 미전달이면 requestedSubTab 그대로(기존 앱 렌더 불변).
+    // 제어 모드 = 콜백이 있고 + 바깥이 탭 줄을 그린다(hideSubTabBar). 판정 근거는 resolveGovSubTab 주석.
+    const isSubTabControlled = typeof onSubTabChange === "function" && hideSubTabBar === true;
+    // ★ 폴백은 prop 을 넘긴 쪽(3분할)에서만 — 미전달이면 그대로(기존 앱 렌더 불변).
     const displaySubTabs = hiddenSubTabs?.length
       ? SUB_TABS.filter((t) => !hiddenSubTabs.includes(t.key))
       : SUB_TABS;
-    const shownSubTab: SubTab = historyOnly
-      ? "history"
-      : !hiddenSubTabs?.length || displaySubTabs.some((t) => t.key === requestedSubTab)
-        ? requestedSubTab
-        : ((displaySubTabs[0]?.key as SubTab | undefined) ?? requestedSubTab);
+    const shownSubTab: SubTab = resolveGovSubTab({
+      subTabProp,
+      internal: subTab,
+      controlled: isSubTabControlled,
+      hiddenSubTabs,
+      historyOnly,
+    });
     const [sel, setSel] = useState(0);
     const [err, setErr] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
@@ -506,7 +496,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
           {shownSubTab === "meetings" && (
             <div className="p-4">
-              <MeetingsTab readOnly={!canEditValues} rawValue={data["_meetings"] ?? null} onSave={canEditValues ? (json: string) => saveOrCreate("_meetings", json) : () => {}} />
+              {/* 미팅 부품은 앱이 주입한다 — 안 넣은 앱에서 그대로 그리면 상세창이 통째로 흰 화면이 된다.
+                  NO.190 전에는 이 탭이 3분할에서 아예 안 열려 드러날 일이 없었다(적대적 리뷰 지적). */}
+              {MeetingsTab ? (
+                <MeetingsTab readOnly={!canEditValues} rawValue={data["_meetings"] ?? null} onSave={canEditValues ? (json: string) => saveOrCreate("_meetings", json) : () => {}} />
+              ) : (
+                <p className="text-[13px] text-wedly-muted">이 앱에서는 미팅정보를 볼 수 없습니다.</p>
+              )}
             </div>
           )}
         </div>
