@@ -113,6 +113,11 @@ const SUB_TABS: { key: SubTab; label: string }[] = [
   { key: "meetings", label: "미팅정보" },
 ];
 
+/** 바깥이 준 탭 키가 이 패널 하위 탭인지. 'files' 같은 바깥 전용 키는 폴백으로 넘긴다. */
+function isGovSubTab(value: string | undefined): value is SubTab {
+  return value === "history" || value === "contract" || value === "settlement" || value === "refund" || value === "meetings";
+}
+
 async function commentsJson(res: Response): Promise<UnifiedComment[]> {
   // 앱별 댓글 응답 형태 차이 흡수: ERP={data:[...]}, 일루아={data:{illuaComments:[...]}},
   // 하이브 읽기전용={data:[...]}, 그 외 {data:{comments:[...]}} / {data:{hiveComments:[...]}}.
@@ -146,6 +151,8 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     historyOnly,
     hiddenSubTabs,
     hideSubTabBar,
+    subTab: subTabProp,
+    onSubTabChange,
   }: SectionPanelProps & {
     /** true 면 히스토리만 그린다(3분할 오른쪽 패널용). 미전달이면 기존 전체 패널 그대로. */
     historyOnly?: boolean;
@@ -153,20 +160,28 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     hiddenSubTabs?: string[];
     /** true 면 이 패널의 하위 탭 줄을 그리지 않는다 — 바깥(오른쪽 한 줄)으로 끌어올렸을 때. 미전달 불변. */
     hideSubTabBar?: boolean;
+    /** 바깥이 하위 탭을 지정할 때. 제어 여부는 onSubTabChange 가 함수일 때만 — 이 값만 오면 무시(하이브·일루아 불변). */
+    subTab?: string;
+    /** 함수로 오면 제어 모드 — 바깥 탭 줄이 이 패널 내용을 바꾼다. 미전달이면 내부 상태만. */
+    onSubTabChange?: (t: string) => void;
   }) {
     const policyRows = config.filterPolicyRows(rows);
     // 항목이 없어도 히스토리로 먼저 연다 — 첫 메모 입력칸(또는 안내)이 바로 보이게(재작업 2026-07-15).
     // 기존엔 항목 없으면 '계약정보'로 열려, 첫 메모 입력이 가능한지 알기 어려웠다.
     const [subTab, setSubTab] = useState<SubTab>("history");
-    // ★ 폴백은 prop 을 넘긴 쪽(3분할)에서만 — 미전달이면 subTab 그대로(기존 앱 렌더 불변).
+    // 제어 모드는 콜백이 함수일 때만. 바깥 키가 이 패널 탭이 아니면(예: 'files') 내부 상태를 폴백에 넘긴다.
+    const isSubTabControlled = typeof onSubTabChange === "function";
+    const requestedSubTab: SubTab =
+      isSubTabControlled && isGovSubTab(subTabProp) ? subTabProp : subTab;
+    // ★ 폴백은 prop 을 넘긴 쪽(3분할)에서만 — 미전달이면 requestedSubTab 그대로(기존 앱 렌더 불변).
     const displaySubTabs = hiddenSubTabs?.length
       ? SUB_TABS.filter((t) => !hiddenSubTabs.includes(t.key))
       : SUB_TABS;
     const shownSubTab: SubTab = historyOnly
       ? "history"
-      : !hiddenSubTabs?.length || displaySubTabs.some((t) => t.key === subTab)
-        ? subTab
-        : ((displaySubTabs[0]?.key as SubTab | undefined) ?? subTab);
+      : !hiddenSubTabs?.length || displaySubTabs.some((t) => t.key === requestedSubTab)
+        ? requestedSubTab
+        : ((displaySubTabs[0]?.key as SubTab | undefined) ?? requestedSubTab);
     const [sel, setSel] = useState(0);
     const [err, setErr] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
@@ -397,7 +412,11 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
             {displaySubTabs.map(({ key, label }) => (
               <button
                 key={key}
-                onClick={() => setSubTab(key)}
+                onClick={() => {
+                  // 제어 모드여도 내부 상태를 같이 바꾼다 — 바깥이 값을 안 받아 줘도 이 패널이 멈추지 않게.
+                  setSubTab(key);
+                  if (typeof onSubTabChange === "function") onSubTabChange(key);
+                }}
                 className={`flex-shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
                   shownSubTab === key ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t2"
                 }`}
