@@ -101,7 +101,12 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
 
 /** 앱별 설정을 받아 정부지원금 섹션 패널 컴포넌트를 만든다(sectionPanels 에 주입). */
 export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
-  function GovSubsidyPanel({ rows, primaryRow, isAdmin, onSaved, adapter }: SectionPanelProps) {
+  function GovSubsidyPanel({ rows, primaryRow, isAdmin, onSaved, adapter, onSubTabChange }: SectionPanelProps & {
+    /** 바깥 탭 줄이 있는 배치에서 「지금 고른 탭」을 알려 주는 통로. 미전달이면 내부 상태만(이 갈래 기본).
+     *  ★여기서는 바깥 값을 읽지 않는다 — 읽으면 「항목 없어도 히스토리로 먼저 연다」(재작업 2026-07-15)가
+     *  되돌아간다. 바깥이 탭 줄을 그리는 배치가 이 갈래에 들어올 때 그때 읽도록 넓힌다(ERP NO.190 참고). */
+    onSubTabChange?: (t: string) => void;
+  }) {
     const policyRows = config.filterPolicyRows(rows);
     // 항목이 없어도 히스토리로 먼저 연다 — 첫 메모 입력칸(또는 안내)이 바로 보이게(재작업 2026-07-15).
     // 기존엔 항목 없으면 '계약정보'로 열려, 첫 메모 입력이 가능한지 알기 어려웠다.
@@ -279,7 +284,11 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {SUB_TABS.map(({ key, label }) => (
             <button
               key={key}
-              onClick={() => setSubTab(key)}
+              onClick={() => {
+                setSubTab(key);
+                // 바깥이 같은 탭 상태를 들고 있으면 함께 맞춘다(미전달 앱은 아무 일도 안 일어난다).
+                if (typeof onSubTabChange === "function") onSubTabChange(key);
+              }}
               className={`flex-shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
                 subTab === key ? "bg-wedly-bg-blue text-wedly-accent" : "text-wedly-muted hover:bg-wedly-bg-gray hover:text-wedly-t2"
               }`}
