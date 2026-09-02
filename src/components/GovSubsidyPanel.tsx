@@ -72,6 +72,12 @@ export type GovSubsidyPanelConfig = {
   /** 히스토리 댓글 경로. */
   commentsPath: (entryId: string) => string;
   /**
+   * 대표님께 보낼 카톡 보고문을 **서버에서** 만들어 오는 통로(선택). ERP 만 실어 준다.
+   * 미주입이면 공용 HistoryPanel 이 기계 정리글로 떨어지고 창이 그 사실을 밝힌다.
+   * ★없으면 정부지원금 탭의 「카톡 보고」가 늘 기계글만 낸다(2026-09-02 실사례 — 경정청구 탭만 AI 글이 나왔다).
+   */
+  buildKakaoReport?: (entryId: string, commentId: string) => Promise<string | null>;
+  /**
    * 차수 카드 제목 옆에 그릴 것(선택). 이 패널은 계약·정산·환불 차수 카드를 직접 그리므로,
    * 공용 SettlementInfoTab 의 renderTierBadge 를 여기서 한 번 더 이어 준다.
    * 미주입이면 지금과 100% 동일 — 다른 앱에는 영향이 없다.
@@ -429,6 +435,11 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 <HistoryPanel
                   pageId={entryId}
                   adapter={historyAdapter}
+                  buildKakaoReport={
+                    config.buildKakaoReport
+                      ? (c) => config.buildKakaoReport!(entryId, c.id).then((t) => t ?? "")
+                      : undefined
+                  }
                   currentUserName={userName}
                   isAdmin={config.editable || canWriteHistory ? isAdmin : false}
                   ownSource={config.ownSource}
