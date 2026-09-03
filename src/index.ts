@@ -12,6 +12,9 @@ export { default as SettlementInfoTab } from "./components/SettlementInfoTab";
 
 // 정부지원금 상세 섹션 공용 패널(3앱 공통) — 어댑터가 createGovSubsidyPanel(config) 로 주입.
 export { createGovSubsidyPanel } from "./components/GovSubsidyPanel";
+// 하위 탭 고르기(순수 판정) — 앱 쪽 배포 관문이 이 판정을 시험으로 지킬 수 있게 함께 내보낸다.
+export { resolveGovSubTab, isGovSubTab, GOV_SUB_TABS } from "./components/gov-subtab";
+export type { GovSubTab } from "./components/gov-subtab";
 export type { GovSubsidyPanelConfig } from "./components/GovSubsidyPanel";
 
 // 분야(섹션)별 정산 탭 래퍼 — 앱별 정산 칸/설정 주소(settlementApiBase) 주입.

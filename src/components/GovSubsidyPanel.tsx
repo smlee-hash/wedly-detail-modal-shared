@@ -33,6 +33,7 @@ import {
   failureReason,
 } from "@wedly/ui-shared";
 import SettlementInfoTabBase from "./SettlementInfoTab";
+import { GOV_SUB_TABS, resolveGovSubTab, type GovSubTab } from "./gov-subtab";
 import { resolveHistoryGate } from "./gov-history-gate";
 import { buildGovEvalBase } from "./gov-eval-context";
 
@@ -101,14 +102,8 @@ export type GovSubsidyPanelConfig = {
   conditionBasicDomain?: string;
 };
 
-type SubTab = "history" | "contract" | "settlement" | "refund" | "meetings";
-const SUB_TABS: { key: SubTab; label: string }[] = [
-  { key: "history", label: "히스토리" },
-  { key: "contract", label: "계약정보" },
-  { key: "settlement", label: "정산정보" },
-  { key: "refund", label: "환불정보" },
-  { key: "meetings", label: "미팅정보" },
-];
+type SubTab = GovSubTab;
+const SUB_TABS = GOV_SUB_TABS;
 
 async function commentsJson(res: Response): Promise<UnifiedComment[]> {
   // 앱별 댓글 응답 형태 차이 흡수: ERP={data:[...]}, 일루아={data:{illuaComments:[...]}},
@@ -134,16 +129,46 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
 
 /** 앱별 설정을 받아 정부지원금 섹션 패널 컴포넌트를 만든다(sectionPanels 에 주입). */
 export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
-  function GovSubsidyPanel({ rows, primaryRow, isAdmin, onSaved, adapter, onSubTabChange }: SectionPanelProps & {
-    /** 바깥 탭 줄이 있는 배치에서 「지금 고른 탭」을 알려 주는 통로. 미전달이면 내부 상태만(이 갈래 기본).
-     *  ★여기서는 바깥 값을 읽지 않는다 — 읽으면 「항목 없어도 히스토리로 먼저 연다」(재작업 2026-07-15)가
-     *  되돌아간다. 바깥이 탭 줄을 그리는 배치가 이 갈래에 들어올 때 그때 읽도록 넓힌다(ERP NO.190 참고). */
+  function GovSubsidyPanel({
+    rows,
+    primaryRow,
+    isAdmin,
+    onSaved,
+    adapter,
+    historyOnly,
+    hiddenSubTabs,
+    hideSubTabBar,
+    subTab: subTabProp,
+    onSubTabChange,
+  }: SectionPanelProps & {
+    /** true 면 히스토리만 그린다(넓은 2분할 오른쪽 레일용). 미전달이면 기존 전체 패널 그대로. */
+    historyOnly?: boolean;
+    /** 숨길 하위 탭 키(예: 히스토리를 오른쪽으로 옮길 때 ["history"]). 미전달이면 불변. */
+    hiddenSubTabs?: string[];
+    /** true 면 이 패널의 하위 탭 줄을 그리지 않는다 — 바깥(오른쪽 한 줄)으로 끌어올렸을 때. 미전달 불변. */
+    hideSubTabBar?: boolean;
+    /** 바깥이 하위 탭을 지정할 때. 제어 여부는 onSubTabChange 가 함수일 때만 — 이 값만 오면 무시(기존 앱 불변). */
+    subTab?: string;
+    /** 함수로 오면 클릭을 바깥에 알린다. hideSubTabBar 와 함께면 제어 모드. 미전달이면 내부 상태만. */
     onSubTabChange?: (t: string) => void;
   }) {
     const policyRows = config.filterPolicyRows(rows);
     // 항목이 없어도 히스토리로 먼저 연다 — 첫 메모 입력칸(또는 안내)이 바로 보이게(재작업 2026-07-15).
     // 기존엔 항목 없으면 '계약정보'로 열려, 첫 메모 입력이 가능한지 알기 어려웠다.
     const [subTab, setSubTab] = useState<SubTab>("history");
+    // 제어 모드 = 콜백이 있고 + 바깥이 탭 줄을 그린다(hideSubTabBar). 판정 근거는 resolveGovSubTab 주석.
+    const isSubTabControlled = typeof onSubTabChange === "function" && hideSubTabBar === true;
+    // ★ 폴백은 prop 을 넘긴 쪽에서만 — 미전달이면 그대로(기존 앱 렌더 불변).
+    const displaySubTabs = hiddenSubTabs?.length
+      ? SUB_TABS.filter((t) => !hiddenSubTabs.includes(t.key))
+      : SUB_TABS;
+    const shownSubTab: SubTab = resolveGovSubTab({
+      subTabProp,
+      internal: subTab,
+      controlled: isSubTabControlled,
+      hiddenSubTabs,
+      historyOnly,
+    });
     const [sel, setSel] = useState(0);
     const [err, setErr] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
@@ -356,7 +381,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                 계약 {i + 1}
               </button>
             ))}
-            {canEditValues && config.createContract && (
+            {canEditValues && config.createContract && !historyOnly && (
               <button
                 onClick={addContract}
                 disabled={busy}
@@ -368,27 +393,34 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           </div>
         )}
 
-        {/* 하위 탭 바 — 알약형 */}
-        <div className="flex items-center gap-1 overflow-x-auto border-b border-wedly-bd/60 bg-wedly-bg-gray/50 px-4 py-2">
-          {SUB_TABS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => {
-                setSubTab(key);
-                // 바깥이 같은 탭 상태를 들고 있으면 함께 맞춘다(미전달 앱은 아무 일도 안 일어난다).
-                if (typeof onSubTabChange === "function") onSubTabChange(key);
-              }}
-              className={`flex-shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
-                subTab === key ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t2"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {/* 하위 탭 바 — 알약형 (히스토리 전용 모드에서는 탭 자체가 없다) */}
+        {!historyOnly && !hideSubTabBar && (
+          <div className="flex items-center gap-1 overflow-x-auto border-b border-wedly-bd/60 bg-wedly-bg-gray/50 px-4 py-2">
+            {displaySubTabs.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => {
+                  // 제어 모드여도 내부 상태를 같이 바꾼다 — 바깥이 값을 안 받아 줘도 이 패널이 멈추지 않게.
+                  setSubTab(key);
+                  if (typeof onSubTabChange === "function") onSubTabChange(key);
+                }}
+                className={`flex-shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors ${
+                  shownSubTab === key ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t2"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex-1">
-          {subTab === "history" && (
+          {historyOnly && policyRows.length > 1 && (
+            <div className="px-4 pt-3 text-[11px] font-semibold text-wedly-t2 break-keep">
+              「계약 {idx + 1}」의 기록 — 위 알약으로 다른 계약의 기록을 볼 수 있어요
+            </div>
+          )}
+          {shownSubTab === "history" && (
             <div className="p-4">
               {historyGate === "panel" ? (
                 <HistoryPanel
@@ -441,27 +473,32 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
             </div>
           )}
 
-          {subTab === "contract" && (
+          {shownSubTab === "contract" && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "contract", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" />
             </div>
           )}
 
-          {subTab === "settlement" && (
+          {shownSubTab === "settlement" && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "settlement", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" />
             </div>
           )}
 
-          {subTab === "refund" && (
+          {shownSubTab === "refund" && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "refund", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" />
             </div>
           )}
 
-          {subTab === "meetings" && (
+          {shownSubTab === "meetings" && (
             <div className="p-4">
-              <MeetingsTab readOnly={!canEditValues} rawValue={data["_meetings"] ?? null} onSave={canEditValues ? (json: string) => saveOrCreate("_meetings", json) : () => {}} />
+              {/* 미팅 부품은 앱이 주입한다 — 안 넣은 앱에서 그대로 그리면 상세창이 통째로 흰 화면이 된다. */}
+              {MeetingsTab ? (
+                <MeetingsTab readOnly={!canEditValues} rawValue={data["_meetings"] ?? null} onSave={canEditValues ? (json: string) => saveOrCreate("_meetings", json) : () => {}} />
+              ) : (
+                <p className="text-[13px] text-wedly-muted">이 앱에서는 미팅정보를 볼 수 없습니다.</p>
+              )}
             </div>
           )}
         </div>
