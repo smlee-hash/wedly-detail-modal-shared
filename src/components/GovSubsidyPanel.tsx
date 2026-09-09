@@ -63,6 +63,9 @@ export type GovSubsidyPanelConfig = {
   /** 수수료 계산식에 '반올림·내림' 항을 더할 수 있게 할지. 기본 꺼짐 — ERP 만 켠다.
    *  (사장님 결정 2026-08-15: 수수료 계산식은 ERP 에서만 관리) */
   allowStepTerms?: boolean;
+  /** 수식 칸 관리자 수동 수정(_ovr_<칸키>·「(수정됨)」 배지) 허용. 기본 꺼짐 — ERP 만 켠다.
+   *  allowNonAdminEdit 와 무관하게 **실제 관리자**에게만 열린다(요청서: 관리자 계정에서 수정). 2026-09-09 */
+  allowFormulaOverride?: boolean;
   /** 히스토리 출처 라벨: "erp" | "hive" | "illua". */
   ownSource: string;
   /** ERP만 조건부 수식 UI. */
@@ -356,6 +359,9 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       columnScopeMode: config.allowStructureEdit ? "erp" : "off",
       // 반올림·내림 항 추가 단추 — 앱이 켤 때만. 안 켜면 단추가 안 뜬다(하이브·일루아).
       allowStepTerms: config.allowStepTerms === true,
+      // 수동 수정은 값 편집 권한(canEditValues)이 아니라 실제 관리자에게만 — SettlementInfoTab 은 isAdmin prop 에
+      // canEditValues 를 받으므로 여기서 실제 isAdmin 으로 한 번 더 좁힌다.
+      allowFormulaOverride: config.allowFormulaOverride === true && isAdmin,
       ratioBaseKey: RATIO.baseKey,
       ratioFeeKey: RATIO.feeKey,
       ratioBaseLabel: RATIO.baseLabel,
