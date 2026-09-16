@@ -80,6 +80,10 @@ export type GovSubsidyPanelConfig = {
    * ★없으면 정부지원금 탭의 「카톡 보고」가 늘 기계글만 낸다(2026-09-02 실사례 — 경정청구 탭만 AI 글이 나왔다).
    */
   buildKakaoReport?: (entryId: string, commentId: string) => Promise<string | null>;
+  /** 히스토리 작성칸 아래에 앱이 끼워 넣을 칸(선택). entryId 는 지금 보고 있는 정책 줄. */
+  historyComposerExtra?: (entryId: string) => ReactNode;
+  /** 히스토리 글이 저장된 뒤 앱이 할 일(선택). 실패해도 저장은 되돌리지 않는다(공용 HistoryPanel 이 잡는다). */
+  onHistorySent?: (entryId: string, text: string) => void | Promise<void>;
   /**
    * 차수 카드 제목 옆에 그릴 것(선택). 이 패널은 계약·정산·환불 차수 카드를 직접 그리므로,
    * 공용 SettlementInfoTab 의 renderTierBadge 를 여기서 한 번 더 이어 준다.
@@ -456,6 +460,8 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   shareEnabled={false}
                   hideCategories
                   draftId={entryId}
+                  composerExtra={config.historyComposerExtra ? config.historyComposerExtra(entryId) : undefined}
+                  onSent={config.onHistorySent ? (text: string) => config.onHistorySent!(entryId, text) : undefined}
                 />
               ) : historyGate === "loadFailed" ? (
                 <div className="flex items-start gap-2.5 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-3">
