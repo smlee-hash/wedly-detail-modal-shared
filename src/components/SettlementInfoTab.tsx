@@ -257,7 +257,7 @@ export default function SettlementInfoTab({
    * **B 줄 차수의 수수료가 A 줄 계약금 기준으로 계산되어 B 줄에 저장**됐다(독립 리뷰 F3 — 돈 칸).
    * 안 넘기면 지금까지와 100% 동일하게 `row` 하나로 계산한다(하이브·일루아·다른 분야 불변).
    */
-  rateRowForTier?: (tier: TierData) => Record<string, unknown> | null | undefined;
+  rateRowForTier?: (tier: TierData) => RowData | null | undefined;
   subSections?: Array<{ id: string; label: string }>;
   onUpdateSubSections?: (list: Array<{ id: string; label: string }>) => void;
   // 자동 비율 계산에 쓰는 계약정보 row 키 (하이브 "10총환급금"/"20확정수수료", 일루아 "07계약금"/"13컨설턴트수수료")
