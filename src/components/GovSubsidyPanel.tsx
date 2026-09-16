@@ -97,6 +97,8 @@ export type GovSubsidyPanelConfig = {
     /** 이 차수 고유 id 가 형제 차수와 겹치는가(겹치면 받는 쪽이 표시를 감춘다) */
     tierIdDuplicated?: boolean;
   }) => ReactNode;
+  /** 하위 탭(계약·정산·환불) 머리에 앱이 끼우는 부품 — ERP 만 주입(수식 설정 버튼). 미주입이면 아무것도 그리지 않는다. */
+  renderSubTabHeader?: (ctx: { subTab: "contract" | "settlement" | "refund"; entryId: string }) => ReactNode;
   /** 보기 전용(하이브): 작성/수정/삭제 차단. */
   commentsReadOnly?: boolean;
   /** 이미지 붙여넣기 업로드 경로(기본 /api/upload). */
@@ -501,18 +503,21 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
           {shownSubTab === "contract" && (
             <div className="p-4">
+              {config.renderSubTabHeader?.({ subTab: "contract", entryId })}
               <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "contract", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
           {shownSubTab === "settlement" && (
             <div className="p-4">
+              {config.renderSubTabHeader?.({ subTab: "settlement", entryId })}
               <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "settlement", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
           {shownSubTab === "refund" && (
             <div className="p-4">
+              {config.renderSubTabHeader?.({ subTab: "refund", entryId })}
               <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "refund", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
