@@ -100,6 +100,27 @@ function fetchConfigCached(configApiPath: string, forceRefresh = false): Promise
   return _configPromiseByPath.get(configApiPath)!;
 }
 
+/**
+ * 차수 목록 읽기 — **「빈 목록」과 「아직 없음」을 가른다.**
+ *
+ * 공용 `parseTiers` 는 빈 배열을 받으면 빈 차수 1개를 새로 만들어 준다(처음 쓰는 회사용).
+ * 그런데 그 때문에 **마지막 차수를 지우면 곧바로 빈 차수가 되살아났다** — 지운 자리에 빈
+ * 「1차」 카드가 다시 뜨고, 저장값은 이미 `[]` 라 서버 쓰기조차 건너뛰어 **아무리 지워도
+ * 되살아났다**(독립 리뷰 F4, 삭제 확인창 문구와도 정반대).
+ * 그래서 **값이 분명히 빈 배열일 때만** 빈 목록 그대로 둔다. 값이 아예 없는(null·미설정)
+ * 회사는 지금처럼 빈 차수 1개로 시작한다 — 기존 동작 그대로다.
+ */
+function parseTiersKeepEmpty(raw: unknown, fields: FieldDef[]): TierData[] {
+  let arr: unknown = raw;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (t === "") return parseTiers(raw, fields);
+    try { arr = JSON.parse(t); } catch { return parseTiers(raw, fields); }
+  }
+  if (Array.isArray(arr) && arr.length === 0) return [];
+  return parseTiers(raw, fields);
+}
+
 function fmtCurrency(n: number | null): string {
   if (n === null || !isFinite(n)) return "";
   // 돈 표시는 정수로 반올림(소수점 제거) — 스코어카드 합계·돈 칸 가독성. 퍼센트는 별도 경로라 영향 없음.
@@ -184,6 +205,7 @@ export default function SettlementInfoTab({
   storagePrefix = "settlement",        // hive-config 키 prefix (settlement / contract / refund)
   fieldsApiPath = "/api/entries/settlement-fields", // 컬럼 정의 받는 쪽
   sectionTitle = "정산정보",            // 화면 표시 제목 (사용 안 함 — 섹션 헤더는 부모에서)
+  rateRowForTier,
   // ── 세부 섹션 (단계 A) ──
   // 같은 영역 안에서 경정청구·정부지원금·인증제도 등 영역별로 차수 묶음을 나눌 수 있게.
   // 단계 A1 : prop 만 수신·통로 확보. UI 변경은 단계 A2 에서.
@@ -227,6 +249,15 @@ export default function SettlementInfoTab({
   storagePrefix?: string;
   fieldsApiPath?: string;
   sectionTitle?: string;
+  /**
+   * 차수마다 「수수료 비율을 어느 회사 줄에서 읽을지」 알려 주는 선택 함수.
+   *
+   * 정부지원금 상세창이 여러 계약 줄의 차수를 **한 목록으로 합쳐** 보여 주면서 생긴 자리다.
+   * 합치기 전에는 화면에 한 줄만 있어 `row` 하나면 됐지만, 합친 뒤에는 차수마다 주인이 달라
+   * **B 줄 차수의 수수료가 A 줄 계약금 기준으로 계산되어 B 줄에 저장**됐다(독립 리뷰 F3 — 돈 칸).
+   * 안 넘기면 지금까지와 100% 동일하게 `row` 하나로 계산한다(하이브·일루아·다른 분야 불변).
+   */
+  rateRowForTier?: (tier: TierData) => Record<string, unknown> | null | undefined;
   subSections?: Array<{ id: string; label: string }>;
   onUpdateSubSections?: (list: Array<{ id: string; label: string }>) => void;
   // 자동 비율 계산에 쓰는 계약정보 row 키 (하이브 "10총환급금"/"20확정수수료", 일루아 "07계약금"/"13컨설턴트수수료")
@@ -368,7 +399,7 @@ export default function SettlementInfoTab({
   // ⚠️ 마운트 시 초기값을 빈 배열로 — 서버 fetch 응답 전까지 옛 기본 컬럼이 잠깐 보이는
   // 깜빡임 방지. 서버 응답이 진실의 원천.
   const [fields, setFields] = useState<FieldDef[]>([]);
-  const [tiers, setTiers] = useState<TierData[]>(() => parseTiers(rawValue, []));
+  const [tiers, setTiers] = useState<TierData[]>(() => parseTiersKeepEmpty(rawValue, []));
   const [fieldsLoaded, setFieldsLoaded] = useState(false);
   // ERP 가 설정한 스코어카드 제목 + 합산 소스 컬럼을 미러 (편집은 ERP 에서만)
   const [cardLabels, setCardLabels] = useState({
@@ -484,6 +515,14 @@ export default function SettlementInfoTab({
     [row, ratioBaseKey, ratioFeeKey, ratioBaseLabel, ratioFeeLabel]
   );
   const reversedRate = rateInfo.ok ? rateInfo.rate : null;
+  /** 이 차수의 수수료 비율 — 주인 줄을 알려 주면 그 줄 기준, 아니면 지금까지처럼 `row` 기준. */
+  const rateForTier = useCallback((tier: TierData): number | null => {
+    if (!rateRowForTier) return reversedRate;
+    const owner = rateRowForTier(tier);
+    if (!owner) return reversedRate;
+    const info = getReversedFeeRate(owner, ratioBaseKey, ratioFeeKey, ratioBaseLabel, ratioFeeLabel);
+    return info.ok ? info.rate : null;
+  }, [rateRowForTier, reversedRate, ratioBaseKey, ratioFeeKey, ratioBaseLabel, ratioFeeLabel]);
 
   const successField = useMemo(() => {
     return fields.find((f) =>
@@ -565,7 +604,7 @@ export default function SettlementInfoTab({
   }, [fieldsApiPath]);
 
   useEffect(() => {
-    setTiers(parseTiers(rawValue, fields));
+    setTiers(parseTiersKeepEmpty(rawValue, fields));
   }, [rawValue, fields]);
 
   const persist = useCallback((next: TierData[]) => {
@@ -627,8 +666,9 @@ export default function SettlementInfoTab({
       let fee = t[consultFeeField.key];
       const updated: TierData = { ...t };
 
-      if (reversedRate !== null && (fee === null || fee === undefined || fee === "")) {
-        fee = Math.round(successNum * reversedRate);
+      const tierRate = rateForTier(t);
+      if (tierRate !== null && (fee === null || fee === undefined || fee === "")) {
+        fee = Math.round(successNum * tierRate);
         updated[consultFeeField.key] = fee;
         changed = true;
       }
@@ -659,7 +699,7 @@ export default function SettlementInfoTab({
       setTiers(next);
       persist(next);
     }
-  }, [successField, consultFeeField, revenueVatField, revenueNetField, reversedRate, tiers, persist]);
+  }, [successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, tiers, persist]);
 
   const updateField = useCallback((idx: number, key: string, value: string | number | null) => {
     setTiers((prev) => {
@@ -669,8 +709,9 @@ export default function SettlementInfoTab({
         const updated: TierData = { ...next[idx], [successField.key]: m };
 
         let feeNum: number | null = null;
-        if (consultFeeField && reversedRate !== null) {
-          feeNum = m === null ? null : Math.round(m * reversedRate);
+        const tierRate = rateForTier(next[idx]);
+        if (consultFeeField && tierRate !== null) {
+          feeNum = m === null ? null : Math.round(m * tierRate);
           updated[consultFeeField.key] = feeNum;
         } else if (consultFeeField) {
           const cur = updated[consultFeeField.key];
@@ -709,7 +750,7 @@ export default function SettlementInfoTab({
       persist(next);
       return next;
     });
-  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, reversedRate]);
+  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, rateForTier]);
 
   const updateTierLabel = useCallback((idx: number, newLabel: string) => {
     setTiers((prev) => {
@@ -2040,7 +2081,7 @@ export default function SettlementInfoTab({
             index={idx}
             canRemove={!readOnly}
             readOnly={readOnly}
-            autoFeeKey={consultFeeField && reversedRate !== null ? consultFeeField.key : null}
+            autoFeeKey={consultFeeField && (rateForTier(tier) !== null) ? consultFeeField.key : null}
             autoRevenueVatKey={revenueVatField?.key || null}
             autoRevenueNetKey={revenueNetField?.key || null}
             successKey={successField?.key || null}

@@ -37,7 +37,7 @@ import { GOV_SUB_TABS, resolveGovSubTab, type GovSubTab } from "./gov-subtab";
 import type { SelectDropdownColorFamily } from "./SelectDropdown";
 import { resolveHistoryGate } from "./gov-history-gate";
 import { buildGovEvalBase } from "./gov-eval-context";
-import { mergeTiersAcrossRows, splitMergedTiers, type MergedTierRef } from "./gov-merged-tiers";
+import { mergeTiersAcrossRows, splitMergedTiers, parseMergedTierId, parseTierArray } from "./gov-merged-tiers";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
 const SettlementInfoTab = SettlementInfoTabBase as unknown as ComponentType<Record<string, unknown>>;
@@ -172,6 +172,14 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     onSubTabChange?: (t: string) => void;
   }) {
     const policyRows = config.filterPolicyRows(rows);
+    const TIER_KEYS = ["계약정보_차수", "정산정보", "환불정보_차수"] as const;
+    // ★policyRows 는 렌더마다 새 배열이라 그대로 의존성에 쓰면 이 계산과 히스토리 어댑터가
+    //   매 렌더 새로 만들어진다(자동 새로고침 타이머가 매번 초기화됨 — 독립 리뷰 F7).
+    //   그래서 「줄 id + 차수 원문」만 뽑은 글자를 기준으로 삼는다.
+    const policyKey = policyRows
+      .map((r) => `${r.entryId}:${TIER_KEYS.map((k) => JSON.stringify((r.row ?? {})[k] ?? null)).join("|")}`)
+      .join("\u0001");
+    const ownerIds = useMemo(() => policyRows.map((r) => r.entryId), [policyKey]); // eslint-disable-line react-hooks/exhaustive-deps
     // 항목이 없어도 히스토리로 먼저 연다 — 첫 메모 입력칸(또는 안내)이 바로 보이게(재작업 2026-07-15).
     // 기존엔 항목 없으면 '계약정보'로 열려, 첫 메모 입력이 가능한지 알기 어려웠다.
     const [subTab, setSubTab] = useState<SubTab>("history");
@@ -239,8 +247,8 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     //        (빈 목록 성공으로 바꾸면 글이 사라진 것처럼 보인다 — commentsJson 주석과 같은 이유).
     const commentOwnerRef = useRef<Map<string, string>>(new Map());
     const historyEntryIds = useMemo(
-      () => (policyRows.length ? policyRows.map((r) => r.entryId) : entryId ? [entryId] : []),
-      [policyRows, entryId],
+      () => (ownerIds.length ? ownerIds : entryId ? [entryId] : []),
+      [ownerIds, entryId],
     );
     const historyAdapter = useMemo<HistoryAdapter>(() => {
       const ids = historyEntryIds;
@@ -358,18 +366,14 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // ── 차수 합치기 ────────────────────────────────────────────────────────────
     // 그 회사의 계약 줄 전부에서 같은 종류 차수를 모아 한 목록으로 보여 준다(오래된 것부터 —
     // 번호를 그 자리로 매기고, 화면은 최신이 맨 위로 뒤집힌다). 합쳐 **보여 줄 뿐** 자료는 옮기지
-    // 않는다: 고친 차수는 refByTierId 를 따라 원래 줄로 되돌려 저장한다(splitMergedTiers).
-    const TIER_KEYS = ["계약정보_차수", "정산정보", "환불정보_차수"] as const;
+    // 않는다: 차수 id 에 주인 줄 번호를 박아 두고, 저장할 때 원래 id·원래 줄로 되돌린다.
     const mergedTiers = useMemo(() => {
       const src = policyRows.map((r) => ({ entryId: r.entryId, row: (r.row ?? {}) as Record<string, unknown> }));
-      const out: Record<string, { json: string; refByTierId: Map<string, MergedTierRef>; refByPosition: MergedTierRef[] }> = {};
-      for (const key of TIER_KEYS) {
-        const { tiers, refByTierId, refByPosition } = mergeTiersAcrossRows(src, key);
-        out[key] = { json: JSON.stringify(tiers), refByTierId, refByPosition };
-      }
+      const out: Record<string, string> = {};
+      for (const key of TIER_KEYS) out[key] = JSON.stringify(mergeTiersAcrossRows(src, key).tiers);
       return out;
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [policyRows]);
+    }, [policyKey]);
 
     /** 합친 목록이 저장될 때 — 줄마다 나눠 저장한다. 바뀐 줄만 실제로 보낸다. */
     async function saveMergedTiers(key: string, json: string) {
@@ -383,39 +387,49 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         return;
       }
       const saved = Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
-      const owners = policyRows.map((r) => r.entryId);
+      const owners = ownerIds;
       if (owners.length === 0) {
         // 계약 줄이 아직 없다 — 기존 길(첫 저장 때 자동 생성)로 넘긴다.
         await saveOrCreate(key, json);
         return;
       }
-      const byOwner = splitMergedTiers(saved, mergedTiers[key]?.refByTierId ?? new Map(), owners);
-      try {
-        for (const [entryId, tiers] of byOwner) {
-          const before = JSON.stringify(
-            (() => {
-              const raw = (policyRows.find((r) => r.entryId === entryId)?.row ?? {})[key];
-              if (Array.isArray(raw)) return raw;
-              if (typeof raw === "string" && raw.trim()) {
-                try { const p: unknown = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
-              }
-              return [];
-            })(),
-          );
-          const after = JSON.stringify(tiers);
-          if (before === after) continue;          // 안 바뀐 줄은 건드리지 않는다
+      const byOwner = splitMergedTiers(saved, owners);
+      // ★어느 줄이 실제로 써졌는지 센다. 중간에 실패해도 **이미 써진 것은 화면에 반영**해야
+      //   한다 — 안 그러면 화면은 옛 상태를 계속 보여 주고 서버만 바뀐 「반쪽 저장」이 된다
+      //   (독립 리뷰 F5). 실패한 줄은 이름을 들어 알린다.
+      const wrote: string[] = [];
+      const failed: string[] = [];
+      let firstError = "";
+      for (const [entryId, tiers] of byOwner) {
+        const before = JSON.stringify(parseTierArray((policyRows.find((r) => r.entryId === entryId)?.row ?? {})[key]));
+        const after = JSON.stringify(tiers);
+        if (before === after) continue;          // 안 바뀐 줄은 건드리지 않는다
+        try {
           await config.savePolicyField(entryId, key, after);
+          wrote.push(entryId);
+        } catch (e) {
+          failed.push(entryId);
+          if (!firstError) firstError = e instanceof Error ? e.message : "저장에 실패했습니다.";
         }
-        onSaved?.();
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : "저장에 실패했습니다.");
       }
+      if (failed.length > 0) {
+        setErr(
+          `계약 ${failed.length}건의 차수를 저장하지 못했습니다${wrote.length > 0 ? ` (${wrote.length}건은 저장됨)` : ""}. ` +
+          `${firstError} 화면을 새로 고쳐 실제 저장된 값을 확인해 주세요.`,
+        );
+      }
+      // 성공·실패와 무관하게 다시 읽는다 — 화면이 서버와 어긋난 채로 남지 않게.
+      if (wrote.length > 0 || failed.length > 0) onSaved?.();
     }
 
-    /** 합친 목록의 i번째 차수가 실제로 저장돼 있는 계약 줄. 못 찾으면 대표 줄. */
-    function ownerEntryIdAt(key: string, i: number): string {
-      return mergedTiers[key]?.refByPosition?.[i]?.ownerEntryId || policyRows[0]?.entryId || entryId;
-    }
+    /** 수수료 비율은 **그 차수가 실제로 속한 계약 줄** 기준으로 — 합치면서 대표 줄 비율이
+     *  남의 줄 차수에 쓰이던 것을 막는다(독립 리뷰 F3, 돈 칸). */
+    const rateRowForTier = (tier: Record<string, unknown>) => {
+      const ref = parseMergedTierId(tier?.id);
+      const owner = ref ? ownerIds[ref.ownerIndex] : undefined;
+      const found = owner ? policyRows.find((r) => r.entryId === owner) : undefined;
+      return found ? ({ ...evalBase, ...(found.row ?? {}) } as Record<string, unknown>) : null;
+    };
 
     const onSaveFor = (key: string) => (canEditValues ? (json: string) => saveOrCreate(key, json) : () => {});
     const onSaveTiersFor = (key: string) => (canEditValues ? (json: string) => { void saveMergedTiers(key, json); } : () => {});
@@ -468,6 +482,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       addButtonSuffixOverride: "정산",
       enableConditionalFormula: config.enableConditionalFormula,
       conditionFieldOptions: condOpts,
+      rateRowForTier,
     };
 
     return (
@@ -568,21 +583,21 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {shownSubTab === "contract" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "contract", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["계약정보_차수"]?.json ?? null} onSave={onSaveTiersFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId: ownerEntryIdAt("계약정보_차수", i), kind: "contract", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["계약정보_차수"] ?? null} onSave={onSaveTiersFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "contract", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
           {shownSubTab === "settlement" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "settlement", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["정산정보"]?.json ?? null} onSave={onSaveTiersFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId: ownerEntryIdAt("정산정보", i), kind: "settlement", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["정산정보"] ?? null} onSave={onSaveTiersFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "settlement", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
           {shownSubTab === "refund" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "refund", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["환불정보_차수"]?.json ?? null} onSave={onSaveTiersFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId: ownerEntryIdAt("환불정보_차수", i), kind: "refund", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["환불정보_차수"] ?? null} onSave={onSaveTiersFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "refund", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
