@@ -422,6 +422,15 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       if (wrote.length > 0 || failed.length > 0) onSaved?.();
     }
 
+    /** 합친 차수 id 에 박힌 주인 줄과 원래 차수 id. **자리(index)로 찾지 않는다** —
+     *  차수를 지운 직후 자리가 밀려 엉뚱한 줄을 가리키던 문제(독립 리뷰 F6).
+     *  파트너 정산 뱃지는 `entryId + 원래 tierId` 로 붙으므로 둘 다 되돌려 넘겨야 한다. */
+    function ownerOfTier(mergedId: string): { entryId: string; tierId: string } {
+      const ref = parseMergedTierId(mergedId);
+      const owner = (ref && ownerIds[ref.ownerIndex]) || ownerIds[0] || entryId;
+      return { entryId: owner, tierId: ref ? ref.originalId : mergedId };
+    }
+
     /** 수수료 비율은 **그 차수가 실제로 속한 계약 줄** 기준으로 — 합치면서 대표 줄 비율이
      *  남의 줄 차수에 쓰이던 것을 막는다(독립 리뷰 F3, 돈 칸). */
     const rateRowForTier = (tier: Record<string, unknown>) => {
