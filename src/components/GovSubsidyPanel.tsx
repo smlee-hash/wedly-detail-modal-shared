@@ -37,6 +37,7 @@ import { GOV_SUB_TABS, resolveGovSubTab, type GovSubTab } from "./gov-subtab";
 import type { SelectDropdownColorFamily } from "./SelectDropdown";
 import { resolveHistoryGate } from "./gov-history-gate";
 import { buildGovEvalBase } from "./gov-eval-context";
+import { mergeTiersAcrossRows, splitMergedTiers, type MergedTierRef } from "./gov-merged-tiers";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
 const SettlementInfoTab = SettlementInfoTabBase as unknown as ComponentType<Record<string, unknown>>;
@@ -187,9 +188,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       hiddenSubTabs,
       historyOnly,
     });
-    const [sel, setSel] = useState(0);
+    // 알약을 없애 「보고 있는 계약 고르기」가 사라졌다. entryId·data 는 여전히 대표 줄을 가리키며
+    // 히스토리 첫 작성·미팅정보 저장처럼 **한 줄을 골라야 하는 일**의 기준으로 쓰인다.
+    const sel = 0;
     const [err, setErr] = useState<string | null>(null);
-    const [busy, setBusy] = useState(false);
     const [userName, setUserName] = useState("");
     const createdIdRef = useRef<string>("");
     const createPromiseRef = useRef<Promise<string> | null>(null);
@@ -230,29 +232,67 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const historyGate = resolveHistoryGate({ entryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
+    // 이 회사의 계약 줄 전부의 기록을 **한 목록**으로 보여 준다(사장님 지시 2026-09-17).
+    //   왜: 알약을 없앴으므로, 합치지 않으면 계약 2·3 에 적혀 있던 기록이 화면에서 영영 안 보인다.
+    //   쓰기: 새 글은 대표 줄에, 고치기·지우기는 **그 글이 실제로 있는 줄**에 보낸다(아래 지도).
+    //   실패: 한 줄이라도 못 읽으면 조용히 「기록 없음」으로 만들지 않고 오류를 그대로 올린다
+    //        (빈 목록 성공으로 바꾸면 글이 사라진 것처럼 보인다 — commentsJson 주석과 같은 이유).
+    const commentOwnerRef = useRef<Map<string, string>>(new Map());
+    const historyEntryIds = useMemo(
+      () => (policyRows.length ? policyRows.map((r) => r.entryId) : entryId ? [entryId] : []),
+      [policyRows, entryId],
+    );
     const historyAdapter = useMemo<HistoryAdapter>(() => {
-      const url = config.commentsPath(entryId);
+      const ids = historyEntryIds;
+      const primary = ids[0] ?? entryId;
       const ro = config.commentsReadOnly === true;
       const blocked = async (): Promise<UnifiedComment[]> => {
         throw new Error("이 앱에서는 정부지원금 히스토리를 작성할 수 없습니다. ERP 또는 일루아에서 작성해 주세요.");
       };
+      const ownerOf = (commentId: string) => commentOwnerRef.current.get(commentId) || primary;
+      const readAll = async (): Promise<UnifiedComment[]> => {
+        const lists = await Promise.all(
+          ids.map(async (id) => {
+            const res = await fetch(config.commentsPath(id), { cache: "no-store" });
+            const rows = await commentsJson(res);
+            for (const c of rows) if (c?.id) commentOwnerRef.current.set(String(c.id), id);
+            return rows;
+          }),
+        );
+        const merged = lists.flat();
+        // 같은 글이 두 번 실리지 않게 id 로 한 번만(줄 사이에 같은 글이 얹혀 오는 경우 방어).
+        const seen = new Set<string>();
+        const out: UnifiedComment[] = [];
+        for (const c of merged) {
+          const key = String(c?.id ?? "");
+          if (key && seen.has(key)) continue;
+          if (key) seen.add(key);
+          out.push(c);
+        }
+        // 시간순(오래된 것부터) — 화면이 그대로 그린다.
+        out.sort((a, b) => Date.parse(a?.createdAt ?? "") - Date.parse(b?.createdAt ?? ""));
+        return out;
+      };
       return {
-        fetch: async () => {
-          const res = await fetch(url, { cache: "no-store" });
-          return { comments: await commentsJson(res) };
-        },
+        fetch: async () => ({ comments: await readAll() }),
         create: ro
           ? (async () => blocked())
-          : async ({ text, category }) =>
-              commentsJson(await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, category }) })),
+          : async ({ text, category }) => {
+              await commentsJson(await fetch(config.commentsPath(primary), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, category }) }));
+              return readAll();
+            },
         edit: ro
           ? (async () => blocked())
-          : async ({ commentId, text }) =>
-              commentsJson(await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentId, text }) })),
+          : async ({ commentId, text }) => {
+              await commentsJson(await fetch(config.commentsPath(ownerOf(commentId)), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentId, text }) }));
+              return readAll();
+            },
         remove: ro
           ? (async () => blocked())
-          : async ({ commentId }) =>
-              commentsJson(await fetch(url, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentId }) })),
+          : async ({ commentId }) => {
+              await commentsJson(await fetch(config.commentsPath(ownerOf(commentId)), { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentId }) }));
+              return readAll();
+            },
         uploadImage: async (file: File) => {
           const fd = new FormData();
           const ext = file.name.split(".").pop() || "png";
@@ -263,7 +303,8 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           return j.data.url as string;
         },
       };
-    }, [entryId]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [historyEntryIds, entryId]);
 
     async function ensureEntryId(): Promise<string> {
       if (entryId) return entryId;
@@ -296,20 +337,6 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       }
     }
 
-    async function addContract() {
-      if (busy || !config.createContract) return;
-      setBusy(true);
-      setErr(null);
-      try {
-        await config.createContract(primaryRow);
-        onSaved?.();
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : "계약 생성에 실패했습니다.");
-      } finally {
-        setBusy(false);
-      }
-    }
-
     // 어댑터가 공급하는 기본정보 정의 기반 조건 옵션(ERP가 conditionBasicDomain 주입 시 사용).
     const [condFromDefs, setCondFromDefs] = useState<Array<{ key: string; label: string; options?: Array<{ value: string; badgeClass?: string }> }> | null>(null);
     useEffect(() => {
@@ -328,7 +355,70 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       return () => { alive = false; };
     }, [adapter, config.conditionBasicDomain, config.enableConditionalFormula]);
 
+    // ── 차수 합치기 ────────────────────────────────────────────────────────────
+    // 그 회사의 계약 줄 전부에서 같은 종류 차수를 모아 한 목록으로 보여 준다(오래된 것부터 —
+    // 번호를 그 자리로 매기고, 화면은 최신이 맨 위로 뒤집힌다). 합쳐 **보여 줄 뿐** 자료는 옮기지
+    // 않는다: 고친 차수는 refByTierId 를 따라 원래 줄로 되돌려 저장한다(splitMergedTiers).
+    const TIER_KEYS = ["계약정보_차수", "정산정보", "환불정보_차수"] as const;
+    const mergedTiers = useMemo(() => {
+      const src = policyRows.map((r) => ({ entryId: r.entryId, row: (r.row ?? {}) as Record<string, unknown> }));
+      const out: Record<string, { json: string; refByTierId: Map<string, MergedTierRef>; refByPosition: MergedTierRef[] }> = {};
+      for (const key of TIER_KEYS) {
+        const { tiers, refByTierId, refByPosition } = mergeTiersAcrossRows(src, key);
+        out[key] = { json: JSON.stringify(tiers), refByTierId, refByPosition };
+      }
+      return out;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [policyRows]);
+
+    /** 합친 목록이 저장될 때 — 줄마다 나눠 저장한다. 바뀐 줄만 실제로 보낸다. */
+    async function saveMergedTiers(key: string, json: string) {
+      if (!config.savePolicyField) return;
+      setErr(null);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(json);
+      } catch {
+        setErr("차수 값을 읽지 못했습니다.");
+        return;
+      }
+      const saved = Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+      const owners = policyRows.map((r) => r.entryId);
+      if (owners.length === 0) {
+        // 계약 줄이 아직 없다 — 기존 길(첫 저장 때 자동 생성)로 넘긴다.
+        await saveOrCreate(key, json);
+        return;
+      }
+      const byOwner = splitMergedTiers(saved, mergedTiers[key]?.refByTierId ?? new Map(), owners);
+      try {
+        for (const [entryId, tiers] of byOwner) {
+          const before = JSON.stringify(
+            (() => {
+              const raw = (policyRows.find((r) => r.entryId === entryId)?.row ?? {})[key];
+              if (Array.isArray(raw)) return raw;
+              if (typeof raw === "string" && raw.trim()) {
+                try { const p: unknown = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; }
+              }
+              return [];
+            })(),
+          );
+          const after = JSON.stringify(tiers);
+          if (before === after) continue;          // 안 바뀐 줄은 건드리지 않는다
+          await config.savePolicyField(entryId, key, after);
+        }
+        onSaved?.();
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "저장에 실패했습니다.");
+      }
+    }
+
+    /** 합친 목록의 i번째 차수가 실제로 저장돼 있는 계약 줄. 못 찾으면 대표 줄. */
+    function ownerEntryIdAt(key: string, i: number): string {
+      return mergedTiers[key]?.refByPosition?.[i]?.ownerEntryId || policyRows[0]?.entryId || entryId;
+    }
+
     const onSaveFor = (key: string) => (canEditValues ? (json: string) => saveOrCreate(key, json) : () => {});
+    const onSaveTiersFor = (key: string) => (canEditValues ? (json: string) => { void saveMergedTiers(key, json); } : () => {});
     // 조건 "기준 칸" 표준 후보를 만드는 함수 — 앱(어댑터)이 넘겨줄 때만 쓴다.
     // 화면 부품(@wedly/ui-shared)에서 직접 가져오면, 그 함수가 없는 판을 무는 앱(하이브·일루아 v0.29)이
     // 화면을 열기도 전에 빌드에서 죽는다. 그래서 앱이 주입하는 형태로 받는다.
@@ -388,31 +478,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           </div>
         )}
 
-        {/* 계약이 여러 건일 때만 선택바 */}
-        {policyRows.length > 1 && (
-          <div className="flex items-center gap-1 overflow-x-auto px-4 pt-3">
-            {policyRows.map((r, i) => (
-              <button
-                key={r.entryId}
-                onClick={() => setSel(i)}
-                className={`flex-shrink-0 rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${
-                  i === idx ? "bg-wedly-bg-blue text-wedly-accent-ink" : "text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t2"
-                }`}
-              >
-                계약 {i + 1}
-              </button>
-            ))}
-            {canEditValues && config.createContract && !historyOnly && (
-              <button
-                onClick={addContract}
-                disabled={busy}
-                className="ml-1 flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] text-wedly-t2 hover:bg-wedly-bg-gray hover:text-wedly-t1 disabled:opacity-50"
-              >
-                + 추가
-              </button>
-            )}
-          </div>
-        )}
+        {/* 계약 알약 줄(계약 1·2·3 + 추가)은 없앴다 — 사장님 지시 2026-09-17.
+            한 회사의 계약 줄 여러 개를 알약으로 나눠 보여 주는 바람에, 표는 「계약 한 건 = 한 줄」로
+            합쳐 보는데 상세창만 나뉘어 같은 회사의 담당 컨설턴트가 서로 다르게 보였다(이번 요청의 뿌리).
+            이제 아래에서 차수·기록을 한 목록으로 합쳐 보여 준다. */}
 
         {/* 하위 탭 바 — 알약형 (히스토리 전용 모드에서는 탭 자체가 없다) */}
         {!historyOnly && !hideSubTabBar && (
@@ -436,11 +505,6 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         )}
 
         <div className="flex-1">
-          {historyOnly && policyRows.length > 1 && (
-            <div className="px-4 pt-3 text-[11px] font-semibold text-wedly-t2 break-keep">
-              「계약 {idx + 1}」의 기록 — 위 알약으로 다른 계약의 기록을 볼 수 있어요
-            </div>
-          )}
           {shownSubTab === "history" && (
             <div className="p-4">
               {historyGate === "panel" ? (
@@ -449,7 +513,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   adapter={historyAdapter}
                   buildKakaoReport={
                     config.buildKakaoReport
-                      ? (c) => config.buildKakaoReport!(entryId, c.id).then((t) => t ?? "")
+                      ? (c) => config.buildKakaoReport!(commentOwnerRef.current.get(String(c.id)) || entryId, c.id).then((t) => t ?? "")
                       : undefined
                   }
                   currentUserName={userName}
@@ -504,21 +568,21 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {shownSubTab === "contract" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "contract", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "contract", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["계약정보_차수"]?.json ?? null} onSave={onSaveTiersFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId: ownerEntryIdAt("계약정보_차수", i), kind: "contract", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
           {shownSubTab === "settlement" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "settlement", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "settlement", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["정산정보"]?.json ?? null} onSave={onSaveTiersFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId: ownerEntryIdAt("정산정보", i), kind: "settlement", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
           {shownSubTab === "refund" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "refund", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "refund", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["환불정보_차수"]?.json ?? null} onSave={onSaveTiersFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId: ownerEntryIdAt("환불정보_차수", i), kind: "refund", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
