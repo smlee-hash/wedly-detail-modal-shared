@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
+import { filledFieldCount } from "./gov-merged-tiers";
 import { displayOrderNewestFirst } from "./tier-render-order";
 import { tierFieldLock, carryFieldLock } from "./tier-field-lock";
 import { tierFieldHidden, carryFieldHidden, visibleTierLayout } from "./tier-field-hidden";
@@ -749,11 +750,27 @@ export default function SettlementInfoTab({
     });
   }, [persist, fields]);
 
+  // 차수 삭제 — 지우기 **전에** 한 번 묻는다.
+  //
+  // 왜 (노션 「담당 컨설턴트 컬럼 …」 이아영 2026-08-25, 사장님 지시 2026-09-17)
+  //   예전에는 휴지통을 누르는 즉시 지워졌다. 되돌릴 수 없는 일에 확인 한 번이 없었고,
+  //   지워진 값이 매출·인센티브·정산 집계에서 같이 빠지는 것도 알 길이 없었다.
+  //   또 차수가 1개뿐이면 휴지통 자체가 안 떠(운영 실측 2026-09-16: 그런 계약 줄 249개)
+  //   잘못 만들어진 차수를 **화면에서 지울 방법이 아예 없었다** — 그것이 이 요청이다.
+  const [pendingDeleteTier, setPendingDeleteTier] = useState<number | null>(null);
   const removeTier = useCallback((idx: number) => {
-    setTiers((prev) => {
-      const next = relabelTiers(prev.filter((_, i) => i !== idx));
-      persist(next);
-      return next;
+    setPendingDeleteTier(idx);
+  }, []);
+  const confirmRemoveTier = useCallback(() => {
+    setPendingDeleteTier((idx) => {
+      if (idx === null) return null;
+      setTiers((prev) => {
+        if (idx < 0 || idx >= prev.length) return prev;   // 그 사이 목록이 바뀌었으면 아무것도 안 지운다
+        const next = relabelTiers(prev.filter((_, i) => i !== idx));
+        persist(next);
+        return next;
+      });
+      return null;
     });
   }, [persist]);
 
@@ -2011,13 +2028,17 @@ export default function SettlementInfoTab({
           return new Set([...count.entries()].filter(([, n]) => n > 1).map(([id]) => id));
         })();
 
+        // canRemove: 차수가 1개뿐이어도 지울 수 있다 — 예전에는 `tiers.length > 1` 이라 휴지통이
+        // 아예 안 떠서, 잘못 만들어진 차수를 화면에서 지울 방법이 없었다(이아영 2026-08-25 요청,
+        // 운영 실측 2026-09-16: 차수 1개짜리 계약 줄 249개). 마지막 차수를 지워도 계약 줄은 남고
+        // 「+ 1차 … 추가」로 다시 만들 수 있다. 실제 삭제는 확인창을 지나야 일어난다.
         const renderTierCard = (tier: TierData, idx: number) => (
           <TierCard
             key={tier.id}
             tier={tier}
             fields={fields}
             index={idx}
-            canRemove={!readOnly && tiers.length > 1}
+            canRemove={!readOnly}
             readOnly={readOnly}
             autoFeeKey={consultFeeField && reversedRate !== null ? consultFeeField.key : null}
             autoRevenueVatKey={revenueVatField?.key || null}
@@ -2579,6 +2600,59 @@ export default function SettlementInfoTab({
           </div>
         </div>
       )}
+
+      {/* 차수 삭제 확인 모달 — 지우기 전에 「무엇을 지우는지」 보여 주고 한 번 묻는다.
+          값이 든 칸 수·주요 값·집계에서 빠진다는 경고를 함께 적는다(사장님 지시 2026-09-17). */}
+      {pendingDeleteTier !== null && (() => {
+        const idx = pendingDeleteTier;
+        const target = tiers[idx];
+        if (!target) return null;
+        const ordinal = ORDINAL_KO[idx] || `${idx + 1}차`;
+        const shown = fields
+          .filter((f) => !f.key.startsWith("_"))
+          .map((f) => ({ label: f.label, value: target[f.key] }))
+          .filter((x) => x.value !== null && x.value !== undefined && String(x.value).trim() !== "")
+          .slice(0, 4);
+        const filled = filledFieldCount(target);
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={`${ordinal} 차수 삭제 확인`}>
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setPendingDeleteTier(null)} />
+            <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-wedly-bd animate-modal-in">
+              <div className="px-5 pt-5 pb-3 flex items-start gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-wedly-bg-red flex items-center justify-center">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-wedly-red-ink">
+                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-wedly-sub font-bold text-wedly-navy break-keep">「{ordinal} {tierSuffix || ""}」 차수를 삭제할까요?</h3>
+                  <p className="mt-1 text-[12px] text-wedly-muted break-keep">{sectionTitle || "차수"} · 값이 든 칸 {filled}칸</p>
+                </div>
+              </div>
+              {shown.length > 0 && (
+                <div className="mx-5 mb-3 rounded-xl border border-wedly-bd overflow-hidden">
+                  {shown.map((x) => (
+                    <div key={x.label} className="flex items-center justify-between gap-3 px-3 py-1.5 text-[12px] border-b border-wedly-bd last:border-b-0">
+                      <span className="text-wedly-t2 flex-shrink-0">{x.label}</span>
+                      <span className="font-semibold tabular-nums truncate">{String(x.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="px-5 pb-4">
+                <p className="rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[12px] leading-relaxed text-wedly-red-ink break-keep">
+                  {tiers.length === 1 ? "이 회사의 마지막 차수입니다. 지워도 회사 자료는 남고 아래 「추가」로 다시 만들 수 있습니다. " : ""}
+                  지우면 되돌릴 수 없고, 매출·인센티브·정산 집계에서 이 차수가 빠집니다.
+                </p>
+              </div>
+              <div className="px-5 py-3 bg-wedly-bg-gray/50 border-t border-wedly-bd/60 flex items-center justify-end gap-2">
+                <button onClick={() => setPendingDeleteTier(null)} className="px-4 py-2 text-[13px] font-medium text-wedly-t2 bg-white border border-wedly-bd rounded-lg hover:bg-wedly-bg-gray transition-colors">취소</button>
+                <button onClick={confirmRemoveTier} className="px-4 py-2 text-[13px] font-bold text-white bg-wedly-red rounded-lg hover:brightness-110 transition-colors">삭제</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 스코어카드 삭제 확인 모달 */}
       {pendingDeleteCardId && (() => {
