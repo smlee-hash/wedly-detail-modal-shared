@@ -592,7 +592,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {shownSubTab === "contract" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "contract", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["계약정보_차수"] ?? null} onSave={onSaveTiersFor("계약정보_차수")} storagePrefix="contract" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "contract", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["계약정보_차수"] ?? null} onSave={onSaveTiersFor("계약정보_차수")} storagePrefix="contract" ensureFirstTier addButtonSuffixOverride="계약" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "contract", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 

@@ -33,7 +33,6 @@ import {
   ORDINAL_KO,
   makeEmptyTier,
   makeScoreCardId,
-  parseTiers,
   parseScoreCards,
   relabelTiers,
   generateFieldKey,
@@ -55,6 +54,12 @@ import { buildCondTargets } from "./cond-targets-helpers";
 import { typeChangeNeedsSave } from "./type-change-save";
 import { appendFieldOption, setFieldOptionColorDef } from "./field-option-append";
 import { splitHiddenFields, mergeHiddenFields } from "./hidden-fields-merge";
+import {
+  loadSettlementTiers,
+  isUnsavedFirstTierDraft,
+  afterLastTierRemoved,
+  lastTierDeleteWarning,
+} from "./settlement-first-tier";
 
 type RowData = Record<string, string | number | boolean | null>;
 
@@ -98,27 +103,6 @@ function fetchConfigCached(configApiPath: string, forceRefresh = false): Promise
     );
   }
   return _configPromiseByPath.get(configApiPath)!;
-}
-
-/**
- * 차수 목록 읽기 — **「빈 목록」과 「아직 없음」을 가른다.**
- *
- * 공용 `parseTiers` 는 빈 배열을 받으면 빈 차수 1개를 새로 만들어 준다(처음 쓰는 회사용).
- * 그런데 그 때문에 **마지막 차수를 지우면 곧바로 빈 차수가 되살아났다** — 지운 자리에 빈
- * 「1차」 카드가 다시 뜨고, 저장값은 이미 `[]` 라 서버 쓰기조차 건너뛰어 **아무리 지워도
- * 되살아났다**(독립 리뷰 F4, 삭제 확인창 문구와도 정반대).
- * 그래서 **값이 분명히 빈 배열일 때만** 빈 목록 그대로 둔다. 값이 아예 없는(null·미설정)
- * 회사는 지금처럼 빈 차수 1개로 시작한다 — 기존 동작 그대로다.
- */
-function parseTiersKeepEmpty(raw: unknown, fields: FieldDef[]): TierData[] {
-  let arr: unknown = raw;
-  if (typeof raw === "string") {
-    const t = raw.trim();
-    if (t === "") return parseTiers(raw, fields);
-    try { arr = JSON.parse(t); } catch { return parseTiers(raw, fields); }
-  }
-  if (Array.isArray(arr) && arr.length === 0) return [];
-  return parseTiers(raw, fields);
 }
 
 function fmtCurrency(n: number | null): string {
@@ -221,6 +205,7 @@ export default function SettlementInfoTab({
   defaultScoreCards,
   seedDefaultCardsForAllPrefixes = false,
   addButtonSuffixOverride,
+  ensureFirstTier = false,
   conditionFieldOptions,
   enableConditionalFormula,
   renderTierBadge,
@@ -274,6 +259,11 @@ export default function SettlementInfoTab({
   seedDefaultCardsForAllPrefixes?: boolean;
   // 차수추가 버튼 꼬리표 고정값 (하이브 "정산" 고정, 일루아 미지정→tierSuffix 사용)
   addButtonSuffixOverride?: string;
+  /**
+   * 명시적 빈 목록(`[]`)도 공용 parseTiers 로 빈 첫 차수 1개를 보여 준다. 기본 false.
+   * 초안은 열기·칸 불러오기·새로고침에서 저장하지 않는다. 정부 계약 탭만 켠다.
+   */
+  ensureFirstTier?: boolean;
   // 조건별 수식의 "기준 필드" 후보 (기본정보 평면 필드). ERP만 주입 → 주입될 때만 조건 UI 노출.
   //   미주입(파트너 앱)이면 조건 UI 자체가 안 보이고 기존과 100% 동일.
   conditionFieldOptions?: Array<{
@@ -399,7 +389,10 @@ export default function SettlementInfoTab({
   // ⚠️ 마운트 시 초기값을 빈 배열로 — 서버 fetch 응답 전까지 옛 기본 컬럼이 잠깐 보이는
   // 깜빡임 방지. 서버 응답이 진실의 원천.
   const [fields, setFields] = useState<FieldDef[]>([]);
-  const [tiers, setTiers] = useState<TierData[]>(() => parseTiersKeepEmpty(rawValue, []));
+  const [tiers, setTiers] = useState<TierData[]>(() => loadSettlementTiers(rawValue, [], ensureFirstTier).tiers);
+  const [unsavedFirstTierDraft, setUnsavedFirstTierDraft] = useState(
+    () => isUnsavedFirstTierDraft(rawValue, ensureFirstTier),
+  );
   const [fieldsLoaded, setFieldsLoaded] = useState(false);
   // ERP 가 설정한 스코어카드 제목 + 합산 소스 컬럼을 미러 (편집은 ERP 에서만)
   const [cardLabels, setCardLabels] = useState({
@@ -604,12 +597,16 @@ export default function SettlementInfoTab({
   }, [fieldsApiPath]);
 
   useEffect(() => {
-    setTiers(parseTiersKeepEmpty(rawValue, fields));
-  }, [rawValue, fields]);
+    const loaded = loadSettlementTiers(rawValue, fields, ensureFirstTier);
+    setTiers(loaded.tiers);
+    setUnsavedFirstTierDraft(loaded.isDraft);
+  }, [rawValue, fields, ensureFirstTier]);
 
   const persist = useCallback((next: TierData[]) => {
+    if (readOnly) return;
+    if (ensureFirstTier && next.length > 0) setUnsavedFirstTierDraft(false);
     onSave(JSON.stringify(next));
-  }, [onSave]);
+  }, [onSave, ensureFirstTier, readOnly]);
   // persistRef 동기 — 위에서 정의된 commitSubSectionDelete 가 호이스팅 없이 참조할 수 있게.
   useEffect(() => { persistRef.current = persist; }, [persist]);
 
@@ -696,10 +693,11 @@ export default function SettlementInfoTab({
       return updated;
     });
     if (changed) {
+      if (unsavedFirstTierDraft) return;
       setTiers(next);
       persist(next);
     }
-  }, [successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, tiers, persist]);
+  }, [successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, tiers, persist, unsavedFirstTierDraft]);
 
   const updateField = useCallback((idx: number, key: string, value: string | number | null) => {
     setTiers((prev) => {
@@ -807,13 +805,15 @@ export default function SettlementInfoTab({
       if (idx === null) return null;
       setTiers((prev) => {
         if (idx < 0 || idx >= prev.length) return prev;   // 그 사이 목록이 바뀌었으면 아무것도 안 지운다
-        const next = relabelTiers(prev.filter((_, i) => i !== idx));
-        persist(next);
-        return next;
+        const remaining = relabelTiers(prev.filter((_, i) => i !== idx));
+        const result = afterLastTierRemoved(remaining, fields, ensureFirstTier);
+        persist(result.persist);
+        setUnsavedFirstTierDraft(result.isDraft);
+        return result.display;
       });
       return null;
     });
-  }, [persist]);
+  }, [persist, fields, ensureFirstTier]);
 
   // 정산 컬럼 편집 — prompt 대신 위들리 디자인 모달
   const [fieldEditModal, setFieldEditModal] = useState<
@@ -2073,13 +2073,14 @@ export default function SettlementInfoTab({
         // 아예 안 떠서, 잘못 만들어진 차수를 화면에서 지울 방법이 없었다(이아영 2026-08-25 요청,
         // 운영 실측 2026-09-16: 차수 1개짜리 계약 줄 249개). 마지막 차수를 지워도 계약 줄은 남고
         // 「+ 1차 … 추가」로 다시 만들 수 있다. 실제 삭제는 확인창을 지나야 일어난다.
+        // 저장 안 한 첫 칸 초안(ensureFirstTier)은 휴지통을 숨긴다. 저장된 빈 차수는 지울 수 있다.
         const renderTierCard = (tier: TierData, idx: number) => (
           <TierCard
             key={tier.id}
             tier={tier}
             fields={fields}
             index={idx}
-            canRemove={!readOnly}
+            canRemove={!readOnly && !unsavedFirstTierDraft}
             readOnly={readOnly}
             autoFeeKey={consultFeeField && (rateForTier(tier) !== null) ? consultFeeField.key : null}
             autoRevenueVatKey={revenueVatField?.key || null}
@@ -2090,7 +2091,7 @@ export default function SettlementInfoTab({
             onOverrideChange={(key, value) => updateOverride(idx, key, value)}
             onLabelChange={(label) => updateTierLabel(idx, label)}
             onRemove={() => removeTier(idx)}
-            renderTierBadge={renderTierBadge}
+            renderTierBadge={unsavedFirstTierDraft ? undefined : renderTierBadge}
             tierIdDuplicated={dupTierIds.has(String(tier?.id ?? ""))}
             tierSuffix={tierSuffix}
             onTierSuffixChange={canEditStructure ? (next) => {
@@ -2682,7 +2683,7 @@ export default function SettlementInfoTab({
               )}
               <div className="px-5 pb-4">
                 <p className="rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[12px] leading-relaxed text-wedly-red-ink break-keep">
-                  {tiers.length === 1 ? "이 회사의 마지막 차수입니다. 지워도 회사 자료는 남고 아래 「추가」로 다시 만들 수 있습니다. " : ""}
+                  {tiers.length === 1 ? lastTierDeleteWarning(ensureFirstTier) : ""}
                   지우면 되돌릴 수 없고, 매출·인센티브·정산 집계에서 이 차수가 빠집니다.
                 </p>
               </div>
@@ -3487,7 +3488,7 @@ function FieldRow({
               {display}
               {dropPos && createPortal(
                 <div
-                  className="fixed z-[9999] w-56 rounded-xl border border-wedly-bd bg-white shadow-[0_8px_24px_-4px_rgba(10,34,68,0.18)]"
+                  className="fixed z-[9999] w-56 rounded-xl border border-wedly-bd bg-white shadow-lg"
                   style={{ top: dropPos.top, left: dropPos.left }}
                 >
                   <SelectDropdownBody
