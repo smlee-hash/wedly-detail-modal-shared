@@ -336,28 +336,6 @@ export default function SettlementInfoTab({
     [next[idx], next[target]] = [next[target], next[idx]];
     onUpdateSubSections(next);
   }, [onUpdateSubSections, subSectionsSafe]);
-  // persist 가 아래에서 정의되므로 ref 로 우회 — 호출 시점엔 항상 최신 함수 참조.
-  const persistRef = useRef<((next: TierData[]) => void) | null>(null);
-  // 어드민 — 세부 섹션 삭제. 그 영역에 속한 차수는 첫 번째 영역으로 자동 이동(데이터 보호).
-  const commitSubSectionDelete = useCallback(() => {
-    if (!subSectionDeleteConfirm || !onUpdateSubSections) return;
-    const deletingId = subSectionDeleteConfirm.id;
-    const remaining = subSectionsSafe.filter((s) => s.id !== deletingId);
-    setTiers((prev) => {
-      const moved = prev.map((t) => {
-        if (t._subSectionId === deletingId) {
-          const copy = { ...t };
-          delete copy._subSectionId;
-          return copy;
-        }
-        return t;
-      });
-      persistRef.current?.(moved);
-      return moved;
-    });
-    onUpdateSubSections(remaining);
-    setSubSectionDeleteConfirm(null);
-  }, [subSectionDeleteConfirm, onUpdateSubSections, subSectionsSafe]);
   // 편집 모드를 끄면 펼쳐둔 인라인 편집 바도 함께 닫는다.
   useEffect(() => {
     if (!editSubMode) setEditMenuOpenForId(null);
@@ -390,6 +368,13 @@ export default function SettlementInfoTab({
   // 깜빡임 방지. 서버 응답이 진실의 원천.
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [tiers, setTiers] = useState<TierData[]>(() => loadSettlementTiers(rawValue, [], ensureFirstTier).tiers);
+  // React 상태 갱신이 반영되기 전 연속 입력이 와도 항상 가장 최근 차수에서 다음 값을 계산한다.
+  // 모든 차수 교체는 replaceTiers 를 거쳐 화면 상태와 이 참조를 동시에 맞춘다.
+  const tiersRef = useRef(tiers);
+  const replaceTiers = useCallback((next: TierData[]) => {
+    tiersRef.current = next;
+    setTiers(next);
+  }, []);
   const [unsavedFirstTierDraft, setUnsavedFirstTierDraft] = useState(
     () => isUnsavedFirstTierDraft(rawValue, ensureFirstTier),
   );
@@ -598,17 +583,34 @@ export default function SettlementInfoTab({
 
   useEffect(() => {
     const loaded = loadSettlementTiers(rawValue, fields, ensureFirstTier);
-    setTiers(loaded.tiers);
+    replaceTiers(loaded.tiers);
     setUnsavedFirstTierDraft(loaded.isDraft);
-  }, [rawValue, fields, ensureFirstTier]);
+  }, [rawValue, fields, ensureFirstTier, replaceTiers]);
 
   const persist = useCallback((next: TierData[]) => {
     if (readOnly) return;
     if (ensureFirstTier && next.length > 0) setUnsavedFirstTierDraft(false);
     onSave(JSON.stringify(next));
   }, [onSave, ensureFirstTier, readOnly]);
-  // persistRef 동기 — 위에서 정의된 commitSubSectionDelete 가 호이스팅 없이 참조할 수 있게.
-  useEffect(() => { persistRef.current = persist; }, [persist]);
+
+  // 어드민 — 세부 섹션 삭제. 그 영역에 속한 차수는 첫 번째 영역으로 자동 이동(데이터 보호).
+  const commitSubSectionDelete = useCallback(() => {
+    if (!subSectionDeleteConfirm || !onUpdateSubSections) return;
+    const deletingId = subSectionDeleteConfirm.id;
+    const remaining = subSectionsSafe.filter((s) => s.id !== deletingId);
+    const moved = tiersRef.current.map((t) => {
+      if (t._subSectionId === deletingId) {
+        const copy = { ...t };
+        delete copy._subSectionId;
+        return copy;
+      }
+      return t;
+    });
+    replaceTiers(moved);
+    persist(moved);
+    onUpdateSubSections(remaining);
+    setSubSectionDeleteConfirm(null);
+  }, [subSectionDeleteConfirm, onUpdateSubSections, subSectionsSafe, replaceTiers, persist]);
 
   const persistFields = useCallback(async (next: FieldDef[]) => {
     setSavingFields(true);
@@ -694,100 +696,93 @@ export default function SettlementInfoTab({
     });
     if (changed) {
       if (unsavedFirstTierDraft) return;
-      setTiers(next);
+      replaceTiers(next);
       persist(next);
     }
-  }, [successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, tiers, persist, unsavedFirstTierDraft]);
+  }, [successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, tiers, persist, unsavedFirstTierDraft, replaceTiers]);
 
   const updateField = useCallback((idx: number, key: string, value: string | number | null) => {
-    setTiers((prev) => {
-      const next = prev.map((t, i) => i === idx ? { ...t, [key]: value } : t);
-      if (successField && key === successField.key) {
-        const m = typeof value === "number" ? value : (value === "" || value === null ? null : Number(value));
-        const updated: TierData = { ...next[idx], [successField.key]: m };
+    const next = tiersRef.current.map((t, i) => i === idx ? { ...t, [key]: value } : t);
+    if (successField && key === successField.key) {
+      const m = typeof value === "number" ? value : (value === "" || value === null ? null : Number(value));
+      const updated: TierData = { ...next[idx], [successField.key]: m };
 
-        let feeNum: number | null = null;
-        const tierRate = rateForTier(next[idx]);
-        if (consultFeeField && tierRate !== null) {
-          feeNum = m === null ? null : Math.round(m * tierRate);
-          updated[consultFeeField.key] = feeNum;
-        } else if (consultFeeField) {
-          const cur = updated[consultFeeField.key];
-          feeNum = typeof cur === "number" ? cur : Number(cur || 0);
-        }
+      let feeNum: number | null = null;
+      const tierRate = rateForTier(next[idx]);
+      if (consultFeeField && tierRate !== null) {
+        feeNum = m === null ? null : Math.round(m * tierRate);
+        updated[consultFeeField.key] = feeNum;
+      } else if (consultFeeField) {
+        const cur = updated[consultFeeField.key];
+        feeNum = typeof cur === "number" ? cur : Number(cur || 0);
+      }
 
-        if (revenueVatField) {
-          updated[revenueVatField.key] = m === null ? null : Math.round(m - (feeNum || 0));
-        }
+      if (revenueVatField) {
+        updated[revenueVatField.key] = m === null ? null : Math.round(m - (feeNum || 0));
+      }
 
+      if (revenueNetField) {
+        const vat = revenueVatField && typeof updated[revenueVatField.key] === "number"
+          ? (updated[revenueVatField.key] as number)
+          : (m === null ? null : Math.round(m - (feeNum || 0)));
+        updated[revenueNetField.key] = vat === null ? null : Math.round(vat / 1.1);
+      }
+
+      next[idx] = updated;
+    }
+
+    if (consultFeeField && key === consultFeeField.key && successField) {
+      const successVal = next[idx][successField.key];
+      const successNum = typeof successVal === "number" ? successVal : Number(successVal || 0);
+      const feeVal = typeof value === "number" ? value : Number(value || 0);
+      if (isFinite(successNum) && successNum > 0) {
+        if (revenueVatField) next[idx][revenueVatField.key] = Math.round(successNum - (isFinite(feeVal) ? feeVal : 0));
         if (revenueNetField) {
-          const vat = revenueVatField && typeof updated[revenueVatField.key] === "number"
-            ? (updated[revenueVatField.key] as number)
-            : (m === null ? null : Math.round(m - (feeNum || 0)));
-          updated[revenueNetField.key] = vat === null ? null : Math.round(vat / 1.1);
-        }
-
-        next[idx] = updated;
-      }
-
-      if (consultFeeField && key === consultFeeField.key && successField) {
-        const successVal = next[idx][successField.key];
-        const successNum = typeof successVal === "number" ? successVal : Number(successVal || 0);
-        const feeVal = typeof value === "number" ? value : Number(value || 0);
-        if (isFinite(successNum) && successNum > 0) {
-          if (revenueVatField) next[idx][revenueVatField.key] = Math.round(successNum - (isFinite(feeVal) ? feeVal : 0));
-          if (revenueNetField) {
-            const vat = revenueVatField && typeof next[idx][revenueVatField.key] === "number"
-              ? (next[idx][revenueVatField.key] as number)
-              : Math.round(successNum - (isFinite(feeVal) ? feeVal : 0));
-            next[idx][revenueNetField.key] = Math.round(vat / 1.1);
-          }
+          const vat = revenueVatField && typeof next[idx][revenueVatField.key] === "number"
+            ? (next[idx][revenueVatField.key] as number)
+            : Math.round(successNum - (isFinite(feeVal) ? feeVal : 0));
+          next[idx][revenueNetField.key] = Math.round(vat / 1.1);
         }
       }
+    }
 
-      persist(next);
-      return next;
-    });
-  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, rateForTier]);
+    replaceTiers(next);
+    persist(next);
+  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, replaceTiers]);
 
   const updateTierLabel = useCallback((idx: number, newLabel: string) => {
-    setTiers((prev) => {
-      const next = prev.map((t, i) => i === idx ? { ...t, label: newLabel } : t);
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+    const next = tiersRef.current.map((t, i) => i === idx ? { ...t, label: newLabel } : t);
+    replaceTiers(next);
+    persist(next);
+  }, [persist, replaceTiers]);
 
   // 수식 칸 수동 수정값 저장/해제 — value === null 이면 수식값으로 복원(키 삭제).
   const updateOverride = useCallback((idx: number, fieldKey: string, value: number | null) => {
-    setTiers((prev) => {
-      const ok = overrideKeyOf(fieldKey);
-      const next = prev.map((t, i) => {
-        if (i !== idx) return t;
-        const copy: TierData = { ...t };
-        if (value === null) delete copy[ok];
-        else copy[ok] = value;
-        return copy;
-      });
-      persist(next);
-      return next;
+    const ok = overrideKeyOf(fieldKey);
+    const next = tiersRef.current.map((t, i) => {
+      if (i !== idx) return t;
+      const copy: TierData = { ...t };
+      if (value === null) delete copy[ok];
+      else copy[ok] = value;
+      return copy;
     });
-  }, [persist]);
+    replaceTiers(next);
+    persist(next);
+  }, [persist, replaceTiers]);
 
   // 세부 섹션 인식 차수 추가 — subSectionId 가 주어지면 그 묶음에 배정, 없으면 옛 동작.
   const addTier = useCallback((subSectionId?: string) => {
-    setTiers((prev) => {
-      // 같은 세부 섹션 안의 차수 개수로 라벨(1차/2차…) 결정.
-      const sameGroupCount = subSectionId
-        ? prev.filter((t) => t._subSectionId === subSectionId).length
-        : prev.length;
-      const newTier: TierData = makeEmptyTier(sameGroupCount, fields);
-      if (subSectionId) newTier._subSectionId = subSectionId;
-      const next = [...prev, newTier];
-      persist(next);
-      return next;
-    });
-  }, [persist, fields]);
+    const prev = tiersRef.current;
+    // 같은 세부 섹션 안의 차수 개수로 라벨(1차/2차…) 결정.
+    const sameGroupCount = subSectionId
+      ? prev.filter((t) => t._subSectionId === subSectionId).length
+      : prev.length;
+    const newTier: TierData = makeEmptyTier(sameGroupCount, fields);
+    if (subSectionId) newTier._subSectionId = subSectionId;
+    const next = [...prev, newTier];
+    replaceTiers(next);
+    persist(next);
+  }, [persist, fields, replaceTiers]);
 
   // 차수 삭제 — 지우기 **전에** 한 번 묻는다.
   //
@@ -801,19 +796,17 @@ export default function SettlementInfoTab({
     setPendingDeleteTier(idx);
   }, []);
   const confirmRemoveTier = useCallback(() => {
-    setPendingDeleteTier((idx) => {
-      if (idx === null) return null;
-      setTiers((prev) => {
-        if (idx < 0 || idx >= prev.length) return prev;   // 그 사이 목록이 바뀌었으면 아무것도 안 지운다
-        const remaining = relabelTiers(prev.filter((_, i) => i !== idx));
-        const result = afterLastTierRemoved(remaining, fields, ensureFirstTier);
-        persist(result.persist);
-        setUnsavedFirstTierDraft(result.isDraft);
-        return result.display;
-      });
-      return null;
-    });
-  }, [persist, fields, ensureFirstTier]);
+    const idx = pendingDeleteTier;
+    if (idx === null) return;
+    setPendingDeleteTier(null);
+    const prev = tiersRef.current;
+    if (idx < 0 || idx >= prev.length) return;   // 그 사이 목록이 바뀌었으면 아무것도 안 지운다
+    const remaining = relabelTiers(prev.filter((_, i) => i !== idx));
+    const result = afterLastTierRemoved(remaining, fields, ensureFirstTier);
+    replaceTiers(result.display);
+    setUnsavedFirstTierDraft(result.isDraft);
+    persist(result.persist);
+  }, [pendingDeleteTier, persist, fields, ensureFirstTier, replaceTiers]);
 
   // 정산 컬럼 편집 — prompt 대신 위들리 디자인 모달
   const [fieldEditModal, setFieldEditModal] = useState<
@@ -958,12 +951,10 @@ export default function SettlementInfoTab({
       const next = [...fields, newField];
       setFields(next);
       persistFields(next);
-      setTiers((prev) => {
-        const empty = (draftType === "number" || draftType === "percent" || draftType === "formula") ? null : "";
-        const updated = prev.map((t) => ({ ...t, [key]: empty }));
-        persist(updated);
-        return updated;
-      });
+      const empty = (draftType === "number" || draftType === "percent" || draftType === "formula") ? null : "";
+      const updated = tiersRef.current.map((t) => ({ ...t, [key]: empty }));
+      replaceTiers(updated);
+      persist(updated);
     } else if (fieldEditModal.mode === "rename") {
       const label = draftLabel.trim();
       if (!label || label === fieldEditModal.label) { setFieldEditModal(null); return; }
@@ -1021,25 +1012,23 @@ export default function SettlementInfoTab({
       });
       setFields(next);
       persistFields(next);
-      setTiers((prev) => {
-        const updated = prev.map((t) => {
-          const v = t[key];
-          let conv: string | number | null;
-          if (newType === "number" || newType === "percent") {
-            conv = typeof v === "number" ? v : (v === "" || v == null ? null : Number(v) || null);
-          } else if (newType === "formula") {
-            conv = null; // 수식 컬럼은 자동 계산이라 저장값을 비워둠 (잔존 숫자 정리)
-          } else {
-            conv = v == null ? "" : String(v);
-          }
-          return { ...t, [key]: conv };
-        });
-        persist(updated);
-        return updated;
+      const updated = tiersRef.current.map((t) => {
+        const v = t[key];
+        let conv: string | number | null;
+        if (newType === "number" || newType === "percent") {
+          conv = typeof v === "number" ? v : (v === "" || v == null ? null : Number(v) || null);
+        } else if (newType === "formula") {
+          conv = null; // 수식 컬럼은 자동 계산이라 저장값을 비워둠 (잔존 숫자 정리)
+        } else {
+          conv = v == null ? "" : String(v);
+        }
+        return { ...t, [key]: conv };
       });
+      replaceTiers(updated);
+      persist(updated);
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope, replaceTiers]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
@@ -1073,17 +1062,15 @@ export default function SettlementInfoTab({
     const next = fields.filter((f) => f.key !== key);
     setFields(next);
     persistFields(next);
-    setTiers((prev) => {
-      const updated = prev.map((t) => {
-        const copy = { ...t };
-        delete copy[key];
-        return copy;
-      });
-      persist(updated);
-      return updated;
+    const updated = tiersRef.current.map((t) => {
+      const copy = { ...t };
+      delete copy[key];
+      return copy;
     });
+    replaceTiers(updated);
+    persist(updated);
     setPendingDeleteFieldKey(null);
-  }, [pendingDeleteFieldKey, fields, persistFields, persist]);
+  }, [pendingDeleteFieldKey, fields, persistFields, persist, replaceTiers]);
 
   // ── 칸 범위(공통↔커스텀) 변경 — 삭제 후 재생성 없이 그 자리에서 토글(ERP 편집기 전용) ──
   // 저장 시 서버가 공통/커스텀 보관함을 다시 가르므로 칸이 알맞은 보관함으로 옮겨진다. 입력값은 그대로 유지.
