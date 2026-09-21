@@ -49,6 +49,8 @@ import {
 import CustomSelect from "./CustomSelect";
 import DateFormulaEditor from "./DateFormulaEditor";
 import SelectDropdownBody from "./SelectDropdown";
+import MultiPersonEditor from "./MultiPersonEditor";
+import { splitPersonListSafe } from "../lib/person-helpers";
 import { buildCondTargets } from "./cond-targets-helpers";
 import { typeChangeNeedsSave } from "./type-change-save";
 import { appendFieldOption } from "./field-option-append";
@@ -2929,6 +2931,7 @@ function TierCard({
                       formulaResult={f.formulaResult}
                       options={f.options}
                       optionColors={f.optionColors}
+                      fieldKey={f.key}
                       onChange={(v) => onChange(f.key, v)}
                       onAddFieldOption={onAddFieldOption ? (opt) => onAddFieldOption(f.key, opt) : undefined}
                       overridden={overridden}
@@ -3245,9 +3248,11 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, overridden = false, formulaValue = null, canOverride = false, onOverrideChange,
+  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, fieldKey,
 }: {
   label: string;
+  /** 담당 컨설턴트만 여러 명을 고른다. 다른 칸은 이 값을 쓰지 않는다. */
+  fieldKey?: string;
   /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
   description?: string;
   type: FieldType;
@@ -3314,6 +3319,24 @@ function FieldRow({
     if (value === null || value === undefined || value === "") {
       return <span className="text-wedly-muted">{"-"}</span>;
     }
+    if (type === "select" && fieldKey === "담당컨설턴트") {
+      const parts = splitPersonListSafe(String(value));
+      if (parts.length === 0) return <span className="text-wedly-muted">-</span>;
+      return (
+        <span className="inline-flex flex-wrap gap-1">
+          {parts.map((part) => {
+            const c = optionColors?.[part];
+            return (
+              <span
+                key={part}
+                className="inline-block rounded-md px-2 py-0.5 text-[12px] font-medium bg-wedly-bg-gray text-wedly-t1"
+                style={c ? { backgroundColor: c.bg, color: c.text } : undefined}
+              >{part}</span>
+            );
+          })}
+        </span>
+      );
+    }
     if (type === "select") {
       const c = optionColors?.[String(value)];
       return (
@@ -3330,7 +3353,7 @@ function FieldRow({
       return <span className="tabular-nums font-medium">{fmtCurrency(value)}원</span>;
     }
     return <span>{String(value)}</span>;
-  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue]);
+  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue, fieldKey]);
 
   // 수식 컬럼은 사람이 입력하지 않음(자동 계산 읽기전용) — 단 관리자 수동 수정이 허용된 곳은 예외.
   const isEditable = !readOnly && !isAuto && (type !== "formula" || (canOverride && !!onOverrideChange));
@@ -3345,7 +3368,22 @@ function FieldRow({
       </div>
       <div ref={anchorRef} className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
         {editing && isEditable ? (
-          (type === "select") ? (
+          (type === "select" && fieldKey === "담당컨설턴트") ? (
+            dropPos && createPortal(
+              <div className="fixed z-[9999] w-72" style={{ top: dropPos.top, left: dropPos.left }}>
+                <MultiPersonEditor
+                  value={value == null ? "" : String(value)}
+                  userNames={[
+                    ...(options ?? []),
+                    ...splitPersonListSafe(value == null ? "" : String(value)).filter((name) => !(options ?? []).includes(name)),
+                  ]}
+                  onSave={(next) => { onChange(next); setEditing(false); }}
+                  onClose={() => setEditing(false)}
+                />
+              </div>,
+              document.body,
+            )
+          ) : (type === "select") ? (
             <>
               {display}
               {dropPos && createPortal(
