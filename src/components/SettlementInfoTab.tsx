@@ -22,6 +22,7 @@ import {
   type ScoreCardDef,
   type ScoreCardColor,
   type FormulaTerm,
+  type FormulaBlock,
   type FormulaResultFormat,
   type ConditionalRule,
   type ConditionClause,
@@ -38,6 +39,7 @@ import {
   generateFieldKey,
   parseFormulaTerms,
   evalFormulaForTier,
+  evalFormulaForTierDetailed,
   evalDateFormulaForTier,
   parseDateFormula,
   formatFormulaResult,
@@ -62,6 +64,7 @@ import {
 } from "./settlement-first-tier";
 
 type RowData = Record<string, string | number | boolean | null>;
+type SummaryValue = number | FormulaBlock;
 
 // 조건 편집 초안 타입 — 규칙별 조건 절 목록(clauses) + 묶음(combine) + 식.
 type DraftClause = { leftKey: string; right: ConditionCompare; op: ConditionOp };
@@ -1276,16 +1279,19 @@ export default function SettlementInfoTab({
   // 한 카드의 값 계산 — sum(plus) - sum(minus). 원본 숫자 그대로 합산.
   // (percent 변환은 직접 수식 unit=column 분기에서만 적용해 합산/차감 회귀 차단)
   // ★ 세부 섹션 인식 — 인자 없으면 옛 동작(전체), 있으면 그 영역만.
-  const sumColumnIn = useCallback((k: string, subId?: string) => {
+  const sumColumnIn = useCallback((k: string, subId?: string): SummaryValue => {
     const target = tiersInSubSection(subId);
     // 수식 컬럼은 저장값이 없으므로 차수마다 계산해서 합산.
     const field = fields.find((f) => f.key === k);
     if (field?.type === "formula") {
       // 날짜 수식 칸은 숫자 합계에 포함하지 않음 (문자열 날짜이므로 0 처리)
       if (field.formulaResult === "date") return 0;
-      return target.reduce((a, t) => {
-        const r = evalFormulaForTier(field, t, fields, undefined, row ?? undefined);
-        return a + (typeof r === "number" && Number.isFinite(r) ? r : 0);
+      return target.reduce<SummaryValue>((a, t) => {
+        if (typeof a !== "number") return a;
+        const r = evalFormulaForTierDetailed(field, t, fields, undefined, row ?? undefined);
+        // 실제 막힘은 보존하고, 막힘 없는 일반 null은 종전처럼 합산에서 제외한다.
+        if (r.blocked) return r.blocked;
+        return a + (typeof r.value === "number" && Number.isFinite(r.value) ? r.value : 0);
       }, 0);
     }
     return target.reduce((a, t) => a + (typeof t[k] === "number" ? (t[k] as number) : 0), 0);
@@ -1312,14 +1318,17 @@ export default function SettlementInfoTab({
   // unit=column 이면 그 컬럼 합계를 값으로 사용.
   //   ★ subId 가 있으면 그 영역 차수만 합산 (통합 탭 = subId 없음 → 전체)
   //   참조 컬럼이 percent 타입이면 곱셈에서 30%가 30으로 잘못 적용되지 않도록 /100 처리.
-  const applyCustoms = (base: number, customs: ReadonlyArray<{ op: "+" | "-" | "*" | "/"; value: number; unit: "number" | "percent" | "column"; columnKey?: string }> | undefined, subId?: string): number => {
+  const applyCustoms = (base: SummaryValue, customs: ReadonlyArray<{ op: "+" | "-" | "*" | "/"; value: number; unit: "number" | "percent" | "column"; columnKey?: string }> | undefined, subId?: string): SummaryValue => {
+    if (typeof base !== "number") return base;
     if (!customs || customs.length === 0) return base;
     let cur = base;
     for (const c of customs) {
       let v: number;
       if (c.unit === "percent") v = c.value / 100;
       else if (c.unit === "column" && c.columnKey) {
-        v = sumColumnIn(c.columnKey, subId);
+        const columnValue = sumColumnIn(c.columnKey, subId);
+        if (typeof columnValue !== "number") return columnValue;
+        v = columnValue;
         // 참조 컬럼이 percent 타입이면 비율로 변환 (예: 30 → 0.3)
         const refField = fields.find((f) => f.key === c.columnKey);
         if (refField?.type === "percent") v = v / 100;
@@ -1335,16 +1344,22 @@ export default function SettlementInfoTab({
 
   // 한 카드 계산 — 세부 섹션 필터링 인식.
   //   subId 없으면 전체. 있으면 그 영역의 차수만 합산.
-  const evalCardIn = useCallback((card: ScoreCardDef, subId?: string): number => {
+  const evalCardIn = useCallback((card: ScoreCardDef, subId?: string): SummaryValue => {
     const numberFieldKeys = new Set(fields.filter((f) => f.type === "number" || f.type === "percent" || f.type === "formula").map((f) => f.key));
-    const sumIfNumber = (keys: string[]) => keys.reduce((a, k) => a + (numberFieldKeys.has(k) ? sumColumnIn(k, subId) : 0), 0);
+    const sumIfNumber = (keys: string[]) => keys.reduce<SummaryValue>((a, k) => {
+      if (typeof a !== "number") return a;
+      const value = numberFieldKeys.has(k) ? sumColumnIn(k, subId) : 0;
+      return typeof value === "number" ? a + value : value;
+    }, 0);
     // applyCustoms 에도 subId 전달 — 직접 수식 unit=column 도 영역 필터링 따라감.
     const plusResult = applyCustoms(sumIfNumber(card.formula.plus), card.formula.plusCustom, subId);
+    if (typeof plusResult !== "number") return plusResult;
     const minusResult = applyCustoms(sumIfNumber(card.formula.minus), card.formula.minusCustom, subId);
+    if (typeof minusResult !== "number") return minusResult;
     return applyCustoms(plusResult - minusResult, card.formula.custom, subId);
   }, [fields, sumColumnIn]);
   // 옛 호환 — 인자 1개. 전체 합계.
-  const evalCard = useCallback((card: ScoreCardDef): number => evalCardIn(card), [evalCardIn]);
+  const evalCard = useCallback((card: ScoreCardDef): SummaryValue => evalCardIn(card), [evalCardIn]);
   // NO.132 — 카드에 보탤 실제 값이 하나도 없으면 true(화면에 '0원' 대신 '-').
   // 직접 수식(숫자·퍼센트 상수)이 걸려 있으면 사람이 넣은 값이므로 '값 있음'으로 본다.
   const cardIsEmpty = useCallback((card: ScoreCardDef, subId?: string): boolean => {
@@ -1557,7 +1572,7 @@ export default function SettlementInfoTab({
               <div key={card.id} className={`rounded-xl ${colors.bg} px-3 py-2.5`}>
                 <p className={`text-[10px] font-bold ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
                 <p className={`text-[16px] font-black ${colors.valueText} tabular-nums mt-0.5`}>
-                  {empty ? "-" : (
+                  {typeof value !== "number" || empty ? "-" : (
                     <>
                       {fmtCurrency(value) || "0"}
                       <span className={`text-[10px] font-bold ${colors.labelText} ml-1`}>원</span>
@@ -1594,7 +1609,7 @@ export default function SettlementInfoTab({
                         <div key={card.id} className={`rounded-lg ${colors.bg} px-2 py-1.5`}>
                           <p className={`text-[10px] font-medium ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
                           <p className={`text-[13px] font-bold ${colors.valueText} tabular-nums`}>
-                            {empty ? "-" : (
+                            {typeof value !== "number" || empty ? "-" : (
                               <>
                                 {fmtCurrency(value) || "0"}
                                 <span className={`text-[10px] font-medium ${colors.labelText} ml-1`}>원</span>
@@ -1631,6 +1646,7 @@ export default function SettlementInfoTab({
               const colors = SCORECARD_COLOR_CLASSES[card.color];
               // 합산/차감 컬럼, 직접 수식의 컬럼값 후보 — number·percent·formula(수식) 모두 포함
               const numberFields = fields.filter((f) => f.type === "number" || f.type === "percent" || f.type === "formula");
+              const value = evalCard(card);
               const COLOR_OPTIONS: Array<{ value: ScoreCardColor; label: string }> = [
                 { value: "gray", label: "회색" },
                 { value: "blue", label: "파랑" },
@@ -1646,7 +1662,7 @@ export default function SettlementInfoTab({
                     <div className={`rounded-lg ${colors.bg} px-3 py-2 sm:min-w-[120px]`}>
                       <p className={`text-[9px] font-bold ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
                       <p className={`text-[14px] font-black ${colors.valueText} tabular-nums`}>
-                        {cardIsEmpty(card) ? "-" : `${fmtCurrency(evalCard(card)) || "0"}원`}
+                        {typeof value !== "number" || cardIsEmpty(card) ? "-" : `${fmtCurrency(value) || "0"}원`}
                       </p>
                     </div>
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
