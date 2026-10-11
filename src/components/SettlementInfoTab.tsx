@@ -62,9 +62,18 @@ import {
   afterLastTierRemoved,
   lastTierDeleteWarning,
 } from "./settlement-first-tier";
+import {
+  createTierFieldEditIntent,
+  snapshotPersistedTiers,
+  type TierFieldEditIntentV1,
+  type TierPersistedShapes,
+} from "./tier-field-edit-intent";
 
 type RowData = Record<string, string | number | boolean | null>;
 type SummaryValue = number | FormulaBlock;
+
+// 아직 불러온 저장본이 없을 때의 빈 기록 — 바꾸지 않고 통째로 갈아끼우기만 한다.
+const NO_TIER_SHAPES: TierPersistedShapes = new Map();
 
 // 조건 편집 초안 타입 — 규칙별 조건 절 목록(clauses) + 묶음(combine) + 식.
 type DraftClause = { leftKey: string; right: ConditionCompare; op: ConditionOp };
@@ -216,7 +225,9 @@ export default function SettlementInfoTab({
 }: {
   rawValue: unknown;
   row?: RowData | null;
-  onSave: (jsonValue: string) => void;
+  // 둘째 인자(editIntent)는 사용자가 칸 하나를 직접 고쳐 확정한 저장에만 붙는다 — 렌더·자동 계산·구조 편집에는 없다.
+  //   옛 한 인자 콜백은 그대로 동작한다. 의도는 "고쳤다"는 주장일 뿐 권한·주인·기준을 증명하지 않는다.
+  onSave: (jsonValue: string, editIntent?: TierFieldEditIntentV1) => void;
   readOnly?: boolean;
   isAdmin?: boolean;
   // 합계 스코어카드 블록 숨김(임베드용).
@@ -378,6 +389,9 @@ export default function SettlementInfoTab({
     tiersRef.current = next;
     setTiers(next);
   }, []);
+  // 마지막으로 불러오거나 저장한 차수의 정규화 전 원본 모양(id 별) — 직접 고침 의도의 "이전 값"은 여기서 읽는다.
+  //   화면 차수(tiersRef)는 없던 칸·빈 글자가 null 로 바뀐 뒤라 원래 있던 값인지 알 수 없다.
+  const tierShapesRef = useRef<TierPersistedShapes>(NO_TIER_SHAPES);
   const [unsavedFirstTierDraft, setUnsavedFirstTierDraft] = useState(
     () => isUnsavedFirstTierDraft(rawValue, ensureFirstTier),
   );
@@ -586,14 +600,22 @@ export default function SettlementInfoTab({
 
   useEffect(() => {
     const loaded = loadSettlementTiers(rawValue, fields, ensureFirstTier);
+    // 첫 칸 초안에는 아직 저장된 금액이 없다. 기존 id만 유지하고 표시용 null을 이전 저장값으로 보내지 않는다.
+    const missingSource = rawValue == null || (typeof rawValue === "string" && rawValue.trim() === "");
+    tierShapesRef.current = snapshotPersistedTiers(loaded.isDraft || missingSource ? loaded.tiers.map(tier => ({ id: tier.id })) : rawValue);
     replaceTiers(loaded.tiers);
     setUnsavedFirstTierDraft(loaded.isDraft);
   }, [rawValue, fields, ensureFirstTier, replaceTiers]);
 
-  const persist = useCallback((next: TierData[]) => {
+  // editIntent 는 사용자가 칸을 직접 고친 확정에서만 넘어온다 — 같은 객체를 onSave 에 한 번만 건넨다.
+  const persist = useCallback((next: TierData[], editIntent?: TierFieldEditIntentV1) => {
     if (readOnly) return;
     if (ensureFirstTier && next.length > 0) setUnsavedFirstTierDraft(false);
-    onSave(JSON.stringify(next));
+    const json = JSON.stringify(next);
+    // 방금 보낸 JSON 이 이제 저장본 — 다음 고침의 "이전 값"이 된다(의도는 이미 이 위에서 만들어졌다).
+    tierShapesRef.current = snapshotPersistedTiers(json);
+    if (editIntent) onSave(json, editIntent);
+    else onSave(json);
   }, [onSave, ensureFirstTier, readOnly]);
 
   // 어드민 — 세부 섹션 삭제. 그 영역에 속한 차수는 첫 번째 영역으로 자동 이동(데이터 보호).
@@ -705,6 +727,10 @@ export default function SettlementInfoTab({
   }, [successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, tiers, persist, unsavedFirstTierDraft, replaceTiers]);
 
   const updateField = useCallback((idx: number, key: string, value: string | number | null) => {
+    // 사용자가 이 칸을 직접 고친 확정 한 번 — 의도는 값을 바꾸기 전 저장본에서 읽는다.
+    const editIntent = createTierFieldEditIntent({
+      kind: "field", tiers: tiersRef.current, index: idx, fieldKey: key, shapes: tierShapesRef.current,
+    });
     const next = tiersRef.current.map((t, i) => i === idx ? { ...t, [key]: value } : t);
     if (successField && key === successField.key) {
       const m = typeof value === "number" ? value : (value === "" || value === null ? null : Number(value));
@@ -750,7 +776,7 @@ export default function SettlementInfoTab({
     }
 
     replaceTiers(next);
-    persist(next);
+    persist(next, editIntent);
   }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, replaceTiers]);
 
   const updateTierLabel = useCallback((idx: number, newLabel: string) => {
@@ -762,6 +788,11 @@ export default function SettlementInfoTab({
   // 수식 칸 수동 수정값 저장/해제 — value === null 이면 수식값으로 복원(키 삭제).
   const updateOverride = useCallback((idx: number, fieldKey: string, value: number | null) => {
     const ok = overrideKeyOf(fieldKey);
+    // 값 지정은 override, 실제로 있던 수동값을 지우는 해제는 restore — 둘 다 실제 저장 키(ok)를 가리킨다.
+    //   지울 수동값이 없던 해제는 의도를 만들지 않는다(새 금액 입력이 아니다).
+    const editIntent = createTierFieldEditIntent({
+      kind: value === null ? "restore" : "override", tiers: tiersRef.current, index: idx, fieldKey: ok, shapes: tierShapesRef.current,
+    });
     const next = tiersRef.current.map((t, i) => {
       if (i !== idx) return t;
       const copy: TierData = { ...t };
@@ -770,7 +801,7 @@ export default function SettlementInfoTab({
       return copy;
     });
     replaceTiers(next);
-    persist(next);
+    persist(next, editIntent);
   }, [persist, replaceTiers]);
 
   // 세부 섹션 인식 차수 추가 — subSectionId 가 주어지면 그 묶음에 배정, 없으면 옛 동작.
@@ -809,6 +840,8 @@ export default function SettlementInfoTab({
     replaceTiers(result.display);
     setUnsavedFirstTierDraft(result.isDraft);
     persist(result.persist);
+    // 빈 목록을 보낸 직후에도 표시된 새 초안은 아직 저장된 금액이 없다. 부모 조회 응답 전의 첫 입력도 기록한다.
+    if (result.isDraft) tierShapesRef.current = snapshotPersistedTiers(result.display.map(tier => ({ id: tier.id })));
   }, [pendingDeleteTier, persist, fields, ensureFirstTier, replaceTiers]);
 
   // 정산 컬럼 편집 — prompt 대신 위들리 디자인 모달

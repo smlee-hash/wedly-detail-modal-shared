@@ -9,6 +9,8 @@ export type { CustomSelectOption } from "./components/CustomSelect";
 export { default as MeetingsTab } from "./components/MeetingsTab";
 
 export { default as SettlementInfoTab } from "./components/SettlementInfoTab";
+// 사용자가 차수 칸을 직접 고친 한 번의 확정 의도 — onSave 의 선택적 둘째 인자 타입.
+export type { TierFieldEditIntentV1 } from "./components/tier-field-edit-intent";
 
 // 정부지원금 상세 섹션 공용 패널(3앱 공통) — 어댑터가 createGovSubsidyPanel(config) 로 주입.
 export { createGovSubsidyPanel } from "./components/GovSubsidyPanel";
