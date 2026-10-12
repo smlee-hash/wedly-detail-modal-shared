@@ -21,6 +21,7 @@ import {
   type ScoreCardDef,
   type ScoreCardColor,
   type FormulaTerm,
+  type FormulaBlock,
   type FormulaResultFormat,
   type ConditionalRule,
   type ConditionClause,
@@ -53,8 +54,30 @@ import { buildCondTargets } from "./cond-targets-helpers";
 import { typeChangeNeedsSave } from "./type-change-save";
 import { appendFieldOption } from "./field-option-append";
 import { splitHiddenFields, mergeHiddenFields } from "./hidden-fields-merge";
+import { isUnsavedFirstTierDraft } from "./settlement-first-tier";
+import {
+  createTierFieldEditIntent,
+  snapshotPersistedTiers,
+  type TierFieldEditIntentV1,
+  type TierPersistedShapes,
+} from "./tier-field-edit-intent";
+import {
+  LEGACY_FEE_CONTEXT,
+  addFeeSelection,
+  createFeeTierContext,
+  feeSelectionHasValue,
+  feeUnresolvedMessage,
+  type FeeTargetForTier,
+  type FeeTierContext,
+  type FeeUnresolved,
+} from "./fee-tier-display";
 
 type RowData = Record<string, string | number | boolean | null>;
+// FeeUnresolved: 서버 수수료 칸이 풀리지 않은 차수가 끼어 있어 부분합을 만들지 않는다는 뜻 — 숫자가 아니라 카드에는 '-'.
+type SummaryValue = number | FormulaBlock | FeeUnresolved;
+
+// 아직 불러온 저장본이 없을 때의 빈 기록 — 바꾸지 않고 통째로 갈아끼우기만 한다.
+const NO_TIER_SHAPES: TierPersistedShapes = new Map();
 
 // 조건 편집 초안 타입 — 규칙별 조건 절 목록(clauses) + 묶음(combine) + 식.
 type DraftClause = { leftKey: string; right: ConditionCompare; op: ConditionOp };
@@ -151,7 +174,11 @@ export default function SettlementInfoTab({
   rawValue,
   row,
   onSave,
-  readOnly = false,
+  readOnly: readOnlyProp = false,
+  saveResetRevision,
+  saveInProgress = false,
+  canStartSave,
+  savedBasisVersion,
   isAdmin = false,
   // 합계 스코어카드(전체 합계) 블록을 통째로 숨김 — 작은 임베드 카드(통합협업 정책 섹션)용. 기본 false=기존 동작.
   hideSummaryCards = false,
@@ -192,6 +219,7 @@ export default function SettlementInfoTab({
   storagePrefix = "settlement",        // hive-config 키 prefix (settlement / contract / refund)
   fieldsApiPath = "/api/entries/settlement-fields", // 컬럼 정의 받는 쪽
   sectionTitle = "정산정보",            // 화면 표시 제목 (사용 안 함 — 섹션 헤더는 부모에서)
+  feeTargetForTier,
   // ── 세부 섹션 (단계 A) ──
   // 같은 영역 안에서 경정청구·정부지원금·인증제도 등 영역별로 차수 묶음을 나눌 수 있게.
   // 단계 A1 : prop 만 수신·통로 확보. UI 변경은 단계 A2 에서.
@@ -213,8 +241,16 @@ export default function SettlementInfoTab({
 }: {
   rawValue: unknown;
   row?: RowData | null;
-  onSave: (jsonValue: string) => void;
+  // 둘째 인자(editIntent)는 사용자가 칸 하나를 직접 고쳐 확정한 저장에만 붙는다 — 렌더·자동 계산·구조 편집에는 없다.
+  //   옛 한 인자 콜백은 그대로 동작한다. 의도는 "고쳤다"는 주장일 뿐 권한·주인·기준을 증명하지 않는다.
+  onSave: (jsonValue: string, editIntent?: TierFieldEditIntentV1) => void;
   readOnly?: boolean;
+  /** Same-raw failed-save recovery and per-owner in-flight acknowledgement. */
+  saveResetRevision?: number;
+  saveInProgress?: boolean;
+  canStartSave?: () => boolean;
+  /** 실제 저장된 원문과 수수료 관측을 함께 고정한 편집 기준. */
+  savedBasisVersion?: string;
   isAdmin?: boolean;
   // 합계 스코어카드 블록 숨김(임베드용).
   hideSummaryCards?: boolean;
@@ -240,6 +276,14 @@ export default function SettlementInfoTab({
   storagePrefix?: string;
   fieldsApiPath?: string;
   sectionTitle?: string;
+  /**
+   * 차수마다 「서버가 승인한 수수료 표시 대상」을 알려 주는 선택 함수(옛 방식 · 막힘 · 표준 대상 중 하나).
+   *
+   * 표준 대상의 칸 값(0·빈 값 포함)은 칸·합계 카드·그 칸에 기대는 수식에 그대로 쓰고, 어떤 것도 저장하지 않는다.
+   * 칸 정의에 feeStandard 표식(version 1)이 붙은 칸은 이 함수가 없으면(또는 대상을 못 찾으면) 옛 수식·저장값으로
+   * 돌아가지 않고 '-' 와 이유로 막힌다. 표식도 이 함수도 없으면 지금까지와 100% 동일.
+   */
+  feeTargetForTier?: FeeTargetForTier;
   subSections?: Array<{ id: string; label: string }>;
   onUpdateSubSections?: (list: Array<{ id: string; label: string }>) => void;
   // 자동 비율 계산에 쓰는 계약정보 row 키 (하이브 "10총환급금"/"20확정수수료", 일루아 "07계약금"/"13컨설턴트수수료")
@@ -272,6 +316,14 @@ export default function SettlementInfoTab({
    */
   renderTierBadge?: (index: number, tierId: string, tierIdDuplicated?: boolean) => ReactNode;
 }) {
+  const readOnly = readOnlyProp || saveInProgress;
+  // 현재 경로에서 한 번이라도 성공한 칸 정의만 저장에 쓴다. 같은 경로의 갱신 실패는 기존 정의를 유지한다.
+  const [fields, setFields] = useState<FieldDef[]>([]);
+  const [fieldsLoadedPath, setFieldsLoadedPath] = useState<string | null>(null);
+  const fieldsLoadedPathRef = useRef<string | null>(null);
+  const currentFieldsPathRef = useRef(fieldsApiPath);
+  currentFieldsPathRef.current = fieldsApiPath;
+  const fieldsLoaded = fieldsLoadedPath === fieldsApiPath;
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
   //   1개 이상이면 "통합" + 각 세부 섹션 탭 줄. 활성 탭만 본문 노출.
@@ -330,24 +382,24 @@ export default function SettlementInfoTab({
   const persistRef = useRef<((next: TierData[]) => void) | null>(null);
   // 어드민 — 세부 섹션 삭제. 그 영역에 속한 차수는 첫 번째 영역으로 자동 이동(데이터 보호).
   const commitSubSectionDelete = useCallback(() => {
-    if (!subSectionDeleteConfirm || !onUpdateSubSections) return;
+    if (!fieldsLoaded || readOnly || !subSectionDeleteConfirm || !onUpdateSubSections) return;
     const deletingId = subSectionDeleteConfirm.id;
     const remaining = subSectionsSafe.filter((s) => s.id !== deletingId);
-    setTiers((prev) => {
-      const moved = prev.map((t) => {
-        if (t._subSectionId === deletingId) {
-          const copy = { ...t };
-          delete copy._subSectionId;
-          return copy;
-        }
-        return t;
-      });
-      persistRef.current?.(moved);
-      return moved;
+    const moved = tiersRef.current.map((t) => {
+      if (t._subSectionId === deletingId) {
+        const copy = { ...t };
+        delete copy._subSectionId;
+        return copy;
+      }
+      return t;
     });
+    replaceTiers(moved);
+    persistRef.current?.(moved);
     onUpdateSubSections(remaining);
     setSubSectionDeleteConfirm(null);
-  }, [subSectionDeleteConfirm, onUpdateSubSections, subSectionsSafe]);
+  // replaceTiers·tiersRef 는 아래에서 만드는 안정된 참조(setTiers 와 같다) — 의존성에 넣으면 선언 전 접근이 된다.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subSectionDeleteConfirm, onUpdateSubSections, subSectionsSafe, fieldsLoaded, readOnly]);
   // 편집 모드를 끄면 펼쳐둔 인라인 편집 바도 함께 닫는다.
   useEffect(() => {
     if (!editSubMode) setEditMenuOpenForId(null);
@@ -370,17 +422,25 @@ export default function SettlementInfoTab({
   void sectionTitleSafe;
   // 구조 편집(전체 합계 카드 '편집' 버튼)은 본부(ERP)에서만 — allowStructureEdit 가 명시적으로 켜져야 한다.
   // (기본 꺼짐 → 파트너 앱은 isAdmin 이 참이어도 값 입력만 가능.)
-  const canEditColumns = !readOnly && isAdmin && (allowColumnEdit ?? allowStructureEdit);
+  const canEditColumns = fieldsLoaded && !readOnly && isAdmin && (allowColumnEdit ?? allowStructureEdit);
   // 세부섹션·차수접미사 등 "무거운 구조" 편집 — 본부(ERP)만(allowStructureEdit).
-  const canEditStructure = !readOnly && isAdmin && allowStructureEdit;
+  const canEditStructure = fieldsLoaded && !readOnly && isAdmin && allowStructureEdit;
   // 스코어카드 편집 게이트 — 칸 구조와 분리. 파트너 앱은 카드만(allowCardEdit), 칸 구조는 ERP만.
   //   allowCardEdit 미지정이면 allowStructureEdit 로 폴백 → 기존 호출부(ERP·다른분야) 100% 동일.
   const canEditCards = !readOnly && isAdmin && (allowCardEdit ?? allowStructureEdit);
   // ⚠️ 마운트 시 초기값을 빈 배열로 — 서버 fetch 응답 전까지 옛 기본 컬럼이 잠깐 보이는
   // 깜빡임 방지. 서버 응답이 진실의 원천.
-  const [fields, setFields] = useState<FieldDef[]>([]);
   const [tiers, setTiers] = useState<TierData[]>(() => parseTiers(rawValue, []));
-  const [fieldsLoaded, setFieldsLoaded] = useState(false);
+  // React 상태 갱신이 반영되기 전 연속 입력이 와도 항상 가장 최근 차수에서 다음 값을 계산한다.
+  // 모든 차수 교체는 replaceTiers 를 거쳐 화면 상태와 이 참조를 동시에 맞춘다.
+  const tiersRef = useRef(tiers);
+  const replaceTiers = useCallback((next: TierData[]) => {
+    tiersRef.current = next;
+    setTiers(next);
+  }, []);
+  // 마지막으로 불러오거나 저장한 차수의 정규화 전 원본 모양(id 별) — 직접 고침 의도의 "이전 값"은 여기서 읽는다.
+  //   화면 차수(tiersRef)는 없던 칸·빈 글자가 null 로 바뀐 뒤라 원래 있던 값인지 알 수 없다.
+  const tierShapesRef = useRef<TierPersistedShapes>(NO_TIER_SHAPES);
   // ERP 가 설정한 스코어카드 제목 + 합산 소스 컬럼을 미러 (편집은 ERP 에서만)
   const [cardLabels, setCardLabels] = useState({
     refund: "총 환급금", success: "성공보수 총액", fee: "컨설턴트 수수료 총액", revenue: "매출",
@@ -496,6 +556,18 @@ export default function SettlementInfoTab({
   );
   const reversedRate = rateInfo.ok ? rateInfo.rate : null;
 
+  // 차수마다 서버가 승인한 수수료 표시 문맥 — 표시(칸·합계)에만 쓰고 저장하지 않는다.
+  //   표식도 선택 함수도 없는 화면은 전부 LEGACY 라서 아래 모든 계산이 지금까지와 같다.
+  const feeContexts = useMemo(() => {
+    const byTier = new Map<TierData, FeeTierContext>();
+    for (const t of tiers) byTier.set(t, createFeeTierContext(t, fields, feeTargetForTier, row ?? undefined));
+    return byTier;
+  }, [tiers, fields, feeTargetForTier, row]);
+  const feeContextFor = useCallback(
+    (t: TierData): FeeTierContext => feeContexts.get(t) ?? createFeeTierContext(t, fields, feeTargetForTier, row ?? undefined),
+    [feeContexts, fields, feeTargetForTier, row],
+  );
+
   const successField = useMemo(() => {
     return fields.find((f) =>
       f.type === "number" &&
@@ -540,7 +612,10 @@ export default function SettlementInfoTab({
       // 칸 편집/저장 중엔 자동 갱신 건너뜀(작업 덮어쓰기 방지). 단 최초 1회는 항상 로드.
       if (!isInitial && (editFieldsRef.current || savingFieldsRef.current)) return;
       fetch(fieldsApiPath, { cache: "no-store" })
-        .then((r) => r.json())
+        .then((r) => {
+          if (!r.ok) throw new Error("칸 정보를 불러오지 못했습니다.");
+          return r.json();
+        })
         .then((j) => {
           if (cancelled) return;
           if (j.success && Array.isArray(j.data)) {
@@ -556,10 +631,11 @@ export default function SettlementInfoTab({
                 ? prev
                 : visible,
             );
+            fieldsLoadedPathRef.current = fieldsApiPath;
+            setFieldsLoadedPath(fieldsApiPath);
           }
         })
-        .catch(() => { /* 유지 */ })
-        .finally(() => { if (isInitial && !cancelled) setFieldsLoaded(true); });
+        .catch(() => { /* 같은 경로에서 성공한 정의만 유지한다. 실패는 읽기 성공이 아니다. */ });
     };
     loadFields(true);
     const interval = setInterval(() => loadFields(false), 60000);
@@ -575,17 +651,38 @@ export default function SettlementInfoTab({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldsApiPath]);
 
-  useEffect(() => {
-    setTiers(parseTiers(rawValue, fields));
-  }, [rawValue, fields]);
+  const resetTiersFromSaved = useCallback(() => {
+    const parsed = parseTiers(rawValue, fields);
+    // 이 화면은 저장된 차수가 없어도(없는 값·빈 목록) 빈 차수 1개를 첫 칸으로 보여 준다(기존 동작 그대로).
+    //   그 첫 칸에는 아직 저장된 금액이 없다 — 기존 id 만 유지하고, 표시용 null·빈 글자를 이전 저장값으로 보내지 않는다.
+    tierShapesRef.current = snapshotPersistedTiers(
+      isUnsavedFirstTierDraft(rawValue, true) ? parsed.map((tier) => ({ id: tier.id })) : rawValue,
+    );
+    replaceTiers(parsed);
+  }, [rawValue, fields, replaceTiers]);
+  useEffect(() => { resetTiersFromSaved(); }, [resetTiersFromSaved, saveResetRevision, savedBasisVersion]);
 
-  const persist = useCallback((next: TierData[]) => {
-    onSave(JSON.stringify(next));
-  }, [onSave]);
+  // editIntent 는 사용자가 칸을 직접 고친 확정에서만 넘어온다 — 같은 객체를 onSave 에 한 번만 건넨다.
+  const persist = useCallback((next: TierData[], editIntent?: TierFieldEditIntentV1) => {
+    // 추가·삭제·이름·자동 계산 등 모든 저장 경로에서, 아직 모르는 칸을 빈 값으로 덮지 않는다.
+    if (!fieldsLoaded || fieldsLoadedPathRef.current !== fieldsApiPath || currentFieldsPathRef.current !== fieldsApiPath) {
+      resetTiersFromSaved();
+      return;
+    }
+    if (canStartSave && !canStartSave()) { resetTiersFromSaved(); return; }
+
+    if (readOnly) return;
+    const json = JSON.stringify(next);
+    // 방금 보낸 JSON 이 이제 저장본 — 다음 고침의 "이전 값"이 된다(의도는 이미 이 위에서 만들어졌다).
+    if (saveResetRevision === undefined) tierShapesRef.current = snapshotPersistedTiers(json);
+    if (editIntent) onSave(json, editIntent);
+    else onSave(json);
+  }, [onSave, readOnly, canStartSave, resetTiersFromSaved, saveResetRevision, fieldsLoaded, fieldsApiPath]);
   // persistRef 동기 — 위에서 정의된 commitSubSectionDelete 가 호이스팅 없이 참조할 수 있게.
-  useEffect(() => { persistRef.current = persist; }, [persist]);
+  useEffect(() => { persistRef.current = persist; }, [persist, readOnly, canStartSave, resetTiersFromSaved, saveResetRevision]);
 
   const persistFields = useCallback(async (next: FieldDef[]) => {
+    if (!fieldsLoaded || fieldsLoadedPathRef.current !== fieldsApiPath || currentFieldsPathRef.current !== fieldsApiPath) return;
     setSavingFields(true);
     try {
       // 숨김은 표시 전용 — 전체 교체 PUT 에서 숨김 칸이 지워지지 않게 되끼운다.
@@ -607,9 +704,7 @@ export default function SettlementInfoTab({
     } finally {
       setSavingFields(false);
     }
-  // dialog 는 안정된 클로저 — 의존성에 안 넣어도 OK
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fieldsApiPath, fieldsLoaded, showNotice]);
 
   // 드롭다운에서 새 보기를 칸 정의(options)에 영구 저장. canEditColumns 일 때만 아래로 넘긴다.
   const addOptionToField = useCallback((fieldKey: string, opt: string) => {
@@ -623,6 +718,8 @@ export default function SettlementInfoTab({
     if (!successField || !consultFeeField) return;
     let changed = false;
     const next = tiers.map((t) => {
+      // 서버가 수수료를 정하는 차수는 옛 비율로 채우지 않는다 — 열기·새로고침이 저장을 만들지 않게.
+      if (feeContextFor(t).serverManaged) return t;
       const success = t[successField.key];
       const successNum = typeof success === "number" ? success : Number(success);
       if (!isFinite(successNum) || successNum <= 0) return t;
@@ -659,107 +756,119 @@ export default function SettlementInfoTab({
       return updated;
     });
     if (changed) {
-      setTiers(next);
-      persist(next);
+      replaceTiers(next);
+      if (saveResetRevision === undefined) persist(next);
     }
-  }, [successField, consultFeeField, revenueVatField, revenueNetField, reversedRate, tiers, persist]);
+  }, [successField, consultFeeField, revenueVatField, revenueNetField, reversedRate, feeContextFor, tiers, persist, replaceTiers, saveResetRevision]);
 
   const updateField = useCallback((idx: number, key: string, value: string | number | null) => {
-    setTiers((prev) => {
-      const next = prev.map((t, i) => i === idx ? { ...t, [key]: value } : t);
-      if (successField && key === successField.key) {
-        const m = typeof value === "number" ? value : (value === "" || value === null ? null : Number(value));
-        const updated: TierData = { ...next[idx], [successField.key]: m };
-
-        let feeNum: number | null = null;
-        if (consultFeeField && reversedRate !== null) {
-          feeNum = m === null ? null : Math.round(m * reversedRate);
-          updated[consultFeeField.key] = feeNum;
-        } else if (consultFeeField) {
-          const cur = updated[consultFeeField.key];
-          feeNum = typeof cur === "number" ? cur : Number(cur || 0);
-        }
-
-        if (revenueVatField) {
-          updated[revenueVatField.key] = m === null ? null : Math.round(m - (feeNum || 0));
-        }
-
-        if (revenueNetField) {
-          const vat = revenueVatField && typeof updated[revenueVatField.key] === "number"
-            ? (updated[revenueVatField.key] as number)
-            : (m === null ? null : Math.round(m - (feeNum || 0)));
-          updated[revenueNetField.key] = vat === null ? null : Math.round(vat / 1.1);
-        }
-
-        next[idx] = updated;
-      }
-
-      if (consultFeeField && key === consultFeeField.key && successField) {
-        const successVal = next[idx][successField.key];
-        const successNum = typeof successVal === "number" ? successVal : Number(successVal || 0);
-        const feeVal = typeof value === "number" ? value : Number(value || 0);
-        if (isFinite(successNum) && successNum > 0) {
-          if (revenueVatField) next[idx][revenueVatField.key] = Math.round(successNum - (isFinite(feeVal) ? feeVal : 0));
-          if (revenueNetField) {
-            const vat = revenueVatField && typeof next[idx][revenueVatField.key] === "number"
-              ? (next[idx][revenueVatField.key] as number)
-              : Math.round(successNum - (isFinite(feeVal) ? feeVal : 0));
-            next[idx][revenueNetField.key] = Math.round(vat / 1.1);
-          }
-        }
-      }
-
-      persist(next);
-      return next;
+    if (!fieldsLoaded) { resetTiersFromSaved(); return; }
+    if (canStartSave && !canStartSave()) return;
+    if (readOnly) return;
+    // 사용자가 이 칸을 직접 고친 확정 한 번 — 의도는 값을 바꾸기 전 저장본에서 읽는다.
+    const editIntent = createTierFieldEditIntent({
+      kind: "field", tiers: tiersRef.current, index: idx, fieldKey: key, shapes: tierShapesRef.current,
     });
-  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, reversedRate]);
+    const next = tiersRef.current.map((t, i) => i === idx ? { ...t, [key]: value } : t);
+    // 서버가 수수료를 정하는 차수는 고친 칸만 바뀐다 — 옛 비율 연쇄 계산을 하지 않는다.
+    const current = tiersRef.current[idx];
+    const serverManaged = current ? feeContextFor(current).serverManaged : false;
+    if (!serverManaged && successField && key === successField.key) {
+      const m = typeof value === "number" ? value : (value === "" || value === null ? null : Number(value));
+      const updated: TierData = { ...next[idx], [successField.key]: m };
+
+      let feeNum: number | null = null;
+      if (consultFeeField && reversedRate !== null) {
+        feeNum = m === null ? null : Math.round(m * reversedRate);
+        updated[consultFeeField.key] = feeNum;
+      } else if (consultFeeField) {
+        const cur = updated[consultFeeField.key];
+        feeNum = typeof cur === "number" ? cur : Number(cur || 0);
+      }
+
+      if (revenueVatField) {
+        updated[revenueVatField.key] = m === null ? null : Math.round(m - (feeNum || 0));
+      }
+
+      if (revenueNetField) {
+        const vat = revenueVatField && typeof updated[revenueVatField.key] === "number"
+          ? (updated[revenueVatField.key] as number)
+          : (m === null ? null : Math.round(m - (feeNum || 0)));
+        updated[revenueNetField.key] = vat === null ? null : Math.round(vat / 1.1);
+      }
+
+      next[idx] = updated;
+    }
+
+    if (!serverManaged && consultFeeField && key === consultFeeField.key && successField) {
+      const successVal = next[idx][successField.key];
+      const successNum = typeof successVal === "number" ? successVal : Number(successVal || 0);
+      const feeVal = typeof value === "number" ? value : Number(value || 0);
+      if (isFinite(successNum) && successNum > 0) {
+        if (revenueVatField) next[idx][revenueVatField.key] = Math.round(successNum - (isFinite(feeVal) ? feeVal : 0));
+        if (revenueNetField) {
+          const vat = revenueVatField && typeof next[idx][revenueVatField.key] === "number"
+            ? (next[idx][revenueVatField.key] as number)
+            : Math.round(successNum - (isFinite(feeVal) ? feeVal : 0));
+          next[idx][revenueNetField.key] = Math.round(vat / 1.1);
+        }
+      }
+    }
+
+    replaceTiers(next);
+    persist(next, editIntent);
+  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, reversedRate, feeContextFor, replaceTiers, readOnly, canStartSave, fieldsLoaded, resetTiersFromSaved]);
 
   const updateTierLabel = useCallback((idx: number, newLabel: string) => {
-    setTiers((prev) => {
-      const next = prev.map((t, i) => i === idx ? { ...t, label: newLabel } : t);
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+    if (!fieldsLoaded || readOnly) { resetTiersFromSaved(); return; }
+    const next = tiersRef.current.map((t, i) => i === idx ? { ...t, label: newLabel } : t);
+    replaceTiers(next);
+    persist(next);
+  }, [persist, replaceTiers, fieldsLoaded, readOnly, resetTiersFromSaved]);
 
   // 수식 칸 수동 수정값 저장/해제 — value === null 이면 수식값으로 복원(키 삭제).
   const updateOverride = useCallback((idx: number, fieldKey: string, value: number | null) => {
-    setTiers((prev) => {
-      const ok = overrideKeyOf(fieldKey);
-      const next = prev.map((t, i) => {
-        if (i !== idx) return t;
-        const copy: TierData = { ...t };
-        if (value === null) delete copy[ok];
-        else copy[ok] = value;
-        return copy;
-      });
-      persist(next);
-      return next;
+    if (!fieldsLoaded) { resetTiersFromSaved(); return; }
+    if (canStartSave && !canStartSave()) return;
+    if (readOnly) return;
+    const ok = overrideKeyOf(fieldKey);
+    // 값 지정은 override, 실제로 있던 수동값을 지우는 해제는 restore — 둘 다 실제 저장 키(ok)를 가리킨다.
+    //   지울 수동값이 없던 해제는 의도를 만들지 않는다(새 금액 입력이 아니다).
+    const editIntent = createTierFieldEditIntent({
+      kind: value === null ? "restore" : "override", tiers: tiersRef.current, index: idx, fieldKey: ok, shapes: tierShapesRef.current,
     });
-  }, [persist]);
+    const next = tiersRef.current.map((t, i) => {
+      if (i !== idx) return t;
+      const copy: TierData = { ...t };
+      if (value === null) delete copy[ok];
+      else copy[ok] = value;
+      return copy;
+    });
+    replaceTiers(next);
+    persist(next, editIntent);
+  }, [persist, replaceTiers, readOnly, canStartSave, fieldsLoaded, resetTiersFromSaved]);
 
   // 세부 섹션 인식 차수 추가 — subSectionId 가 주어지면 그 묶음에 배정, 없으면 옛 동작.
   const addTier = useCallback((subSectionId?: string) => {
-    setTiers((prev) => {
-      // 같은 세부 섹션 안의 차수 개수로 라벨(1차/2차…) 결정.
-      const sameGroupCount = subSectionId
-        ? prev.filter((t) => t._subSectionId === subSectionId).length
-        : prev.length;
-      const newTier: TierData = makeEmptyTier(sameGroupCount, fields);
-      if (subSectionId) newTier._subSectionId = subSectionId;
-      const next = [...prev, newTier];
-      persist(next);
-      return next;
-    });
-  }, [persist, fields]);
+    if (!fieldsLoaded || readOnly) { resetTiersFromSaved(); return; }
+    const prev = tiersRef.current;
+    // 같은 세부 섹션 안의 차수 개수로 라벨(1차/2차…) 결정.
+    const sameGroupCount = subSectionId
+      ? prev.filter((t) => t._subSectionId === subSectionId).length
+      : prev.length;
+    const newTier: TierData = makeEmptyTier(sameGroupCount, fields);
+    if (subSectionId) newTier._subSectionId = subSectionId;
+    const next = [...prev, newTier];
+    replaceTiers(next);
+    persist(next);
+  }, [persist, fields, replaceTiers, fieldsLoaded, readOnly, resetTiersFromSaved]);
 
   const removeTier = useCallback((idx: number) => {
-    setTiers((prev) => {
-      const next = relabelTiers(prev.filter((_, i) => i !== idx));
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+    if (!fieldsLoaded || readOnly) { resetTiersFromSaved(); return; }
+    const next = relabelTiers(tiersRef.current.filter((_, i) => i !== idx));
+    replaceTiers(next);
+    persist(next);
+  }, [persist, replaceTiers, fieldsLoaded, readOnly, resetTiersFromSaved]);
 
   // 정산 컬럼 편집 — prompt 대신 위들리 디자인 모달
   const [fieldEditModal, setFieldEditModal] = useState<
@@ -904,12 +1013,10 @@ export default function SettlementInfoTab({
       const next = [...fields, newField];
       setFields(next);
       persistFields(next);
-      setTiers((prev) => {
-        const empty = (draftType === "number" || draftType === "percent" || draftType === "formula") ? null : "";
-        const updated = prev.map((t) => ({ ...t, [key]: empty }));
-        persist(updated);
-        return updated;
-      });
+      const empty = (draftType === "number" || draftType === "percent" || draftType === "formula") ? null : "";
+      const updated = tiersRef.current.map((t) => ({ ...t, [key]: empty }));
+      replaceTiers(updated);
+      persist(updated);
     } else if (fieldEditModal.mode === "rename") {
       const label = draftLabel.trim();
       if (!label || label === fieldEditModal.label) { setFieldEditModal(null); return; }
@@ -967,25 +1074,23 @@ export default function SettlementInfoTab({
       });
       setFields(next);
       persistFields(next);
-      setTiers((prev) => {
-        const updated = prev.map((t) => {
-          const v = t[key];
-          let conv: string | number | null;
-          if (newType === "number" || newType === "percent") {
-            conv = typeof v === "number" ? v : (v === "" || v == null ? null : Number(v) || null);
-          } else if (newType === "formula") {
-            conv = null; // 수식 컬럼은 자동 계산이라 저장값을 비워둠 (잔존 숫자 정리)
-          } else {
-            conv = v == null ? "" : String(v);
-          }
-          return { ...t, [key]: conv };
-        });
-        persist(updated);
-        return updated;
+      const updated = tiersRef.current.map((t) => {
+        const v = t[key];
+        let conv: string | number | null;
+        if (newType === "number" || newType === "percent") {
+          conv = typeof v === "number" ? v : (v === "" || v == null ? null : Number(v) || null);
+        } else if (newType === "formula") {
+          conv = null; // 수식 컬럼은 자동 계산이라 저장값을 비워둠 (잔존 숫자 정리)
+        } else {
+          conv = v == null ? "" : String(v);
+        }
+        return { ...t, [key]: conv };
       });
+      replaceTiers(updated);
+      persist(updated);
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope, replaceTiers]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
@@ -1019,17 +1124,15 @@ export default function SettlementInfoTab({
     const next = fields.filter((f) => f.key !== key);
     setFields(next);
     persistFields(next);
-    setTiers((prev) => {
-      const updated = prev.map((t) => {
-        const copy = { ...t };
-        delete copy[key];
-        return copy;
-      });
-      persist(updated);
-      return updated;
+    const updated = tiersRef.current.map((t) => {
+      const copy = { ...t };
+      delete copy[key];
+      return copy;
     });
+    replaceTiers(updated);
+    persist(updated);
     setPendingDeleteFieldKey(null);
-  }, [pendingDeleteFieldKey, fields, persistFields, persist]);
+  }, [pendingDeleteFieldKey, fields, persistFields, persist, replaceTiers]);
 
   // ── 칸 범위(공통↔커스텀) 변경 — 삭제 후 재생성 없이 그 자리에서 토글(ERP 편집기 전용) ──
   // 저장 시 서버가 공통/커스텀 보관함을 다시 가르므로 칸이 알맞은 보관함으로 옮겨진다. 입력값은 그대로 유지.
@@ -1235,20 +1338,30 @@ export default function SettlementInfoTab({
   // 한 카드의 값 계산 — sum(plus) - sum(minus). 원본 숫자 그대로 합산.
   // (percent 변환은 직접 수식 unit=column 분기에서만 적용해 합산/차감 회귀 차단)
   // ★ 세부 섹션 인식 — 인자 없으면 옛 동작(전체), 있으면 그 영역만.
-  const sumColumnIn = useCallback((k: string, subId?: string) => {
+  const sumColumnIn = useCallback((k: string, subId?: string): SummaryValue => {
     const target = tiersInSubSection(subId);
     // 수식 컬럼은 저장값이 없으므로 차수마다 계산해서 합산.
     const field = fields.find((f) => f.key === k);
     if (field?.type === "formula") {
       // 날짜 수식 칸은 숫자 합계에 포함하지 않음 (문자열 날짜이므로 0 처리)
       if (field.formulaResult === "date") return 0;
-      return target.reduce((a, t) => {
+      return target.reduce<SummaryValue>((a, t) => {
+        if (typeof a !== "number") return a;
+        // 서버가 정한 수수료 칸(또는 그 칸에 기대는 수식)은 화면 칸과 같은 선택값으로 더한다.
+        //   풀리지 않은 차수가 하나라도 있으면 부분합 대신 합계를 막는다.
+        const fee = addFeeSelection(a, feeContextFor(t).select(field));
+        if (fee !== null) return fee;
         const r = evalFormulaForTier(field, t, fields, undefined, row ?? undefined);
         return a + (typeof r === "number" && Number.isFinite(r) ? r : 0);
       }, 0);
     }
-    return target.reduce((a, t) => a + (typeof t[k] === "number" ? (t[k] as number) : 0), 0);
-  }, [tiersInSubSection, fields, row]);
+    return target.reduce<SummaryValue>((a, t) => {
+      if (typeof a !== "number") return a;
+      const fee = field ? addFeeSelection(a, feeContextFor(t).select(field)) : null;
+      if (fee !== null) return fee;
+      return a + (typeof t[k] === "number" ? (t[k] as number) : 0);
+    }, 0);
+  }, [tiersInSubSection, fields, row, feeContextFor]);
   // 옛 호출 호환 — 인자 1개. 항상 전체 합산.
   const sumColumn = useCallback((k: string) => sumColumnIn(k), [sumColumnIn]);
   // NO.132 — 이 칸에 '실제로 더할 값'이 하나라도 있었나. 합계 카드가 0원을 보여줄지 '-'를
@@ -1261,24 +1374,32 @@ export default function SettlementInfoTab({
     if (field?.type === "formula") {
       if (field.formulaResult === "date") return false;
       return target.some((t) => {
+        const fee = feeSelectionHasValue(feeContextFor(t).select(field));
+        if (fee !== null) return fee;
         const r = evalFormulaForTier(field, t, fields, undefined, row ?? undefined);
         return typeof r === "number" && Number.isFinite(r);
       });
     }
-    return target.some((t) => typeof t[k] === "number");
-  }, [tiersInSubSection, fields, row]);
+    return target.some((t) => {
+      const fee = field ? feeSelectionHasValue(feeContextFor(t).select(field)) : null;
+      return fee !== null ? fee : typeof t[k] === "number";
+    });
+  }, [tiersInSubSection, fields, row, feeContextFor]);
   // 직접 수식 항목 배열을 base 에 순차 적용 — 합산/차감/전체 3 곳에서 공통 사용
   // unit=column 이면 그 컬럼 합계를 값으로 사용.
   //   ★ subId 가 있으면 그 영역 차수만 합산 (통합 탭 = subId 없음 → 전체)
   //   참조 컬럼이 percent 타입이면 곱셈에서 30%가 30으로 잘못 적용되지 않도록 /100 처리.
-  const applyCustoms = (base: number, customs: ReadonlyArray<{ op: "+" | "-" | "*" | "/"; value: number; unit: "number" | "percent" | "column"; columnKey?: string }> | undefined, subId?: string): number => {
+  const applyCustoms = (base: SummaryValue, customs: ReadonlyArray<{ op: "+" | "-" | "*" | "/"; value: number; unit: "number" | "percent" | "column"; columnKey?: string }> | undefined, subId?: string): SummaryValue => {
+    if (typeof base !== "number") return base;
     if (!customs || customs.length === 0) return base;
     let cur = base;
     for (const c of customs) {
       let v: number;
       if (c.unit === "percent") v = c.value / 100;
       else if (c.unit === "column" && c.columnKey) {
-        v = sumColumnIn(c.columnKey, subId);
+        const columnValue = sumColumnIn(c.columnKey, subId);
+        if (typeof columnValue !== "number") return columnValue;
+        v = columnValue;
         // 참조 컬럼이 percent 타입이면 비율로 변환 (예: 30 → 0.3)
         const refField = fields.find((f) => f.key === c.columnKey);
         if (refField?.type === "percent") v = v / 100;
@@ -1294,16 +1415,22 @@ export default function SettlementInfoTab({
 
   // 한 카드 계산 — 세부 섹션 필터링 인식.
   //   subId 없으면 전체. 있으면 그 영역의 차수만 합산.
-  const evalCardIn = useCallback((card: ScoreCardDef, subId?: string): number => {
+  const evalCardIn = useCallback((card: ScoreCardDef, subId?: string): SummaryValue => {
     const numberFieldKeys = new Set(fields.filter((f) => f.type === "number" || f.type === "percent" || f.type === "formula").map((f) => f.key));
-    const sumIfNumber = (keys: string[]) => keys.reduce((a, k) => a + (numberFieldKeys.has(k) ? sumColumnIn(k, subId) : 0), 0);
+    const sumIfNumber = (keys: string[]) => keys.reduce<SummaryValue>((a, k) => {
+      if (typeof a !== "number") return a;
+      const value = numberFieldKeys.has(k) ? sumColumnIn(k, subId) : 0;
+      return typeof value === "number" ? a + value : value;
+    }, 0);
     // applyCustoms 에도 subId 전달 — 직접 수식 unit=column 도 영역 필터링 따라감.
     const plusResult = applyCustoms(sumIfNumber(card.formula.plus), card.formula.plusCustom, subId);
+    if (typeof plusResult !== "number") return plusResult;
     const minusResult = applyCustoms(sumIfNumber(card.formula.minus), card.formula.minusCustom, subId);
+    if (typeof minusResult !== "number") return minusResult;
     return applyCustoms(plusResult - minusResult, card.formula.custom, subId);
   }, [fields, sumColumnIn]);
   // 옛 호환 — 인자 1개. 전체 합계.
-  const evalCard = useCallback((card: ScoreCardDef): number => evalCardIn(card), [evalCardIn]);
+  const evalCard = useCallback((card: ScoreCardDef): SummaryValue => evalCardIn(card), [evalCardIn]);
   // NO.132 — 카드에 보탤 실제 값이 하나도 없으면 true(화면에 '0원' 대신 '-').
   // 직접 수식(숫자·퍼센트 상수)이 걸려 있으면 사람이 넣은 값이므로 '값 있음'으로 본다.
   const cardIsEmpty = useCallback((card: ScoreCardDef, subId?: string): boolean => {
@@ -1515,8 +1642,8 @@ export default function SettlementInfoTab({
             return (
               <div key={card.id} className={`rounded-xl ${colors.bg} px-3 py-2.5`}>
                 <p className={`text-[10px] font-bold ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
-                <p className={`text-[16px] font-black ${colors.valueText} tabular-nums mt-0.5`}>
-                  {empty ? "-" : (
+                <p className={`text-[16px] font-black ${colors.valueText} tabular-nums mt-0.5`} title={feeUnresolvedMessage(value)}>
+                  {typeof value !== "number" || empty ? "-" : (
                     <>
                       {fmtCurrency(value) || "0"}
                       <span className={`text-[10px] font-bold ${colors.labelText} ml-1`}>원</span>
@@ -1552,8 +1679,8 @@ export default function SettlementInfoTab({
                       return (
                         <div key={card.id} className={`rounded-lg ${colors.bg} px-2 py-1.5`}>
                           <p className={`text-[10px] font-medium ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
-                          <p className={`text-[13px] font-bold ${colors.valueText} tabular-nums`}>
-                            {empty ? "-" : (
+                          <p className={`text-[13px] font-bold ${colors.valueText} tabular-nums`} title={feeUnresolvedMessage(value)}>
+                            {typeof value !== "number" || empty ? "-" : (
                               <>
                                 {fmtCurrency(value) || "0"}
                                 <span className={`text-[10px] font-medium ${colors.labelText} ml-1`}>원</span>
@@ -1590,6 +1717,7 @@ export default function SettlementInfoTab({
               const colors = SCORECARD_COLOR_CLASSES[card.color];
               // 합산/차감 컬럼, 직접 수식의 컬럼값 후보 — number·percent·formula(수식) 모두 포함
               const numberFields = fields.filter((f) => f.type === "number" || f.type === "percent" || f.type === "formula");
+              const value = evalCard(card);
               const COLOR_OPTIONS: Array<{ value: ScoreCardColor; label: string }> = [
                 { value: "gray", label: "회색" },
                 { value: "blue", label: "파랑" },
@@ -1605,7 +1733,7 @@ export default function SettlementInfoTab({
                     <div className={`rounded-lg ${colors.bg} px-3 py-2 sm:min-w-[120px]`}>
                       <p className={`text-[9px] font-bold ${colors.labelText}`}>{card.label || "(이름 없음)"}</p>
                       <p className={`text-[14px] font-black ${colors.valueText} tabular-nums`}>
-                        {cardIsEmpty(card) ? "-" : `${fmtCurrency(evalCard(card)) || "0"}원`}
+                        {typeof value !== "number" || cardIsEmpty(card) ? "-" : `${fmtCurrency(value) || "0"}원`}
                       </p>
                     </div>
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -2033,14 +2161,15 @@ export default function SettlementInfoTab({
             tier={tier}
             fields={fields}
             index={idx}
-            canRemove={!readOnly && tiers.length > 1}
-            readOnly={readOnly}
+            canRemove={fieldsLoaded && !readOnly && tiers.length > 1}
+            readOnly={readOnly || !fieldsLoaded}
+            savedBasisVersion={savedBasisVersion}
             autoFeeKey={consultFeeField && reversedRate !== null ? consultFeeField.key : null}
             autoRevenueVatKey={revenueVatField?.key || null}
             autoRevenueNetKey={revenueNetField?.key || null}
             successKey={successField?.key || null}
             onChange={(key, value) => updateField(idx, key, value)}
-            allowOverride={allowFormulaOverride && isAdmin && !readOnly}
+            allowOverride={fieldsLoaded && allowFormulaOverride && isAdmin && !readOnly}
             onOverrideChange={(key, value) => updateOverride(idx, key, value)}
             onLabelChange={(label) => updateTierLabel(idx, label)}
             onRemove={() => removeTier(idx)}
@@ -2062,6 +2191,7 @@ export default function SettlementInfoTab({
             } : undefined}
             rowLayout={rowLayout}
             conditionValues={row ?? undefined}
+            feeContext={feeContextFor(tier)}
             onAddFieldOption={canEditColumns ? addOptionToField : undefined}
           />
         );
@@ -2090,6 +2220,7 @@ export default function SettlementInfoTab({
               {!readOnly && (
                 <button
                   type="button"
+                  disabled={!fieldsLoaded}
                   onClick={() => addTier(activeSubSectionId)}
                   className="w-full py-3 rounded-2xl border-2 border-dashed border-wedly-bd hover:border-wedly-accent hover:bg-wedly-bg-blue/30 transition-colors text-[13px] font-bold text-wedly-t2 hover:text-wedly-accent-ink flex items-center justify-center gap-1.5"
                 >
@@ -2106,6 +2237,7 @@ export default function SettlementInfoTab({
             {displayOrderNewestFirst(tiers).map(({ tier, idx }) => renderTierCard(tier, idx))}
             {!readOnly && (
               <button
+                disabled={!fieldsLoaded}
                 onClick={() => addTier()}
                 className="w-full py-3 rounded-2xl border-2 border-dashed border-wedly-bd hover:border-wedly-accent hover:bg-wedly-bg-blue/30 transition-colors text-[13px] font-bold text-wedly-t2 hover:text-wedly-accent-ink flex items-center justify-center gap-1.5"
               >
@@ -2795,13 +2927,14 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, feeContext = LEGACY_FEE_CONTEXT, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, savedBasisVersion,
 }: {
   tier: TierData;
   fields: FieldDef[];
   index: number;
   canRemove: boolean;
   readOnly: boolean;
+  savedBasisVersion?: string;
   autoFeeKey: string | null;
   autoRevenueVatKey: string | null;
   autoRevenueNetKey: string | null;
@@ -2817,6 +2950,8 @@ function TierCard({
   rowLayout?: number[];
   /** 조건별 수식의 기준값 — 이 행의 평면 값(row). 없으면 기존(조건 미적용)과 동일 */
   conditionValues?: RowData | null;
+  /** 이 차수의 서버 수수료 표시 문맥 — 표시 전용. 없으면 옛 방식 그대로. */
+  feeContext?: FeeTierContext;
   allowOverride?: boolean;
   onOverrideChange?: (fieldKey: string, value: number | null) => void;
   /** 차수 카드 제목 옆에 그릴 것(선택). tierId 는 차수 고유 id — 배열 위치와 달리 삭제·순서변경에 안 흔들린다 */
@@ -2832,7 +2967,11 @@ function TierCard({
   const [suffixDraft, setSuffixDraft] = useState(tierSuffix || "");
   useEffect(() => { setSuffixDraft(tierSuffix || ""); }, [tierSuffix]);
 
-  const success = successKey && typeof tier[successKey] === "number" ? (tier[successKey] as number) : null;
+  const successField = successKey ? fields.find((f) => f.key === successKey) : undefined;
+  const successSelection = successField ? feeContext.select(successField) : null;
+  const success = successSelection && successSelection.state !== "legacy"
+    ? successSelection.state === "selected" ? successSelection.amount : null
+    : successKey && typeof tier[successKey] === "number" ? (tier[successKey] as number) : null;
 
   // 차수 라벨 = ORDINAL_KO[idx] (고정) + " " + tierSuffix (공통, 어드민 편집)
   const ordinal = ORDINAL_KO[index] || `${index + 1}차`;
@@ -2931,29 +3070,51 @@ function TierCard({
                   // 이 칸만 잠그라는 표시(앱별 정책)가 붙어 있으면 탭 전체 잠금과 같게 취급한다.
                   // 표시가 없으면 { locked: false } 라 다른 앱 동작은 한 톨도 안 바뀐다.
                   const lock = tierFieldLock(f);
+                  // 서버가 승인한 수수료 표시값 — 정해진 칸은 그 값(0·빈 값 포함)을 그대로, 풀리지 않은 칸은 '-' 와 이유만 보인다.
+                  //   옛 방식 칸(legacy)은 아래 기존 계산을 한 톨도 바꾸지 않는다.
+                  const sel = feeContext.select(f);
+                  const serverField = sel.state === "selected" && sel.managed ? sel : null;
                   // 수식 칸 수동 수정 — 저장된 수동값·"(수정됨)" 배지·툴팁용 수식 계산값.
-                  const manual = isFormula ? getTierOverride(tier, f.key) : null;
-                  const overridden = manual !== null;
+                  //   서버 칸의 배지·툴팁은 서버가 알려 준 출처(source)·자동 계산값(automaticValue)만 따른다.
+                  const manual = isFormula && (sel.state === "legacy" || (sel.state === "selected" && !sel.managed))
+                    ? getTierOverride(tier, f.key)
+                    : null;
+                  const overridden = serverField ? serverField.source === "manual" : manual !== null;
                   // 툴팁의 "수식 계산값" — 이 칸의 수동값만 뺀 사본으로 계산(다른 칸 수동값은 반영).
                   let formulaValue: number | null = null;
-                  if (overridden) {
-                    const base: TierData = { ...tier };
-                    delete base[overrideKeyOf(f.key)];
-                    formulaValue = evalFormulaForTier(f, base, fields, undefined, conditionValues ?? undefined);
+                  if (serverField) {
+                    formulaValue = serverField.automaticValue;
+                  } else if (overridden) {
+                    if (sel.state === "legacy") {
+                      const base: TierData = { ...tier };
+                      delete base[overrideKeyOf(f.key)];
+                      formulaValue = evalFormulaForTier(f, base, fields, undefined, conditionValues ?? undefined);
+                    } else {
+                      formulaValue = feeContext.calculatedWithoutOverride(f);
+                    }
                   }
+                  // 확정(finalized)된 서버 칸은 화면에서 수식 수동값으로 바꿀 수 없다.
                   const canOverride = allowOverride && isFormula && !isDateFormula
-                    && (f.formulaResult === undefined || f.formulaResult === "number") && !lock.locked;
+                    && (f.formulaResult === undefined || f.formulaResult === "number") && !lock.locked
+                    && !(serverField && serverField.source === "finalized");
+                  const shownValue = isDateFormula ? null
+                    : sel.state === "selected" ? sel.value
+                    : sel.state === "unresolved" || sel.state === "blocked" ? null
+                    : (isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null));
                   return (
                     <FieldRow
-                      key={f.key}
+                      key={JSON.stringify([tier.id, f.key, f.type, f.formulaResult])}
                       label={f.label}
                       description={(f as { description?: string }).description}
                       type={f.type}
-                      value={isDateFormula ? null : (isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null))}
+                      value={shownValue}
                       dateValue={isDateFormula ? evalDateFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : undefined}
                       readOnly={readOnly || lock.locked}
                       lockedNote={lock.locked ? lock.note : undefined}
-                      isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
+                      isAuto={!isFormula && sel.state === "legacy" && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
+                      unresolvedReason={sel.state === "unresolved" ? sel.message : undefined}
+                      guardUnchanged={serverField !== null || sel.state === "unresolved"}
+                      savedBasisVersion={savedBasisVersion}
                       formulaResult={f.formulaResult}
                       options={f.options}
                       optionColors={f.optionColors}
@@ -3273,7 +3434,7 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, overridden = false, formulaValue = null, canOverride = false, onOverrideChange,
+  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, unresolvedReason, guardUnchanged = false, savedBasisVersion,
 }: {
   label: string;
   /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
@@ -3299,8 +3460,50 @@ function FieldRow({
   canOverride?: boolean;
   /** 수동값 저장(숫자)·복원(null) */
   onOverrideChange?: (v: number | null) => void;
+  /** 서버 값을 아직 풀지 못한 칸의 쉬운 말 이유 — '-' 옆 title 과 화면낭독용 글자로만 붙는다. */
+  unresolvedReason?: string;
+  /** 보이는 값이 서버 선택값이라 저장된 값과 다를 수 있는 칸 — 값을 안 바꾸고 초점만 떠나면 아무것도 저장하지 않는다. */
+  guardUnchanged?: boolean;
+  savedBasisVersion?: string;
 }) {
   const [editing, setEditing] = useState(false);
+  const [editInitialValue, setEditInitialValue] = useState("");
+  const [refreshNotice, setRefreshNotice] = useState(false);
+  // 편집을 연 순간의 값은 서버 갱신으로 바뀌지 않는다. 취소·확정 뒤에는 같은 편집으로 다시 저장하지 않는다.
+  const editSessionRef = useRef<{ initial: string; guardUnchanged: boolean; savedBasisVersion?: string; invalidated?: boolean } | null>(null);
+  useEffect(() => {
+    const session = editSessionRef.current;
+    // 저장 기준이 돌아와도 한 번 바뀐 편집은 새 관측으로 다시 제출하지 않는다.
+    if (session && session.savedBasisVersion !== savedBasisVersion) session.invalidated = true;
+  }, [savedBasisVersion]);
+  const startEditing = () => {
+    const initial = value === null || value === undefined ? "" : String(value);
+    editSessionRef.current = { initial, guardUnchanged, savedBasisVersion };
+    setRefreshNotice(false);
+    setEditInitialValue(initial);
+    setEditing(true);
+  };
+  const cancelNumericEdit = () => {
+    editSessionRef.current = null;
+    setEditing(false);
+  };
+  const takeNumericSession = () => {
+    const session = editSessionRef.current;
+    cancelNumericEdit();
+    if (!session) return null;
+    if (session.invalidated || session.savedBasisVersion !== savedBasisVersion) {
+      setRefreshNotice(true);
+      return null;
+    }
+    return session;
+  };
+  const commitNumericEdit = (raw: string, override: boolean) => {
+    const session = takeNumericSession();
+    if (!session || (raw === session.initial && (override || session.guardUnchanged))) return;
+    const n = Number(raw);
+    if (override) onOverrideChange?.(raw === "" || !Number.isFinite(n) ? null : n);
+    else onChange(raw === "" ? null : n);
+  };
   // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
   const anchorRef = useRef<HTMLDivElement>(null);
   const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
@@ -3316,6 +3519,17 @@ function FieldRow({
   }, [editing, type]);
 
   const display = useMemo(() => {
+    // 빈 칸 표시 — 풀리지 않은 서버 칸이면 이유를 title·화면낭독 글자로 덧붙인다(없으면 기존 '-' 와 동일).
+    const blank = (
+      <span className="text-wedly-muted" title={unresolvedReason}>
+        {"-"}
+        {unresolvedReason && <span className="sr-only">{unresolvedReason}</span>}
+      </span>
+    );
+    // 서버 칸의 수동 출처 — 배지와 툴팁(현재 저장값 / 서버가 알려 준 수식 계산값). 수식이 아닌 숫자 칸에만 쓰인다.
+    const manualTip = (shown: string, calculated: string | null) =>
+      `현재 저장값: ${shown}\n수식 계산값: ${calculated === null ? "-" : calculated}`;
+    const manualBadge = <span className="ml-1 text-[10px] font-semibold text-wedly-orange">(수정됨)</span>;
     // 수식 컬럼 — 날짜 수식은 dateValue, 숫자/퍼센트는 value. 항상 읽기전용.
     if (type === "formula") {
       if (formulaResult === "date") {
@@ -3325,7 +3539,7 @@ function FieldRow({
       // ⚠️ 빈값(null·빈 글자)을 먼저 걸러야 한다 — Number(null)·Number("")은 0 이라
       //    "계산 불가"가 "0원"으로 찍힌다(NO.132 와 같은 사고, 세 갈래 통합 때 되살아날 뻔했다).
       if (value === null || value === undefined || value === "" || !Number.isFinite(num)) {
-        return <span className="text-wedly-muted">-</span>;
+        return blank;
       }
       return (
         <span
@@ -3340,7 +3554,7 @@ function FieldRow({
       );
     }
     if (value === null || value === undefined || value === "") {
-      return <span className="text-wedly-muted">{"-"}</span>;
+      return blank;
     }
     if (type === "select") {
       const c = optionColors?.[String(value)];
@@ -3352,13 +3566,29 @@ function FieldRow({
       );
     }
     if (type === "percent" && typeof value === "number") {
-      return <span className="tabular-nums font-medium">{value}%</span>;
+      return (
+        <span
+          className="tabular-nums font-medium"
+          title={overridden ? manualTip(`${value}%`, formulaValue === null || formulaValue === undefined ? null : `${formulaValue}%`) : undefined}
+        >
+          {value}%
+          {overridden && manualBadge}
+        </span>
+      );
     }
     if (type === "number" && typeof value === "number") {
-      return <span className="tabular-nums font-medium">{fmtCurrency(value)}원</span>;
+      return (
+        <span
+          className="tabular-nums font-medium"
+          title={overridden ? manualTip(`${fmtCurrency(value)}원`, formulaValue === null || formulaValue === undefined ? null : `${fmtCurrency(formulaValue)}원`) : undefined}
+        >
+          {fmtCurrency(value)}원
+          {overridden && manualBadge}
+        </span>
+      );
     }
     return <span>{String(value)}</span>;
-  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue]);
+  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue, unresolvedReason]);
 
   // 수식 컬럼은 사람이 입력하지 않음(자동 계산 읽기전용) — 단 관리자 수동 수정이 허용된 곳은 예외.
   const isEditable = !readOnly && !isAuto && (type !== "formula" || (canOverride && !!onOverrideChange));
@@ -3398,25 +3628,23 @@ function FieldRow({
               <input
                 type="number"
                 autoFocus
-                defaultValue={value === null || value === undefined ? "" : String(value)}
-                onBlur={(e) => {
-                  const raw = e.target.value;
-                  // 값을 안 바꾸고 초점만 떠나면 아무 일도 안 한다 — 확인차 클릭한 계산값이
-                  // 그대로 수동값으로 굳는 사고 방지(적대적 리뷰 2차 중요 지적).
-                  const initial = value === null || value === undefined ? "" : String(value);
-                  if (raw === initial) { setEditing(false); return; }
-                  const n = Number(raw);
-                  onOverrideChange?.(raw === "" || !Number.isFinite(n) ? null : n);
-                  setEditing(false);
+                defaultValue={editInitialValue}
+                onBlur={(e) => commitNumericEdit(e.target.value, true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") { e.preventDefault(); cancelNumericEdit(); }
                 }}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(false); }}
                 className="w-full px-2.5 sm:px-2 py-2 sm:py-1 text-[15px] sm:text-[13px] tabular-nums border border-wedly-accent/40 rounded-md outline-none focus:ring-2 focus:ring-wedly-accent/20 bg-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               />
               {overridden && (
                 <button
                   type="button"
                   // onMouseDown + preventDefault: input 의 onBlur 보다 먼저 잡아 복원이 씹히지 않게.
-                  onMouseDown={(ev) => { ev.preventDefault(); onOverrideChange?.(null); setEditing(false); }}
+                  onMouseDown={(ev) => {
+                    ev.preventDefault();
+                    if (!takeNumericSession()) return;
+                    onOverrideChange?.(null);
+                  }}
                   className="self-start text-[11px] px-2 py-0.5 rounded-md border border-wedly-bd bg-wedly-bg-gray/60 text-wedly-t2 hover:bg-wedly-bg-yellow transition-colors"
                 >수식값으로 복원</button>
               )}
@@ -3426,9 +3654,12 @@ function FieldRow({
               <input
                 type="number"
                 autoFocus
-                defaultValue={value === null ? "" : String(value)}
-                onBlur={(e) => { onChange(e.target.value === "" ? null : Number(e.target.value)); setEditing(false); }}
-                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(false); }}
+                defaultValue={editInitialValue}
+                onBlur={(e) => commitNumericEdit(e.target.value, false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") { e.preventDefault(); cancelNumericEdit(); }
+                }}
                 // 숫자 입력 우측의 브라우저 기본 위·아래 화살표 제거 — 깔끔한 디자인 + percent 의 "%" 표시와 겹침 방지
                 className={`w-full px-2.5 sm:px-2 py-2 sm:py-1 text-[15px] sm:text-[13px] tabular-nums border border-wedly-accent/40 rounded-md outline-none focus:ring-2 focus:ring-wedly-accent/20 bg-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${type === "percent" ? "pr-7" : ""}`}
               />
@@ -3464,13 +3695,18 @@ function FieldRow({
           )
         ) : (
           <div
-            onClick={isEditable ? () => setEditing(true) : undefined}
+            onClick={isEditable ? startEditing : undefined}
             className={`rounded-md px-1 py-0.5 -mx-1 min-h-[26px] flex items-center ${isEditable ? "cursor-pointer hover:bg-wedly-bg-gray transition-colors" : ""}`}
           >
             {display}
           </div>
         )}
       </div>
+      {refreshNotice && (
+        <div role="status" className="text-[11px] text-wedly-muted break-keep">
+          저장된 값이 바뀌어 이번 입력을 취소했습니다. 새 값을 확인한 뒤 다시 수정해 주세요.
+        </div>
+      )}
     </div>
   );
 }
