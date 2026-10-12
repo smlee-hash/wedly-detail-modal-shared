@@ -67,7 +67,6 @@ describe("allowRowLayoutEdit — 소스 구조", () => {
 describe("allowRowLayoutEdit — 렌더", () => {
   const render = (extra: Record<string, unknown>) =>
     renderToStaticMarkup(
-      // @ts-expect-error 시험에서는 도메인 prop 만 최소로 넘긴다
       <SettlementInfoTab
         rawValue={JSON.stringify([{ id: "t1", label: "1차" }])}
         row={{}}
