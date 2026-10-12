@@ -18,13 +18,15 @@
 //   달라, 본 패널은 같은 코드가 두 갈래에서 모두 빌드되도록 ComponentType<any> 로 느슨히 받는다
 //   (기존 어댑터 components 캐스팅 관행과 동일). 미지원 prop 은 런타임에서 해당 컴포넌트가 무시한다.
 
-import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import {
   HistoryPanel,
   timeAgo,
   type HistoryAdapter,
   type UnifiedComment,
   type SectionPanelProps,
+  type FeePublicTargetV1,
+  type FeePublicViewV1,
   type ScoreCardDef,
   COMMON_BASIC_FIELD_SPECS,
   useDetailLoadState,
@@ -37,7 +39,14 @@ import { GOV_SUB_TABS, resolveGovSubTab, type GovSubTab } from "./gov-subtab";
 import type { SelectDropdownColorFamily } from "./SelectDropdown";
 import { resolveHistoryGate } from "./gov-history-gate";
 import { buildGovEvalBase } from "./gov-eval-context";
-import { mergeTiersAcrossRows, splitMergedTiers, parseMergedTierId, parseTierArray } from "./gov-merged-tiers";
+import { mergeTiersAcrossRows, splitMergedTiers, makeMergedTierId, parseMergedTierId, parseTierArray, tierIdOf } from "./gov-merged-tiers";
+import {
+  bindGovFeeEdit, isSensitiveGovFeeEdit, observedFeeViewMode,
+  type GovFeeEditRequestV1, type GovPolicyFieldSaveOptions,
+} from "./gov-fee-edit-binding";
+import { hasNewFeeEditObservation, hasSavedTierMutation, ownerTierSavedBasis, type SavedTierFieldSelection } from "./gov-save-observation";
+import type { FeeTargetForTier, FeeTierView } from "./fee-tier-display";
+import type { TierFieldEditIntentV1 } from "./tier-field-edit-intent";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
 const SettlementInfoTab = SettlementInfoTabBase as unknown as ComponentType<Record<string, unknown>>;
@@ -109,8 +118,8 @@ export type GovSubsidyPanelConfig = {
   refundFieldsPath: string;
   settlementFieldsPath: string;
   configPath: string;
-  /** 값 저장(editable일 때만). */
-  savePolicyField?: (entryId: string, key: string, value: string | number | boolean | null) => Promise<void>;
+  /** 값 저장(editable일 때만). 수수료 직접 수정은 선택적 넷째 인자로 원본 관측값을 전달한다. */
+  savePolicyField?: (entryId: string, key: string, value: string | number | boolean | null, options?: GovPolicyFieldSaveOptions) => Promise<void>;
   /** 새 계약 생성(editable일 때만). 없으면 자동 생성 불가. */
   createContract?: (primaryRow: Record<string, unknown>) => Promise<string>;
   /** 이 그룹 행 중 정책 행만 골라내기(도메인 키 차이 흡수). */
@@ -123,6 +132,144 @@ export type GovSubsidyPanelConfig = {
 
 type SubTab = GovSubTab;
 const SUB_TABS = GOV_SUB_TABS;
+type MergedTierSaveState = { saving: boolean; resetRevision: number; error: string | null };
+type PendingTierOwnerSave = {
+  savedBasis: string;
+  beforeRaw: unknown;
+  submittedRaw: string;
+  succeeded: boolean;
+  feeEdit?: GovFeeEditRequestV1;
+  ordinaryEdit?: SavedTierFieldSelection;
+};
+type PendingMergedTierSave = {
+  panelScope: string;
+  /** 이 요청이 잠금을 잡은 컨테이너와 소유자 순서 — 실패 기록의 이름이 된다. */
+  key: string;
+  scopeOwnerIds: readonly string[];
+  /** 요청이 시작된 순서 — 실패 기록을 지우고 덮을 때 더 새 요청의 기록을 건드리지 않으려고 비교한다. */
+  seq: number;
+  finished: boolean;
+  createdOwnerId?: string;
+  /**
+   * 다시 읽기(onSaved) 요청을 받은 마운트가 아직 없다 — 같은 패널이 다시 열릴 때 전달한다.
+   * 저장이 끝난 뒤뿐 아니라, 첫 계약 줄이 rows 에 나타나길 기다리는 중(아직 저장 전)에도 켜진다.
+   */
+  refreshPending?: boolean;
+  owners: Map<string, PendingTierOwnerSave>;
+};
+/** error: null = 새 요청의 시작 또는 저장 확인, 문자열 = 끝난 요청의 실패 이유, 생략 = 오류와 무관한 알림. */
+type TierSaveNotice = { scope: string; save: PendingMergedTierSave; error?: string | null; reset?: boolean; refresh?: boolean; refreshError?: string };
+/** 끝난 저장 하나의 실패 이유. 저장 잠금과 무관하게 남는다 — 화면에 이유를 보이기만 하고 아무것도 잠그지 않는다. */
+type TierSaveFailure = { save: PendingMergedTierSave; message: string };
+type ContractCreation = {
+  promise: Promise<string>;
+  /** 만들기가 끝나 받은 새 줄 id — 패널이 다시 열려도 같은 줄을 쓴다. 끝나기 전에는 null. */
+  createdId: string | null;
+  /** 이 결과를 기다리거나 이어서 쓰는 중인 요청 수. 0이 되고 rows 가 새 줄을 보여 준 뒤에만 비운다. */
+  users: number;
+};
+type PolicyRow = SectionPanelProps["rows"][number] & { feeView?: FeePublicViewV1 };
+/** 지금 마운트된 패널이 현재 보고 있는 것 — 전역에 rows 를 쌓지 않고, 마운트마다 최신 값을 읽는 접근자로만 둔다. */
+type MountedPanelView = {
+  panelScope: string;
+  policyRows: ReadonlyArray<PolicyRow>;
+  rowsLoadFailed: boolean;
+  onSaved: SectionPanelProps["onSaved"];
+};
+/** 첫 계약 줄이 rows 에 나타나길 기다리는 중인 금액 저장 하나. 확인되면 스스로 풀린다. */
+type OwnerWaiter = { panelScope: string; evaluate: () => void };
+type CreatedOwnerObservation =
+  | { status: "waiting" }
+  | { status: "failed"; message: string }
+  | { status: "ready"; row: PolicyRow };
+const SAVING_TIERS_MESSAGE = "저장 중입니다. 저장이 끝난 뒤 다음 값을 수정해 주세요.";
+const SAVE_BUSY_ERROR = "앞의 값을 저장 중입니다. 이번 변경은 저장하지 않았습니다. 저장이 끝난 뒤 다시 수정해 주세요.";
+const SAVED_RELOAD_FAILED_MESSAGE = "저장된 값을 다시 불러오지 못했습니다. 창을 닫았다가 다시 열어 주세요.";
+/**
+ * 실패로만 끝내는 기한이다 — 이 시간이 지났다고 성공 처리하거나 잠금을 풀지 않는다.
+ * 같은 논리 패널이 열려 있는 동안만 흐르는 합계 시간이다(닫힌 시간은 세지 않고, 다시 열어도 처음으로 되돌리지 않는다).
+ */
+const OWNER_OBSERVATION_DEADLINE_MS = 20_000;
+const OWNER_DEADLINE_MESSAGE = "새로 만든 계약 줄을 20초 안에 확인하지 못해 금액을 저장하지 않았습니다.";
+const OWNER_ROWS_FAILED_MESSAGE = "계약 정보를 불러오지 못해 새로 만든 계약 줄을 확인하지 못했습니다. 금액은 저장하지 않았습니다.";
+const OWNER_UNREADABLE_MESSAGE = "새로 만든 계약 줄의 수수료 기준을 확인하지 못해 금액을 저장하지 않았습니다.";
+const OWNER_POPULATED_MESSAGE = "새로 만든 계약 줄에 이미 다른 값이 저장되어 있어 금액을 저장하지 않았습니다.";
+
+/** 같은 고객(panelScope)·소유자 목록(순서까지)·컨테이너마다 하나인 이름 — 저장 잠금과 실패 기록이 함께 쓴다. */
+const scopeForOwners = (panelScope: string, ownerIds: readonly string[], key: string) => JSON.stringify([panelScope, ownerIds, key]);
+
+/** 컨테이너가 아직 없거나 구조적으로 비어 있는가. 읽을 수 없는 비어 있지 않은 값은 비었다고 보지 않는다. */
+function isEmptyTierContainer(raw: unknown): boolean {
+  if (raw == null) return true;
+  if (Array.isArray(raw)) return raw.length === 0;
+  if (typeof raw !== "string") return false;
+  if (raw.trim() === "") return true;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * 합친 목록의 차수 하나가 보여 줄 서버 수수료 대상을, 지금 받아 둔 줄 목록에서 **정확히 하나만** 고른다.
+ * 첫 줄·표시 순서로 대신 고르지 않는다 — 주인 줄을 못 정하거나 대상이 0개·2개 이상이면 막힘으로 답한다.
+ * 읽기만 한다(저장·수정 요청과 무관). 환불은 이 함수를 쓰지 않는다 — 옛 방식 그대로.
+ */
+function selectGovFeeTarget(
+  policyRows: ReadonlyArray<{ entryId: string; row?: unknown; feeView?: unknown }>,
+  containerKey: "계약정보_차수" | "정산정보",
+  tier: { id?: unknown },
+): FeeTierView {
+  const RELOAD = "화면을 새로고침한 뒤 다시 확인해 주세요.";
+  const blocked = (message: string): FeeTierView => ({ mode: "blocked", message });
+  // 수수료 표준 화면을 가진 줄이 하나도 없는 화면(옛 앱·옛 자료)은 처음부터 옛 방식 그대로다.
+  if (!policyRows.some((r) => r.feeView !== undefined)) return { mode: "legacy" };
+
+  const tierId = typeof tier?.id === "string" ? tier.id : "";
+  const ref = parseMergedTierId(tierId);
+  if (!ref) return blocked("새로 만든 차수라 수수료 기준을 아직 찾을 수 없어요. 저장한 뒤 다시 열어 확인해 주세요.");
+  const ownerNotFound = blocked(`이 차수가 속한 계약 줄을 정확히 찾지 못했어요. ${RELOAD}`);
+  const owner = policyRows[ref.ownerIndex];
+  if (
+    !owner || typeof owner.entryId !== "string" || !owner.entryId
+    || policyRows.filter((candidate) => candidate.entryId === owner.entryId).length !== 1
+  ) return ownerNotFound;
+
+  const sourceTiers = parseTierArray(isRecord(owner.row) ? owner.row[containerKey] : undefined);
+  // 서버의 공개 차수 id — id 없는 원본 차수는 서버 투영(`tier-<자리+1>-<자리>`)과 같은 이름을 쓴다.
+  const publicIds = sourceTiers.map((source, index) => tierIdOf(source) || `tier-${index + 1}-${index}`);
+  const matches: number[] = [];
+  sourceTiers.forEach((source, index) => {
+    if (isRecord(source) && makeMergedTierId(ref.ownerIndex, tierIdOf(source), index) === tierId) matches.push(index);
+  });
+  if (matches.length !== 1) return ownerNotFound;
+  const publicId = publicIds[matches[0]];
+  if (publicIds.filter((id) => id === publicId).length !== 1) return ownerNotFound;
+
+  const view: unknown = owner.feeView;
+  if (view === undefined) return { mode: "legacy" }; // 이 줄은 수수료 표준 화면이 없는 옛 줄
+  const invalid = blocked(`수수료 정보를 확인하지 못했어요. ${RELOAD}`);
+  if (
+    !isRecord(view) || view.version !== 1 || !isRecord(view.owner)
+    || view.owner.sourceTable !== "PolicyFundEntry" || view.owner.entryId !== owner.entryId
+  ) return invalid;
+  if (view.mode === "legacy") return { mode: "legacy" };
+  if (view.mode !== "standard" || !Array.isArray(view.targets)) return invalid;
+
+  const scope = containerKey === "계약정보_차수" ? "gov-contract" : "gov-settlement";
+  const targets = view.targets.filter((target: unknown) => (
+    isRecord(target) && target.scope === scope && isRecord(target.target)
+    && target.target.containerKey === containerKey && target.target.tierId === publicId
+  ));
+  if (targets.length !== 1) return blocked(`이 차수의 수수료 기준을 찾지 못했어요. ${RELOAD}`);
+  return { mode: "standard", target: targets[0] as FeePublicTargetV1 };
+}
 
 async function commentsJson(res: Response): Promise<UnifiedComment[]> {
   // 앱별 댓글 응답 형태 차이 흡수: ERP={data:[...]}, 일루아={data:{illuaComments:[...]}},
@@ -148,6 +295,195 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
 
 /** 앱별 설정을 받아 정부지원금 섹션 패널 컴포넌트를 만든다(sectionPanels 에 주입). */
 export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
+  // 바깥 도메인 탭이 패널을 없애도 같은 고객·소유자 순서·컨테이너의 미확인 저장은 유지한다.
+  // 관측값은 각 마운트에서 현재 rows로만 읽는다. 여기에는 진행 중인 요청만 둔다.
+  const pendingTierSaves = new Map<string, PendingMergedTierSave>();
+  const tierSaveListeners = new Set<(notice: TierSaveNotice) => void>();
+  // 끝난 저장의 실패 이유 — 패널이 닫혀 있어도, 화면이 그 사이 첫 저장이 만든 줄로 바뀌어도 읽을 수 있게 마운트와 따로 둔다.
+  // 같은 고객(panelScope)·컨테이너·소유자 순서마다 가장 최근 하나만 둔다. 같은 곳에서 새 요청이 시작되면 지운다. 이 기록은 잠금이 아니다 — 화면에 이유를 보이기만 한다.
+  const tierSaveFailures = new Map<string, TierSaveFailure>();
+  let tierSaveSeq = 0;
+  // 이 요청의 실패를 읽을 수 있는 이름들. 첫 줄을 만들던 저장(빈 소유자 목록)만 "빈 목록 → 방금 만든 그 줄 하나" 별칭이 하나 더 생긴다. 다른 목록·고객으로는 번지지 않는다.
+  const failureScopesOf = (save: PendingMergedTierSave) => {
+    const scopes = [scopeForOwners(save.panelScope, save.scopeOwnerIds, save.key)];
+    if (save.scopeOwnerIds.length === 0 && save.createdOwnerId) scopes.push(scopeForOwners(save.panelScope, [save.createdOwnerId], save.key));
+    return scopes;
+  };
+  const forgetTierFailure = (failure: TierSaveFailure) => {
+    for (const scope of failureScopesOf(failure.save)) {
+      if (tierSaveFailures.get(scope) === failure) tierSaveFailures.delete(scope);
+    }
+  };
+  // 이 요청보다 먼저 시작한 요청의 실패만 지운다 — 새 요청을 시작할 때와 이 요청의 저장 확인이 도착할 때. 더 새 요청의 실패는 남긴다.
+  const clearOlderTierFailures = (save: PendingMergedTierSave) => {
+    for (const scope of failureScopesOf(save)) {
+      const failure = tierSaveFailures.get(scope);
+      if (failure && failure.save.seq < save.seq) forgetTierFailure(failure);
+    }
+  };
+  const recordTierFailure = (save: PendingMergedTierSave, message: string) => {
+    clearOlderTierFailures(save);
+    const scopes = failureScopesOf(save);
+    if (scopes.some((scope) => tierSaveFailures.has(scope))) return; // 남아 있는 것은 이 요청보다 새 요청의 실패다
+    const failure: TierSaveFailure = { save, message };
+    for (const scope of scopes) tierSaveFailures.set(scope, failure);
+  };
+  // 다시 읽기 실패는 이 요청 자신의 실패 이유 뒤에 이어 붙인다. 이 요청의 실패가 없으면 그것만 이 요청의 기록이 된다.
+  const appendRefreshFailure = (save: PendingMergedTierSave, refreshError: string) => {
+    const text = `저장된 값을 다시 불러오지 못했습니다. ${refreshError} 화면을 새로 고친 뒤 확인해 주세요.`;
+    const own = failureScopesOf(save).map((scope) => tierSaveFailures.get(scope)).find((failure) => failure?.save === save);
+    if (own) own.message = `${own.message} ${text}`;
+    else recordTierFailure(save, text);
+  };
+  const notifyTierSave = (notice: TierSaveNotice) => {
+    // 듣는 화면이 없어도 먼저 기록한다. 늦은 콜백은 호출하는 쪽의 요청 비교(pendingTierSaves)를 통과한 현재 요청만 여기까지 온다.
+    if (notice.error === null) clearOlderTierFailures(notice.save);
+    else if (notice.error !== undefined) recordTierFailure(notice.save, notice.error);
+    if (notice.refreshError !== undefined) appendRefreshFailure(notice.save, notice.refreshError);
+    for (const listener of tierSaveListeners) listener(notice);
+  };
+  const releaseTierSave = (scope: string, save: PendingMergedTierSave, notice: Omit<TierSaveNotice, "scope" | "save"> = {}) => {
+    if (pendingTierSaves.get(scope) !== save) return;
+    pendingTierSaves.delete(scope);
+    notifyTierSave({ scope, save, ...notice });
+  };
+  // 첫 계약 줄을 만드는 요청도 같은 논리 패널(panelScope)의 마운트·컨테이너·히스토리 사이에 하나로 공유한다.
+  // 진행 중인 요청과 끝난 새 줄 id 를 함께 둔다. 닫힘(unmount)만으로는 비우지 않는다 —
+  // rows 가 그 새 줄을 보여 주고 이어서 쓰는 요청도 없을 때에만 정확히 그 항목만 비운다.
+  const contractCreations = new Map<string, ContractCreation>();
+  const creationListeners = new Set<(panelScope: string) => void>();
+  // 방금 만든 첫 계약 줄에 처음 쓰는 금액은, 그 줄이 같은 논리 패널의 현재 rows 에 실제로 나타나 수수료 표시를 읽을 수 있을 때까지 보내지 않는다.
+  // 전역에 지난 rows 를 쌓아 두지 않는다 — 기다리는 요청(ownerWaiters)과 지금 마운트된 패널의 접근자(mountedPanels)만 둔다.
+  // 패널이 닫혀도 요청은 남는다. 같은 논리 패널이 다시 열리면 그 마운트의 실제 rows 로 이어서 확인한다.
+  const mountedPanels = new Set<{ current: MountedPanelView }>();
+  const ownerWaiters = new Set<OwnerWaiter>();
+  const pokeOwnerWaiters = (panelScope: string) => {
+    for (const waiter of [...ownerWaiters]) {
+      if (waiter.panelScope === panelScope) waiter.evaluate();
+    }
+  };
+  // 지금 마운트된 것 중 정확히 이 논리 패널(panelScope)의 화면만 — 다른 회사의 화면은 세지 않는다.
+  const mountedViewsOf = (panelScope: string) => (
+    [...mountedPanels].map((mounted) => mounted.current).filter((view) => view.panelScope === panelScope)
+  );
+  const observeCreatedOwner = (panelScope: string, ownerId: string, key: string): CreatedOwnerObservation => {
+    const views = mountedViewsOf(panelScope);
+    if (views.length === 0) return { status: "waiting" };
+    if (views.some((view) => view.rowsLoadFailed)) return { status: "failed", message: OWNER_ROWS_FAILED_MESSAGE };
+    for (const view of views) {
+      const matches = view.policyRows.filter((candidate) => candidate.entryId === ownerId);
+      if (matches.length === 0) continue;
+      const row = matches[0];
+      // 정확히 한 줄, 그 줄의 수수료 표시가 표준 또는 실제 옛 앱 표시여야 한다. 없거나 깨졌으면 일반 저장으로 낮추지 않는다.
+      if (matches.length !== 1 || !isRecord(row.row) || observedFeeViewMode(row) === undefined) {
+        return { status: "failed", message: OWNER_UNREADABLE_MESSAGE };
+      }
+      // 방금 만든 줄의 이 컨테이너는 아직 비어 있어야 한다. 다른 쪽이 먼저 채웠다면 그 차수를 덮지 않는다.
+      if (!isEmptyTierContainer(row.row[key])) return { status: "failed", message: OWNER_POPULATED_MESSAGE };
+      return { status: "ready", row };
+    }
+    return { status: "waiting" };
+  };
+  /**
+   * 만들기 응답으로 받은 줄 id(ownerId)가 현재 rows 에 나타나길 기다린다. 응답이 rows 보다 늦든 빠르든 같은 확인을 거친다.
+   * 기한(20초)은 실패로만 끝낸다. 끝나면(확인·실패·기한) 타이머와 등록을 모두 푼다. 패널이 닫힌 것만으로는 끝나지 않는다.
+   * 기한은 이 요청이 가진 남은 시간(remainingMs)으로 센다. 정확히 같은 panelScope 의 패널이 하나라도 마운트된 동안만 타이머가 돌고,
+   * 하나도 없으면 타이머를 끄고 남은 시간만 보관한다. 같은 패널이 다시 열리면 그 남은 시간으로 이어 간다.
+   */
+  const awaitCreatedOwner = (scope: string, save: PendingMergedTierSave, ownerId: string, key: string): Promise<PolicyRow> => (
+    new Promise<PolicyRow>((resolve, reject) => {
+      let settled = false;
+      let remainingMs = OWNER_OBSERVATION_DEADLINE_MS;
+      let startAt = 0;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const waiter: OwnerWaiter = {
+        panelScope: save.panelScope,
+        evaluate: () => {
+          if (settled) return;
+          const observation = observeCreatedOwner(save.panelScope, ownerId, key);
+          if (observation.status === "ready") settle(() => resolve(observation.row));
+          else if (observation.status === "failed") settle(() => reject(new Error(observation.message)));
+          else syncDeadline();
+        },
+      };
+      // 지금 마운트된 같은 panelScope 패널이 있는지에 맞춰 타이머를 켜거나 끈다. 이미 맞는 상태면 아무것도 하지 않는다.
+      function syncDeadline() {
+        const active = mountedViewsOf(save.panelScope).length > 0;
+        if (active && timer === null) {
+          startAt = Date.now();
+          timer = setTimeout(() => settle(() => reject(new Error(OWNER_DEADLINE_MESSAGE))), remainingMs);
+        } else if (!active && timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+          remainingMs = Math.max(0, remainingMs - Math.max(0, Date.now() - startAt));
+        }
+      }
+      // 확인·실패·기한 중 먼저 오는 하나로만 끝낸다. 끝나면 등록과 타이머를 함께 푼다.
+      function settle(finish: () => void) {
+        if (settled) return;
+        settled = true;
+        ownerWaiters.delete(waiter);
+        if (timer !== null) clearTimeout(timer);
+        timer = null;
+        finish();
+      }
+      // 먼저 등록하고 알린다 — 다시 읽기가 동기로 끝나도 놓치지 않는다.
+      ownerWaiters.add(waiter);
+      // rows 가 만들기 응답보다 먼저 도착해 있었을 수 있다.
+      waiter.evaluate();
+      if (settled) return;
+      // 받은 마운트가 없거나 onSaved 가 없으면 켜 둔 채 남는다 — 같은 패널이 다시 열릴 때 전달한다.
+      save.refreshPending = true;
+      notifyTierSave({ scope, save, refresh: true });
+    })
+  );
+  const startContractCreation = (panelScope: string, primaryRow: Record<string, unknown>): ContractCreation => {
+    if (!config.createContract) throw new Error("이 앱에서는 새 계약을 만들 수 없습니다.");
+    let started: Promise<string>;
+    try {
+      started = Promise.resolve(config.createContract(primaryRow));
+    } catch (e) {
+      started = Promise.reject(e);
+    }
+    const creation: ContractCreation = { promise: started, createdId: null, users: 0 };
+    creation.promise = started.then(
+      (id) => {
+        creation.createdId = id;
+        return id;
+      },
+      (e) => {
+        // 실패한 그 시도만 비운다 — 다음 저장이 다시 만들어 볼 수 있게. 이미 다른 시도가 자리했다면 건드리지 않는다.
+        if (contractCreations.get(panelScope) === creation) contractCreations.delete(panelScope);
+        throw e;
+      },
+    );
+    contractCreations.set(panelScope, creation);
+    return creation;
+  };
+  /** 같은 논리 패널의 첫 줄 만들기에 참여한다(이미 있으면 그 요청·결과를 그대로 쓴다). 이어 쓰기가 끝나면 release() 로 알린다. */
+  const claimContractOwner = async (panelScope: string, primaryRow: Record<string, unknown>) => {
+    const creation = contractCreations.get(panelScope) ?? startContractCreation(panelScope, primaryRow);
+    creation.users += 1;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      creation.users -= 1;
+      for (const listener of creationListeners) listener(panelScope);
+    };
+    try {
+      return { id: await creation.promise, release };
+    } catch (e) {
+      release();
+      throw e;
+    }
+  };
+  // 정확히 만들어진 그 줄이 rows 에 보이고 이어서 쓰는 요청이 없을 때만 그 항목을 비운다. 다른 줄이 보인다고 비우지 않는다.
+  const retireObservedCreation = (panelScope: string, observedEntryIds: readonly string[]) => {
+    const creation = contractCreations.get(panelScope);
+    if (!creation || creation.createdId === null || creation.users > 0) return;
+    if (observedEntryIds.includes(creation.createdId)) contractCreations.delete(panelScope);
+  };
   function GovSubsidyPanel({
     rows,
     primaryRow,
@@ -171,7 +507,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     /** 함수로 오면 제어 모드 — 바깥 탭 줄이 이 패널 내용을 바꾼다. 미전달이면 내부 상태만. */
     onSubTabChange?: (t: string) => void;
   }) {
-    const policyRows = config.filterPolicyRows(rows);
+    const policyRows = config.filterPolicyRows(rows) as PolicyRow[];
     const TIER_KEYS = ["계약정보_차수", "정산정보", "환불정보_차수"] as const;
     // ★policyRows 는 렌더마다 새 배열이라 그대로 의존성에 쓰면 이 계산과 히스토리 어댑터가
     //   매 렌더 새로 만들어진다(자동 새로고침 타이머가 매번 초기화됨 — 독립 리뷰 F7).
@@ -201,22 +537,35 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const sel = 0;
     const [err, setErr] = useState<string | null>(null);
     const [userName, setUserName] = useState("");
-    const createdIdRef = useRef<string>("");
-    const createPromiseRef = useRef<Promise<string> | null>(null);
+    const tierSavedObservationsRef = useRef(new Map<string, Map<string, string>>());
+    const [tierSaveStates, setTierSaveStates] = useState<Record<string, MergedTierSaveState>>({});
 
     useEffect(() => {
       adapter.api.currentUser().then((u) => setUserName(u?.name ?? "")).catch(() => {});
     }, [adapter]);
 
     const anchorKey = String(primaryRow["15사업자번호"] ?? primaryRow["04사업자번호"] ?? primaryRow["_id"] ?? "");
-    useEffect(() => {
-      createdIdRef.current = "";
-      createPromiseRef.current = null;
-    }, [anchorKey]);
+    const panelScope = JSON.stringify([config.ownSource, primaryRow["_id"] ?? null, anchorKey]);
 
     const idx = policyRows.length ? Math.min(sel, policyRows.length - 1) : -1;
     const entry = idx >= 0 ? policyRows[idx] : null;
     const entryId = entry?.entryId ?? "";
+    // 공유하던 생성 결과는 rows 가 그 새 줄(정확한 id)을 보여 주고 이어서 쓰는 요청이 없을 때에만 비운다.
+    // 아무 줄이나 나타났다고, 또는 패널이 닫혔다고 비우면 늦게 도착하는 같은 패널의 요청이 줄을 한 번 더 만든다.
+    const policyEntryIds = JSON.stringify(policyRows.map((r) => r.entryId));
+    const policyEntryIdsRef = useRef<string[]>([]);
+    useEffect(() => {
+      policyEntryIdsRef.current = JSON.parse(policyEntryIds) as string[];
+      retireObservedCreation(panelScope, policyEntryIdsRef.current);
+    }, [policyEntryIds, panelScope]);
+    useEffect(() => {
+      // 응답이 rows 보다 늦게 끝나는 순서도 있다 — 마지막 요청이 끝날 때 현재 rows 로 다시 확인한다.
+      const listener = (scope: string) => {
+        if (scope === panelScope) retireObservedCreation(panelScope, policyEntryIdsRef.current);
+      };
+      creationListeners.add(listener);
+      return () => { creationListeners.delete(listener); };
+    }, [panelScope]);
     const data = (entry?.row ?? {}) as Record<string, unknown>;
 
     // NO.125 반려 재작업: 수식 평가 바탕 행 — 전체 탭과 동일 문맥(경정청구 행+공통 칸 채움)을
@@ -237,6 +586,23 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
     // 상세창이 분야 행 목록을 못 불러왔나 — 상자가 없는 호출부는 항상 거짓이라 동작 그대로.
     const { rowsLoadFailed } = useDetailLoadState();
+    // 첫 계약 줄을 기다리는 금액 저장이 읽을 이 마운트의 현재 값. 그려질 때마다 갱신하고 기다리는 요청에 확인을 맡긴다.
+    const liveRef = useRef<MountedPanelView>({ panelScope, policyRows, rowsLoadFailed, onSaved });
+    useEffect(() => {
+      liveRef.current = { panelScope, policyRows, rowsLoadFailed, onSaved };
+      pokeOwnerWaiters(panelScope);
+    });
+    useEffect(() => {
+      // 같은 회사로 다시 열린 마운트도 이미 기다리던 요청을 자기 rows 로 이어서 확인한다. 열리면 멈춰 있던 기한도 남은 시간으로 다시 돈다.
+      const mounted = liveRef;
+      mountedPanels.add(mounted);
+      pokeOwnerWaiters(panelScope);
+      // 닫힐 때는 접근자만 빼고 요청은 남긴다. 뺀 즉시 이 논리 패널의 요청에 알려, 마운트된 화면이 없어졌다면 기한 타이머를 바로 멈추게 한다.
+      return () => {
+        mountedPanels.delete(mounted);
+        pokeOwnerWaiters(panelScope);
+      };
+    }, [panelScope]);
     const historyGate = resolveHistoryGate({ entryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
@@ -311,37 +677,28 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           return j.data.url as string;
         },
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [historyEntryIds, entryId]);
 
-    async function ensureEntryId(): Promise<string> {
-      if (entryId) return entryId;
-      if (createdIdRef.current) return createdIdRef.current;
-      if (!config.createContract) throw new Error("이 앱에서는 새 계약을 만들 수 없습니다.");
-      if (!createPromiseRef.current) {
-        createPromiseRef.current = config
-          .createContract(primaryRow)
-          .then((id) => {
-            createdIdRef.current = id;
-            return id;
-          })
-          .catch((e) => {
-            createPromiseRef.current = null;
-            throw e;
-          });
-      }
-      return createPromiseRef.current;
+    // 쓸 계약 줄 id. 줄이 있으면 그대로, 없으면 같은 논리 패널이 공유하는 첫 줄 만들기에 참여한다.
+    // 이어서 하는 일(저장·댓글)이 끝나면 release() 를 꼭 부른다 — 그 전에는 만들기 결과를 비우지 않는다.
+    async function acquireOwner(): Promise<{ id: string; release: () => void }> {
+      if (entryId) return { id: entryId, release: () => {} };
+      return claimContractOwner(panelScope, primaryRow);
     }
 
     async function saveOrCreate(key: string, value: string | number | boolean | null) {
       if (!config.savePolicyField) return;
       setErr(null);
+      let release = () => {};
       try {
-        const id = await ensureEntryId();
-        await config.savePolicyField(id, key, value);
+        const owner = await acquireOwner();
+        release = owner.release;
+        await config.savePolicyField(owner.id, key, value);
         onSaved?.();
       } catch (e) {
         setErr(e instanceof Error ? e.message : "저장에 실패했습니다.");
+      } finally {
+        release();
       }
     }
 
@@ -375,51 +732,242 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [policyKey]);
 
-    /** 합친 목록이 저장될 때 — 줄마다 나눠 저장한다. 바뀐 줄만 실제로 보낸다. */
-    async function saveMergedTiers(key: string, json: string) {
-      if (!config.savePolicyField) return;
-      setErr(null);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(json);
-      } catch {
-        setErr("차수 값을 읽지 못했습니다.");
-        return;
+    // 고객의 실제 id도 묶는다 — 사업자번호가 같아도 옛 고객의 실패가 현재 입력을 초기화하지 않는다.
+    // 소유자 순서는 합친 차수 id의 줄 번호와 연결되므로, 목록 순서가 바뀌면 화면 부품도 새로 연다.
+    const tierSaveScopeFor = (key: string) => {
+      const draftScope = scopeForOwners(panelScope, [], key);
+      const draftSave = pendingTierSaves.get(draftScope);
+      // 자동 생성한 첫 저장도 실제 서버 줄이 rows에 나타나 저장값이 확인될 때까지 같은 요청이다.
+      if (draftSave && (!ownerIds.length || (ownerIds.length === 1 && draftSave.createdOwnerId === ownerIds[0]))) return draftScope;
+      return scopeForOwners(panelScope, ownerIds, key);
+    };
+
+    const releaseObservedTierSaves = useCallback(() => {
+      for (const [scope, save] of pendingTierSaves) {
+        if (save.panelScope !== panelScope) continue;
+        const observations = tierSavedObservationsRef.current.get(scope);
+        for (const [ownerId, ownerSave] of save.owners) {
+          const observed = observations?.get(ownerId);
+          if (!ownerSave.succeeded || !observed) continue;
+          // 돈 칸은 그 선택의 새 사건만 인정한다. 일반 칸은 실제 제출한 변경을 대조한다.
+          if (ownerSave.feeEdit) {
+            if (observed === ownerSave.savedBasis
+              || !hasNewFeeEditObservation(observed, ownerSave.feeEdit)) continue;
+          } else {
+            const observedRaw = (JSON.parse(observed) as { raw?: unknown }).raw;
+            if (!hasSavedTierMutation(ownerSave.beforeRaw, ownerSave.submittedRaw, observedRaw, ownerSave.ordinaryEdit)) continue;
+          }
+          save.owners.delete(ownerId);
+        }
+        // 일부 줄이 먼저 확인돼도 나머지 요청·성공한 줄의 확인이 끝나기 전에는 다시 쓰지 않는다.
+        if (!save.finished || save.owners.size > 0) continue;
+        // 확인이 끝난 요청이 지우는 것은 자기보다 먼저 시작한 요청의 실패뿐이다 — 자기 실패와 더 새 요청의 실패는 남는다.
+        releaseTierSave(scope, save, { error: null });
       }
-      const saved = Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
-      const owners = ownerIds;
-      if (owners.length === 0) {
-        // 계약 줄이 아직 없다 — 기존 길(첫 저장 때 자동 생성)로 넘긴다.
-        await saveOrCreate(key, json);
-        return;
-      }
-      const byOwner = splitMergedTiers(saved, owners);
-      // ★어느 줄이 실제로 써졌는지 센다. 중간에 실패해도 **이미 써진 것은 화면에 반영**해야
-      //   한다 — 안 그러면 화면은 옛 상태를 계속 보여 주고 서버만 바뀐 「반쪽 저장」이 된다
-      //   (독립 리뷰 F5). 실패한 줄은 이름을 들어 알린다.
-      const wrote: string[] = [];
-      const failed: string[] = [];
-      let firstError = "";
-      for (const [entryId, tiers] of byOwner) {
-        const before = JSON.stringify(parseTierArray((policyRows.find((r) => r.entryId === entryId)?.row ?? {})[key]));
-        const after = JSON.stringify(tiers);
-        if (before === after) continue;          // 안 바뀐 줄은 건드리지 않는다
-        try {
-          await config.savePolicyField(entryId, key, after);
-          wrote.push(entryId);
-        } catch (e) {
-          failed.push(entryId);
-          if (!firstError) firstError = e instanceof Error ? e.message : "저장에 실패했습니다.";
+    }, [panelScope]);
+    useEffect(() => {
+      // 다시 읽기 요청을 받은 것으로 먼저 표시한 뒤 부른다(다시 그려져도 반복하지 않게).
+      const requestRefresh = (scope: string, save: PendingMergedTierSave) => {
+        save.refreshPending = false;
+        void Promise.resolve().then(() => onSaved?.()).catch((e) => {
+          // 늦은 재조회 실패가 같은 범위의 새 저장을 초기화하지 않는다.
+          if (pendingTierSaves.get(scope) !== save) return;
+          notifyTierSave({
+            scope, save, reset: true,
+            refreshError: e instanceof Error ? e.message : "",
+          });
+        });
+      };
+      const listener = (notice: TierSaveNotice) => {
+        if (notice.save.panelScope !== panelScope) return;
+        setTierSaveStates((prev) => {
+          const saving = pendingTierSaves.has(notice.scope);
+          const previousError = prev[notice.scope]?.error ?? null;
+          // 끝난 요청의 실패 이유(다시 읽기 실패 포함)는 여기(옛 scope)에 두지 않는다 — tierSaveFailures 에서 읽는다. 여기 남는 오류는 저장 중 안내(SAVE_BUSY_ERROR)뿐이다.
+          const cleared = notice.error !== undefined || notice.refreshError !== undefined
+            || (!saving && previousError === SAVE_BUSY_ERROR);
+          const error = cleared ? null : previousError;
+          return {
+            ...prev,
+            [notice.scope]: {
+              saving,
+              resetRevision: (prev[notice.scope]?.resetRevision ?? 0) + (notice.reset ? 1 : 0),
+              error,
+            },
+          };
+        });
+        // 옛 인스턴스의 응답도 현재 마운트의 관측과 대조한다. unmount 때 구독은 제거한다.
+        releaseObservedTierSaves();
+        // 요청할 수 있는 마운트(onSaved 가 있는 쪽)만 신호를 받는다.
+        if (notice.refresh && onSaved) requestRefresh(notice.scope, notice.save);
+      };
+      tierSaveListeners.add(listener);
+      // 패널이 닫힌 사이 성공한 저장(또는 첫 계약 줄을 기다리는 저장)은 다시 읽기 요청을 받을 마운트가 없었다 — 같은 회사로 다시 열린 이 마운트가 한 번 대신 요청한다.
+      // 이 신호는 다시 읽기 요청일 뿐이다 — 저장 잠금은 위 관측(releaseObservedTierSaves)이 실제 저장값을 볼 때에만 푼다.
+      // onSaved 가 없는 마운트는 받은 것으로 치지 않는다.
+      if (onSaved) {
+        for (const [scope, save] of pendingTierSaves) {
+          if (save.panelScope === panelScope && save.refreshPending) requestRefresh(scope, save);
         }
       }
-      if (failed.length > 0) {
-        setErr(
-          `계약 ${failed.length}건의 차수를 저장하지 못했습니다${wrote.length > 0 ? ` (${wrote.length}건은 저장됨)` : ""}. ` +
-          `${firstError} 화면을 새로 고쳐 실제 저장된 값을 확인해 주세요.`,
-        );
+      // 그리고 구독하는 사이에 끝난 실패도 놓치지 않는다 — 이 고객의 실패 기록이 있으면 한 번 더 그려 읽는다(읽기만, 요청은 없다).
+      for (const failure of tierSaveFailures.values()) {
+        if (failure.save.panelScope !== panelScope) continue;
+        setTierSaveStates((prev) => ({ ...prev }));
+        break;
       }
-      // 성공·실패와 무관하게 다시 읽는다 — 화면이 서버와 어긋난 채로 남지 않게.
-      if (wrote.length > 0 || failed.length > 0) onSaved?.();
+      return () => { tierSaveListeners.delete(listener); };
+    }, [panelScope, onSaved, releaseObservedTierSaves]);
+    // 부모가 실제 받은 저장본만 기록한다. 새 자료가 원격 성공보다 먼저 와도 성공 뒤에 대조할 수 있다.
+    const observedTierSnapshots = JSON.stringify(TIER_KEYS.map((key) => [
+      tierSaveScopeFor(key),
+      policyRows.filter((owner) => policyRows.filter((candidate) => candidate.entryId === owner.entryId).length === 1)
+        .map((owner) => [owner.entryId, ownerTierSavedBasis(owner, key)]),
+    ]));
+    useEffect(() => {
+      const snapshots = JSON.parse(observedTierSnapshots) as Array<[string, Array<[string, string]>]>;
+      tierSavedObservationsRef.current = new Map(snapshots.map(([scope, owners]) => [scope, new Map(owners)]));
+      releaseObservedTierSaves();
+    }, [observedTierSnapshots, releaseObservedTierSaves]);
+
+    /** 합친 목록이 저장될 때 — 줄마다 나눠 저장한다. 바뀐 줄만 실제로 보낸다. */
+    async function saveMergedTiers(key: string, json: string, editIntent?: TierFieldEditIntentV1) {
+      // 요청을 시작한 고객·소유자 목록·컨테이너를 끝까지 유지한다.
+      const scope = tierSaveScopeFor(key);
+      if (pendingTierSaves.has(scope)) {
+        setTierSaveStates((prev) => ({
+          ...prev,
+          [scope]: { saving: true, resetRevision: (prev[scope]?.resetRevision ?? 0) + 1, error: SAVE_BUSY_ERROR },
+        }));
+        return;
+      }
+      const pendingSave: PendingMergedTierSave = { panelScope, key, scopeOwnerIds: ownerIds, seq: ++tierSaveSeq, finished: false, owners: new Map() };
+      pendingTierSaves.set(scope, pendingSave);
+      notifyTierSave({ scope, save: pendingSave, error: null });
+      let refresh = false;
+      let releaseOwner = () => {};
+      try {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(json);
+        } catch {
+          throw new Error("차수 값을 읽지 못했습니다.");
+        }
+        if (!Array.isArray(parsed)) throw new Error("차수 값을 읽지 못했습니다.");
+        const saved = parsed as Record<string, unknown>[];
+        if (!config.savePolicyField) throw new Error("이 앱에서는 차수 값을 저장할 수 없습니다.");
+        let owners = ownerIds;
+        let bindRows: ReadonlyArray<PolicyRow> = policyRows;
+        if (owners.length === 0) {
+          // 계약 줄이 아직 없다 — 기존처럼 첫 저장 때 자동 생성한다(같은 패널의 만들기는 한 번만).
+          const created = await acquireOwner();
+          releaseOwner = created.release;
+          const id = created.id;
+          pendingSave.createdOwnerId = id;
+          if (!isSensitiveGovFeeEdit(key, editIntent)) {
+            const ownerSave: PendingTierOwnerSave = {
+              savedBasis: ownerTierSavedBasis(null, key), beforeRaw: undefined,
+              submittedRaw: json, succeeded: false,
+            };
+            pendingSave.owners.set(id, ownerSave);
+            await config.savePolicyField(id, key, json);
+            ownerSave.succeeded = true;
+            refresh = true;
+            return;
+          }
+          // 금액 칸의 첫 저장은 만들어진 id 만으로 보내지 않는다. 그 줄이 rows 에 실제로 나타나 수수료 표시를 읽은 뒤에만
+          // 아래 기존 소유자 경로(bindGovFeeEdit)로 이어 간다. 확인하지 못하면 세 인자 저장으로 낮추지 않고 실패한다.
+          const target = await awaitCreatedOwner(scope, pendingSave, id, key);
+          // 이제부터 소유자는 방금 읽은 이 줄 하나다 — 합친 다른 줄은 검증도, 저장도 하지 않는다.
+          owners = [target.entryId];
+          bindRows = [target];
+        }
+        // 한 소유자의 오류 때문에 다른 소유자만 먼저 저장되는 일이 없게 모두 쓰기 전에 검증한다.
+        // 첫 줄을 만든 금액 저장도 방금 읽은 그 줄과 처음 캡처한 editIntent 로 같은 경로를 탄다(새 차수 id·요청 id·이전 값 그대로).
+        const binding = bindGovFeeEdit(bindRows, key, saved, editIntent);
+        const feeEdit = binding?.feeEdit;
+        // 칸 하나를 직접 고친 저장은 고른 소유자의 줄만 쓴다 — 건드리지 않은 다른 줄은 나눠 보내지 않는다.
+        //   (의도 없는 저장은 기존처럼 모든 줄을 나눠 저장한다.)
+        const writes = [...splitMergedTiers(saved, owners)]
+          .filter(([entryId]) => !binding || entryId === binding.entryId)
+          .map(([entryId, tiers]) => {
+            let ordinaryEdit: SavedTierFieldSelection | undefined;
+            if (editIntent && !feeEdit) {
+              // 합친 화면의 자리가 아닌 splitMergedTiers와 같은 실제 소유자 안의 자리로 확인한다.
+              const ownerIndex = owners.indexOf(entryId);
+              const selected = saved.filter((tier) => {
+                const ref = parseMergedTierId(tier.id);
+                return (ref && owners[ref.ownerIndex] ? ref.ownerIndex : 0) === ownerIndex;
+              });
+              const index = selected.findIndex((tier) => tier.id === editIntent.tierId);
+              if (index < 0 || !tiers[index]) throw new Error("수정한 차수를 확인하지 못했습니다.");
+              ordinaryEdit = { tierId: tierIdOf(tiers[index]), index, fieldKey: editIntent.fieldKey };
+            }
+            return { entryId, tiers, ordinaryEdit };
+          });
+        // ★어느 줄이 실제로 써졌는지 센다. 중간에 실패해도 **이미 써진 것은 화면에 반영**해야
+        //   한다 — 안 그러면 화면은 옛 상태를 계속 보여 주고 서버만 바뀐 「반쪽 저장」이 된다
+        //   (독립 리뷰 F5). 실패한 줄은 이름을 들어 알린다.
+        const wrote: string[] = [];
+        const failed: string[] = [];
+        let firstError = "";
+        for (const { entryId, tiers, ordinaryEdit } of writes) {
+          const owner = bindRows.find((r) => r.entryId === entryId) ?? null;
+          const before = JSON.stringify(parseTierArray((owner?.row ?? {})[key]));
+          const after = JSON.stringify(tiers);
+          const options = feeEdit ? { feeEdit } : undefined;
+          if (before === after && !options) continue; // 같은 금액 확정도 선택한 소유자의 수정 기준은 저장한다.
+          const savedBasis = ownerTierSavedBasis(owner, key);
+          const ownerSave: PendingTierOwnerSave = {
+            savedBasis,
+            beforeRaw: (JSON.parse(savedBasis) as { raw?: unknown }).raw,
+            submittedRaw: after, succeeded: false, feeEdit, ordinaryEdit,
+          };
+          pendingSave.owners.set(entryId, ownerSave);
+          try {
+            if (options) await config.savePolicyField(entryId, key, after, options);
+            else await config.savePolicyField(entryId, key, after);
+            ownerSave.succeeded = true;
+            wrote.push(entryId);
+            refresh = true;
+          } catch (e) {
+            // 실패한 주인·건드리지 않은 주인은 새 저장본을 영원히 기다리지 않는다.
+            pendingSave.owners.delete(entryId);
+            failed.push(entryId);
+            if (!firstError) firstError = e instanceof Error ? e.message : "저장에 실패했습니다.";
+          }
+        }
+        if (failed.length > 0) {
+          throw new Error(
+            `계약 ${failed.length}건의 차수를 저장하지 못했습니다${wrote.length > 0 ? ` (${wrote.length}건은 저장됨)` : ""}. ${firstError}`,
+          );
+        }
+      } catch (e) {
+        refresh = true;
+        // 새 줄 저장 실패도 성공한 줄만 기다리는 기존 부분 성공 규칙을 따른다.
+        for (const [ownerId, ownerSave] of pendingSave.owners) {
+          if (!ownerSave.succeeded) pendingSave.owners.delete(ownerId);
+        }
+        if (pendingTierSaves.get(scope) === pendingSave) notifyTierSave({
+          scope, save: pendingSave, reset: true,
+          error: `${e instanceof Error ? e.message : "저장에 실패했습니다."} 저장된 값을 다시 불러옵니다. 확인한 뒤 다시 수정해 주세요.`,
+        });
+      } finally {
+        try {
+          // JSON·묶기·원격 저장 실패도 다시 읽는다. 복구 번호는 같은 문자열 응답에도 적용된다.
+          // onSaved가 void로 재조회를 시작해도 성공한 주인은 실제 저장본이 확인될 때까지 잠근다.
+          pendingSave.finished = true;
+          // 응답을 받은 옛 마운트 대신 현재 구독자가 현재 rows와 대조하고 재조회한다.
+          // 구독자가 없으면(패널이 닫힘) refreshPending 이 남아 같은 패널이 다시 열릴 때 전달된다.
+          if (pendingTierSaves.get(scope) === pendingSave) {
+            pendingSave.refreshPending = refresh;
+            notifyTierSave({ scope, save: pendingSave, refresh });
+          }
+        } finally {
+          // 이 저장이 쓰던 새 줄 id 는 마지막에 놓는다 — 위 알림이 모두 끝난 뒤에야 만들기 결과를 비울 수 있다.
+          releaseOwner();
+        }
+      }
     }
 
     /** 합친 차수 id 에 박힌 주인 줄과 원래 차수 id. **자리(index)로 찾지 않는다** —
@@ -440,8 +988,40 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       return found ? ({ ...evalBase, ...(found.row ?? {}) } as Record<string, unknown>) : null;
     };
 
-    const onSaveFor = (key: string) => (canEditValues ? (json: string) => saveOrCreate(key, json) : () => {});
-    const onSaveTiersFor = (key: string) => (canEditValues ? (json: string) => { void saveMergedTiers(key, json); } : () => {});
+    /** 계약·정산 컨테이너마다 따로 — 지금 받아 둔 줄 목록 기준으로 차수의 서버 수수료 대상을 고른다(표시 전용). 환불은 쓰지 않는다. */
+    const feeTargetFor = (containerKey: "계약정보_차수" | "정산정보"): FeeTargetForTier => (tier) => (
+      selectGovFeeTarget(policyRows, containerKey, tier)
+    );
+
+    const onSaveTiersFor = (key: string) => (canEditValues ? (json: string, editIntent?: TierFieldEditIntentV1) => { void saveMergedTiers(key, json, editIntent); } : () => {});
+    const tierSavePropsFor = (key: string) => {
+      const scope = tierSaveScopeFor(key);
+      const state = tierSaveStates[scope];
+      return {
+        savedBasisVersion: JSON.stringify(policyRows.map((owner) => [owner.entryId, ownerTierSavedBasis(owner, key)])),
+        saveResetRevision: state?.resetRevision ?? 0,
+        saveInProgress: pendingTierSaves.has(scope),
+        canStartSave: () => {
+          if (!pendingTierSaves.has(scope)) return true;
+          setTierSaveStates((prev) => ({
+            ...prev,
+            [scope]: { saving: true, resetRevision: prev[scope]?.resetRevision ?? 0, error: SAVE_BUSY_ERROR },
+          }));
+          return false;
+        },
+      };
+    };
+    const shownTierContainer = shownSubTab === "contract" ? "계약정보_차수"
+      : shownSubTab === "settlement" ? "정산정보" : shownSubTab === "refund" ? "환불정보_차수" : null;
+    const shownTierScope = shownTierContainer ? tierSaveScopeFor(shownTierContainer) : null;
+    const shownTierSave = shownTierScope ? {
+      ...tierSaveStates[shownTierScope], saving: pendingTierSaves.has(shownTierScope),
+    } : undefined;
+    // 끝난 저장의 실패 이유는 지금 보는 고객·컨테이너·소유자 순서와 정확히 같은 기록만 — 첫 저장이 만든 줄은 그 줄 하나만 보는 동안 같은 기록으로 읽힌다.
+    const shownFailure = shownTierContainer ? tierSaveFailures.get(scopeForOwners(panelScope, ownerIds, shownTierContainer)) : undefined;
+    // 저장은 끝났지만 저장된 값을 아직 확인하지 못한 채 상세창의 다시 읽기가 실패했다면 안내만 보인다. 잠금·실패 기록과 무관하고, 실제 저장값이 확인되어야만 잠금이 풀린다.
+    const reloadFailedMessage = rowsLoadFailed && shownTierSave?.saving ? SAVED_RELOAD_FAILED_MESSAGE : undefined;
+    const shownError = [err, shownTierSave?.error, shownFailure?.message, reloadFailedMessage].filter(Boolean).join(" ");
     // 조건 "기준 칸" 표준 후보를 만드는 함수 — 앱(어댑터)이 넘겨줄 때만 쓴다.
     // 화면 부품(@wedly/ui-shared)에서 직접 가져오면, 그 함수가 없는 판을 무는 앱(하이브·일루아 v0.29)이
     // 화면을 열기도 전에 빌드에서 죽는다. 그래서 앱이 주입하는 형태로 받는다.
@@ -496,10 +1076,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
     return (
       <div className="flex flex-col">
-        {err && (
+        {shownError && (
           <div role="alert" className="mx-4 mt-3 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red-ink">
-            {err}
+            {shownError}
           </div>
+        )}
+        {shownTierSave?.saving && (
+          <div role="status" className="mx-4 mt-2 text-[13px] text-wedly-muted">{SAVING_TIERS_MESSAGE}</div>
         )}
 
         {/* 계약 알약 줄(계약 1·2·3 + 추가)은 없앴다 — 사장님 지시 2026-09-17.
@@ -573,14 +1156,18 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
               ) : historyGate === "composer" ? (
                 <FirstHistoryComposer
                   onAdd={async (text) => {
-                    const id = await ensureEntryId();
-                    const res = await fetch(config.commentsPath(id), {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ text }),
-                    });
-                    if (!res.ok) throw new Error("저장에 실패했습니다.");
-                    onSaved?.();
+                    const owner = await acquireOwner();
+                    try {
+                      const res = await fetch(config.commentsPath(owner.id), {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ text }),
+                      });
+                      if (!res.ok) throw new Error("저장에 실패했습니다.");
+                      onSaved?.();
+                    } finally {
+                      owner.release();
+                    }
                   }}
                 />
               ) : (
@@ -592,21 +1179,21 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {shownSubTab === "contract" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "contract", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["계약정보_차수"] ?? null} onSave={onSaveTiersFor("계약정보_차수")} storagePrefix="contract" ensureFirstTier addButtonSuffixOverride="계약" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "contract", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab key={tierSaveScopeFor("계약정보_차수")} {...settlementCommon} {...tierSavePropsFor("계약정보_차수")} rawValue={mergedTiers["계약정보_차수"] ?? null} onSave={onSaveTiersFor("계약정보_차수")} feeTargetForTier={feeTargetFor("계약정보_차수")} storagePrefix="contract" ensureFirstTier addButtonSuffixOverride="계약" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "contract", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
           {shownSubTab === "settlement" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "settlement", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["정산정보"] ?? null} onSave={onSaveTiersFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "settlement", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab key={tierSaveScopeFor("정산정보")} {...settlementCommon} {...tierSavePropsFor("정산정보")} rawValue={mergedTiers["정산정보"] ?? null} onSave={onSaveTiersFor("정산정보")} feeTargetForTier={feeTargetFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "settlement", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
           {shownSubTab === "refund" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "refund", entryId })}
-              <SettlementInfoTab {...settlementCommon} rawValue={mergedTiers["환불정보_차수"] ?? null} onSave={onSaveTiersFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "refund", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab key={tierSaveScopeFor("환불정보_차수")} {...settlementCommon} {...tierSavePropsFor("환불정보_차수")} rawValue={mergedTiers["환불정보_차수"] ?? null} onSave={onSaveTiersFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "refund", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 

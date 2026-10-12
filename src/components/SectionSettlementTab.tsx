@@ -4,6 +4,7 @@
 // 앱별 정산 칸/설정 주소는 settlementApiBase prop으로 주입(ERP·하이브·일루아 공용).
 // 비율 자동계산은 분야 공통 의미가 없어 끄고(더미 키), 합계카드 기본값도 비워 둔다(관리자가 분야별로 추가).
 import SharedSettlementInfoTab from "./SettlementInfoTab";
+import type { TierFieldEditIntentV1 } from "./tier-field-edit-intent";
 import type { ScoreCardDef } from "../lib/settlement-info-helpers";
 import type { SelectDropdownColorFamily } from "./SelectDropdown";
 
@@ -22,7 +23,8 @@ export default function SectionSettlementTab({
 }: {
   section: string;
   rawValue: unknown;
-  onSave: (jsonValue: string) => void;
+  // 둘째 인자는 사용자가 칸을 직접 고친 저장에만 붙는 선택 인자 — 가공 없이 그대로 전달한다.
+  onSave: (jsonValue: string, editIntent?: TierFieldEditIntentV1) => void;
   isAdmin?: boolean;
   // 앱별 정산 칸/설정 API의 베이스 경로. 예: "/api/unified-collab/section-settlement" (뒤에 /{section} 자동)
   settlementApiBase: string;
