@@ -11,6 +11,8 @@ export { default as MeetingsTab } from "./components/MeetingsTab";
 export { default as SettlementInfoTab } from "./components/SettlementInfoTab";
 // 사용자가 차수 칸을 직접 고친 한 번의 확정 의도 — onSave 의 선택적 둘째 인자 타입.
 export type { TierFieldEditIntentV1 } from "./components/tier-field-edit-intent";
+// 서버가 승인한 수수료 표시 대상을 차수마다 알려 주는 선택 함수 — SettlementInfoTab 의 feeTargetForTier prop 타입.
+export type { FeeTargetForTier, FeeTierView } from "./components/fee-tier-display";
 
 // 정부지원금 상세 섹션 공용 패널(3앱 공통) — 어댑터가 createGovSubsidyPanel(config) 로 주입.
 export { createGovSubsidyPanel } from "./components/GovSubsidyPanel";
@@ -19,6 +21,7 @@ export { createGovSubsidyPanel } from "./components/GovSubsidyPanel";
 export { resolveGovSubTab, isGovSubTab, GOV_SUB_TABS } from "./components/gov-subtab";
 export type { GovSubTab } from "./components/gov-subtab";
 export type { GovSubsidyPanelConfig } from "./components/GovSubsidyPanel";
+export type { GovFeeEditRequestV1, GovPolicyFieldSaveOptions } from "./components/gov-fee-edit-binding";
 
 // 분야(섹션)별 정산 탭 래퍼 — 앱별 정산 칸/설정 주소(settlementApiBase) 주입.
 export { default as SectionSettlementTab } from "./components/SectionSettlementTab";
