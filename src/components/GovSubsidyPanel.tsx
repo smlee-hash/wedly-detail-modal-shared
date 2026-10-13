@@ -90,7 +90,7 @@ export type GovSubsidyPanelConfig = {
    * ★없으면 정부지원금 탭의 「카톡 보고」가 늘 기계글만 낸다(2026-09-02 실사례 — 경정청구 탭만 AI 글이 나왔다).
    */
   buildKakaoReport?: (entryId: string, commentId: string) => Promise<string | null>;
-  /** 히스토리 작성칸 아래에 앱이 끼워 넣을 칸(선택). entryId 는 지금 보고 있는 정책 줄. */
+  /** 히스토리 작성칸 아래에 앱이 끼워 넣을 칸(선택). entryId 는 이력의 대표 줄. */
   historyComposerExtra?: (entryId: string) => ReactNode;
   /** 히스토리 글이 저장된 뒤 앱이 할 일(선택). 실패해도 저장은 되돌리지 않는다(공용 HistoryPanel 이 잡는다). */
   onHistorySent?: (entryId: string, text: string) => void | Promise<void>;
@@ -124,6 +124,8 @@ export type GovSubsidyPanelConfig = {
   createContract?: (primaryRow: Record<string, unknown>) => Promise<string>;
   /** 이 그룹 행 중 정책 행만 골라내기(도메인 키 차이 흡수). */
   filterPolicyRows: (rows: SectionPanelProps["rows"]) => SectionPanelProps["rows"];
+  /** 이력을 읽고 쓸 행 고르기(선택). 미설정 시 filterPolicyRows 결과를 그대로 쓴다. 계약 저장 소유자에는 영향을 주지 않는다. */
+  filterHistoryRows?: (rows: SectionPanelProps["rows"]) => SectionPanelProps["rows"];
   /** 조건부 수식 기준 칸을 가져올 기본정보 도메인(ERP가 "government-subsidy" 등 주입). */
   conditionBasicDomain?: string;
   /** 선택 칸 보기 색 고르는 판. 내려주면 차수 카드 드롭다운에 「색상 변경」이 뜬다. */
@@ -508,9 +510,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     onSubTabChange?: (t: string) => void;
   }) {
     const policyRows = config.filterPolicyRows(rows) as PolicyRow[];
+    const historyRows = config.filterHistoryRows?.(rows) ?? policyRows;
     const TIER_KEYS = ["계약정보_차수", "정산정보", "환불정보_차수"] as const;
-    // ★policyRows 는 렌더마다 새 배열이라 그대로 의존성에 쓰면 이 계산과 히스토리 어댑터가
-    //   매 렌더 새로 만들어진다(자동 새로고침 타이머가 매번 초기화됨 — 독립 리뷰 F7).
+    // ★policyRows 는 렌더마다 새 배열이라 그대로 의존성에 쓰면 이 계산이
+    //   매 렌더 새로 만들어진다.
     //   그래서 「줄 id + 차수 원문」만 뽑은 글자를 기준으로 삼는다.
     const policyKey = policyRows
       .map((r) => `${r.entryId}:${TIER_KEYS.map((k) => JSON.stringify((r.row ?? {})[k] ?? null)).join("|")}`)
@@ -533,7 +536,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       historyOnly,
     });
     // 알약을 없애 「보고 있는 계약 고르기」가 사라졌다. entryId·data 는 여전히 대표 줄을 가리키며
-    // 히스토리 첫 작성·미팅정보 저장처럼 **한 줄을 골라야 하는 일**의 기준으로 쓰인다.
+    // 미팅정보 저장처럼 **계약 줄 하나를 골라야 하는 일**의 기준으로 쓰인다.
     const sel = 0;
     const [err, setErr] = useState<string | null>(null);
     const [userName, setUserName] = useState("");
@@ -550,6 +553,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const idx = policyRows.length ? Math.min(sel, policyRows.length - 1) : -1;
     const entry = idx >= 0 ? policyRows[idx] : null;
     const entryId = entry?.entryId ?? "";
+    const historyEntryId = historyRows[0]?.entryId ?? "";
     // 공유하던 생성 결과는 rows 가 그 새 줄(정확한 id)을 보여 주고 이어서 쓰는 요청이 없을 때에만 비운다.
     // 아무 줄이나 나타났다고, 또는 패널이 닫혔다고 비우면 늦게 도착하는 같은 패널의 요청이 줄을 한 번 더 만든다.
     const policyEntryIds = JSON.stringify(policyRows.map((r) => r.entryId));
@@ -603,22 +607,24 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         pokeOwnerWaiters(panelScope);
       };
     }, [panelScope]);
-    const historyGate = resolveHistoryGate({ entryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
+    const historyGate = resolveHistoryGate({ entryId: historyEntryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
-    // 이 회사의 계약 줄 전부의 기록을 **한 목록**으로 보여 준다(사장님 지시 2026-09-17).
+    // 이 회사의 이력 줄 전부의 기록을 **한 목록**으로 보여 준다(기본은 계약 줄, 앱별로 추가 가능).
     //   왜: 알약을 없앴으므로, 합치지 않으면 계약 2·3 에 적혀 있던 기록이 화면에서 영영 안 보인다.
     //   쓰기: 새 글은 대표 줄에, 고치기·지우기는 **그 글이 실제로 있는 줄**에 보낸다(아래 지도).
     //   실패: 한 줄이라도 못 읽으면 조용히 「기록 없음」으로 만들지 않고 오류를 그대로 올린다
     //        (빈 목록 성공으로 바꾸면 글이 사라진 것처럼 보인다 — commentsJson 주석과 같은 이유).
     const commentOwnerRef = useRef<Map<string, string>>(new Map());
+    // 필터가 매 렌더 새 배열을 돌려줘도 소유자 id와 순서가 같으면 이력 어댑터·새로고침 타이머를 유지한다.
+    const historyKey = JSON.stringify(historyRows.map((r) => r.entryId));
     const historyEntryIds = useMemo(
-      () => (ownerIds.length ? ownerIds : entryId ? [entryId] : []),
-      [ownerIds, entryId],
+      () => JSON.parse(historyKey) as string[],
+      [historyKey],
     );
     const historyAdapter = useMemo<HistoryAdapter>(() => {
       const ids = historyEntryIds;
-      const primary = ids[0] ?? entryId;
+      const primary = ids[0] ?? historyEntryId;
       const ro = config.commentsReadOnly === true;
       const blocked = async (): Promise<UnifiedComment[]> => {
         throw new Error("이 앱에서는 정부지원금 히스토리를 작성할 수 없습니다. ERP 또는 일루아에서 작성해 주세요.");
@@ -677,7 +683,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           return j.data.url as string;
         },
       };
-    }, [historyEntryIds, entryId]);
+    }, [historyEntryIds, historyEntryId]);
 
     // 쓸 계약 줄 id. 줄이 있으면 그대로, 없으면 같은 논리 패널이 공유하는 첫 줄 만들기에 참여한다.
     // 이어서 하는 일(저장·댓글)이 끝나면 release() 를 꼭 부른다 — 그 전에는 만들기 결과를 비우지 않는다.
@@ -1119,11 +1125,11 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
             <div className="p-4">
               {historyGate === "panel" ? (
                 <HistoryPanel
-                  pageId={entryId}
+                  pageId={historyEntryId}
                   adapter={historyAdapter}
                   buildKakaoReport={
                     config.buildKakaoReport
-                      ? (c) => config.buildKakaoReport!(commentOwnerRef.current.get(String(c.id)) || entryId, c.id).then((t) => t ?? "")
+                      ? (c) => config.buildKakaoReport!(commentOwnerRef.current.get(String(c.id)) || historyEntryId, c.id).then((t) => t ?? "")
                       : undefined
                   }
                   currentUserName={userName}
@@ -1135,9 +1141,9 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   pollingIntervalMs={5000}
                   shareEnabled={false}
                   hideCategories
-                  draftId={entryId}
-                  composerExtra={config.historyComposerExtra ? config.historyComposerExtra(entryId) : undefined}
-                  onSent={config.onHistorySent ? (text: string) => config.onHistorySent!(entryId, text) : undefined}
+                  draftId={historyEntryId}
+                  composerExtra={config.historyComposerExtra ? config.historyComposerExtra(historyEntryId) : undefined}
+                  onSent={config.onHistorySent ? (text: string) => config.onHistorySent!(historyEntryId, text) : undefined}
                 />
               ) : historyGate === "loadFailed" ? (
                 <div className="flex items-start gap-2.5 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-3">
