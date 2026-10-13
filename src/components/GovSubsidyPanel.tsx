@@ -45,7 +45,7 @@ import {
 } from "./gov-fee-edit-binding";
 import type { FeeTargetForTier, FeeTierView } from "./fee-tier-display";
 import type { TierFieldEditIntentV1 } from "./tier-field-edit-intent";
-import { ownerTierSavedBasis, hasNewFeeEditObservation, hasSavedTierMutation, type SavedTierFieldSelection } from "./gov-save-observation";
+import { ownerTierSavedBasis, hasNewFeeEditObservation, hasSavedTierMutation, refundReadProjectionOf, type SavedTierFieldSelection } from "./gov-save-observation";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
 const SettlementInfoTab = SettlementInfoTabBase as unknown as ComponentType<Record<string, unknown>>;
@@ -550,6 +550,15 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     }, [panelScope]);
     const data = (entry?.row ?? {}) as Record<string, unknown>;
 
+    // 상세창이 분야 행 목록을 못 불러왔나 — 상자가 없는 호출부는 항상 거짓이라 동작 그대로.
+    const { rowsLoadFailed } = useDetailLoadState();
+    // 첫 계약 줄을 기다리는 금액 저장이 읽을 이 마운트의 현재 값. 그려질 때마다 갱신하고 기다리는 요청에 확인을 맡긴다.
+    const liveRef = useRef<MountedPanelView>({ panelScope, policyRows, rowsLoadFailed, onSaved });
+    useEffect(() => {
+      liveRef.current = { panelScope, policyRows, rowsLoadFailed, onSaved };
+      pokeOwnerWaiters(panelScope);
+    });
+
     const releaseObservedTierSaves = useCallback(() => {
       for (const [scope, save] of pendingTierSaves) {
         if (save.panelScope !== panelScope || !save.succeeded) continue;
@@ -560,8 +569,11 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           if (observed === save.savedBasis || !hasNewFeeEditObservation(observed, save.feeEdit)) continue;
         } else {
           const observedRaw = (JSON.parse(observed) as { raw?: unknown }).raw;
-          if (save.submittedRaw === undefined
-            || !hasSavedTierMutation(save.beforeRaw, save.submittedRaw, observedRaw, save.ordinaryEdit)) continue;
+          if (save.submittedRaw === undefined) continue;
+          // 환불 읽기 투영은 이 저장의 소유자 줄이 정확히 하나일 때만 — 현재 마운트의 rows 에서 읽는다.
+          const owners = liveRef.current.policyRows.filter((candidate) => candidate.entryId === save.ownerId);
+          const refundContext = refundReadProjectionOf(owners.length === 1 ? owners[0] : null, save.key);
+          if (!hasSavedTierMutation(save.beforeRaw, save.submittedRaw, observedRaw, save.ordinaryEdit, refundContext)) continue;
         }
         releaseTierSave(scope, save, { error: null });
       }
@@ -615,10 +627,14 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         ])
         : []
     )));
+    // 원문이 같아도 현재 소유자의 환불 읽기 문맥이 달라지면 저장 확인을 다시 한다.
+    const observedRefundContexts = JSON.stringify(policyRows.map((owner) => [
+      owner.entryId, refundReadProjectionOf(owner, "환불정보_차수"),
+    ]));
     useEffect(() => {
       tierSavedObservationsRef.current = new Map(JSON.parse(observedTierSnapshots) as Array<[string, string]>);
       releaseObservedTierSaves();
-    }, [observedTierSnapshots, releaseObservedTierSaves]);
+    }, [observedTierSnapshots, observedRefundContexts, releaseObservedTierSaves]);
 
     // NO.125 반려 재작업: 수식 평가 바탕 행 — 전체 탭과 동일 문맥(경정청구 행+공통 칸 채움)을
     // 어느 화면에서든 재현한다(대웅글로벌: 일루아 탭·일루아 앱 카드가 전체 탭과 딴 값이던 원인).
@@ -636,14 +652,6 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 히스토리 게이트 — 항목 없어도 편집 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
     // 식별값(사업자번호/연락처)이 없어도 열린다 — 자동생성 항목은 앵커 꼬리표(_anchorRef, 각 앱 prefill 부여)로
     // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
-    // 상세창이 분야 행 목록을 못 불러왔나 — 상자가 없는 호출부는 항상 거짓이라 동작 그대로.
-    const { rowsLoadFailed } = useDetailLoadState();
-    // 첫 계약 줄을 기다리는 금액 저장이 읽을 이 마운트의 현재 값. 그려질 때마다 갱신하고 기다리는 요청에 확인을 맡긴다.
-    const liveRef = useRef<MountedPanelView>({ panelScope, policyRows, rowsLoadFailed, onSaved });
-    useEffect(() => {
-      liveRef.current = { panelScope, policyRows, rowsLoadFailed, onSaved };
-      pokeOwnerWaiters(panelScope);
-    });
     useEffect(() => {
       // 같은 회사로 다시 열린 마운트도 이미 기다리던 요청을 자기 rows 로 이어서 확인한다. 열리면 멈춰 있던 기한도 남은 시간으로 다시 돈다.
       const mounted = liveRef;
