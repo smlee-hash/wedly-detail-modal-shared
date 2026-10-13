@@ -44,7 +44,7 @@ import {
   bindGovFeeEdit, isSensitiveGovFeeEdit, observedFeeViewMode,
   type GovFeeEditRequestV1, type GovPolicyFieldSaveOptions,
 } from "./gov-fee-edit-binding";
-import { hasNewFeeEditObservation, hasSavedTierMutation, ownerTierSavedBasis, type SavedTierFieldSelection } from "./gov-save-observation";
+import { hasNewFeeEditObservation, hasSavedTierMutation, ownerTierSavedBasis, refundReadProjectionOf, type SavedTierFieldSelection } from "./gov-save-observation";
 import type { FeeTargetForTier, FeeTierView } from "./fee-tier-display";
 import type { TierFieldEditIntentV1 } from "./tier-field-edit-intent";
 
@@ -755,7 +755,10 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
               || !hasNewFeeEditObservation(observed, ownerSave.feeEdit)) continue;
           } else {
             const observedRaw = (JSON.parse(observed) as { raw?: unknown }).raw;
-            if (!hasSavedTierMutation(ownerSave.beforeRaw, ownerSave.submittedRaw, observedRaw, ownerSave.ordinaryEdit)) continue;
+            // 환불 읽기 투영은 지금 rows 의 같은 소유자 줄이 켜졌을 때만 푼다. 정확히 한 줄이 아니면 엄격하게 대조한다.
+            const currentOwners = liveRef.current.policyRows.filter((candidate) => candidate.entryId === ownerId);
+            const refundContext = refundReadProjectionOf(currentOwners.length === 1 ? currentOwners[0] : null, save.key);
+            if (!hasSavedTierMutation(ownerSave.beforeRaw, ownerSave.submittedRaw, observedRaw, ownerSave.ordinaryEdit, refundContext)) continue;
           }
           save.owners.delete(ownerId);
         }
