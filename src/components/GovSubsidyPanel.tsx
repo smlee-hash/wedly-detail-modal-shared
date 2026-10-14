@@ -8,6 +8,7 @@
 //
 // 구조(경정청구 상세와 동일): 도메인 탭 아래 하위 탭 5개.
 //   · 히스토리 : 공용 HistoryPanel + 앱별 댓글 경로(config.commentsPath). 보기전용(config.commentsReadOnly)이면 작성 차단.
+//                config.filterHistoryRows 를 주입한 앱만 히스토리 소유 계약을 수수료 계약과 따로 잡는다(없으면 고른 계약 하나).
 //   · 계약/정산/환불 : 공용 SettlementInfoTab — 칸 목록·합계카드를 "공용 저장소"에서 읽어 3앱 동일 렌더.
 //   · 미팅 : adapter.components.MeetingsTab (앱별 주입).
 //
@@ -100,6 +101,12 @@ export type GovSubsidyPanelConfig = {
   createContract?: (primaryRow: Record<string, unknown>) => Promise<string>;
   /** 이 그룹 행 중 정책 행만 골라내기(도메인 키 차이 흡수). */
   filterPolicyRows: (rows: SectionPanelProps["rows"]) => SectionPanelProps["rows"];
+  /**
+   * 히스토리 소유 계약만 따로 고르기(선택). 주면 히스토리 조회·작성·수정·삭제는 이 행들의 entryId 로만 오가고
+   * (여러 계약이면 댓글을 합쳐 보여 주되 수정·삭제는 원래 계약으로 보낸다), 수수료·미팅 저장과 첫 계약 자동생성은
+   * 계속 filterPolicyRows 기준이다. 미주입이면 지금과 100% 동일 — 고른 계약 하나의 히스토리.
+   */
+  filterHistoryRows?: (rows: SectionPanelProps["rows"]) => SectionPanelProps["rows"];
   /** 조건부 수식 기준 칸을 가져올 기본정보 도메인(ERP가 "government-subsidy" 등 주입). */
   conditionBasicDomain?: string;
 };
@@ -133,6 +140,124 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
   if (d && Array.isArray(d.illuaComments)) return d.illuaComments;
   if (d && Array.isArray(d.hiveComments)) return d.hiveComments;
   return [];
+}
+
+// 댓글 한 건의 id(문자열/숫자). 없으면 빈 문자열 = 어느 계약 댓글인지 기억할 수 없는 댓글.
+function commentIdOf(c: UnifiedComment): string {
+  const id = (c as unknown as { id?: unknown }).id;
+  return typeof id === "string" || typeof id === "number" ? String(id) : "";
+}
+
+/**
+ * 히스토리 소유 계약이 따로 주어졌을 때(config.filterHistoryRows)의 댓글 통로.
+ *  · fetch  : 소유 계약마다 읽어 한 목록으로 합친다. 한 곳이라도 실패하면 통째로 실패 — 일부만 보여 주지 않는다.
+ *  · create : 대표 계약(primaryId)에만 쓴다. 소유 계약이 둘 이상인데 확정된 목록이 아직 전부 없으면
+ *    쓰기 전에 먼저 전부 읽고, 하나라도 못 읽으면 아무것도 쓰지 않고 실패한다.
+ *  · edit/remove : 그 댓글을 읽어 온 **원래 계약**으로만 보낸다. 소유 계약을 모르거나(미확인) 둘 이상이면(모호)
+ *    다른 계약에 잘못 쓰지 않도록 쓰기 전에 실패시킨다.
+ *  · 쓰기가 성공하면 쓴 계약의 응답 목록을 확정하고, 모든 소유 계약을 다시 읽어 합친 목록을 돌려준다.
+ *    다시 읽기만 실패하면 거절하지 않고 「쓴 계약의 응답 목록 + 다른 계약의 마지막 확정 목록」을 합쳐 돌려준다 —
+ *    쓰기는 이미 서버에 반영됐는데 거절하면 HistoryPanel 이 입력 초안을 되살려 같은 글을 다시 등록하게 만든다(중복 저장).
+ *  · 확정 목록은 계약별로 「읽기 성공 | 쓰기 응답」일 때만 갈아 끼운다. 합친 목록과 댓글 소유 계약은 늘 이 목록에서
+ *    다시 만든다. 읽기는 시작할 때, 쓰기 응답은 받을 때 시각표를 찍어, 더 늦게 확정된 것을 오래된 읽기 응답
+ *    (5초 폴링이 쓰기 응답보다 늦게 도착하는 경우)이 덮지 못하게 한다.
+ */
+function createOwnerHistory(args: {
+  ownerIds: string[];
+  primaryId: string;
+  commentsPath: (entryId: string) => string;
+}): Pick<HistoryAdapter, "fetch" | "create" | "edit" | "remove"> {
+  // 소유 계약별 마지막 확정 목록. 없으면 그 계약은 아직 한 번도 확정된 적이 없다.
+  const lists = new Map<string, UnifiedComment[]>();
+  // 계약별로 마지막 확정 시각표(단조 증가). 이보다 이르게 시작한 읽기 결과는 버린다.
+  const settledAt = new Map<string, number>();
+  let clock = 0;
+
+  function settle(ownerId: string, comments: UnifiedComment[], at: number): void {
+    if (at <= (settledAt.get(ownerId) ?? 0)) return;
+    settledAt.set(ownerId, at);
+    lists.set(ownerId, comments);
+  }
+
+  // 확정 목록에서 합친 목록과 소유 계약을 함께 다시 만든다(소유 계약 순서대로).
+  // owners: 댓글 id → 그 댓글이 든 계약 entryId. null = 같은 id 가 둘 이상의 계약에 있음(소유자 모호).
+  function view(): { merged: UnifiedComment[]; owners: Map<string, string | null> } {
+    const owners = new Map<string, string | null>();
+    const merged: UnifiedComment[] = [];
+    for (const ownerId of args.ownerIds) {
+      for (const c of lists.get(ownerId) ?? []) {
+        merged.push(c);
+        const id = commentIdOf(c);
+        if (!id) continue;
+        owners.set(id, owners.has(id) && owners.get(id) !== ownerId ? null : ownerId);
+      }
+    }
+    return { merged, owners };
+  }
+
+  async function fetchAll(): Promise<UnifiedComment[]> {
+    const results = await Promise.allSettled(
+      args.ownerIds.map(async (ownerId) => {
+        const at = ++clock;
+        return { ownerId, at, comments: await commentsJson(await fetch(args.commentsPath(ownerId), { cache: "no-store" })) };
+      }),
+    );
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failed) throw failed.reason;
+    // 전부 성공했을 때만 확정한다(실패한 읽기가 이전 확정 목록을 지우거나 일부만 갈아 끼우지 않게).
+    for (const r of results) {
+      if (r.status === "fulfilled") settle(r.value.ownerId, r.value.comments, r.value.at);
+    }
+    return view().merged;
+  }
+
+  function ownerOf(commentId: string): string {
+    const { owners } = view();
+    const owner = owners.get(String(commentId));
+    if (owner) return owner;
+    throw new Error(
+      owners.has(String(commentId))
+        ? "같은 댓글 번호가 여러 계약에 있어 어느 계약의 댓글인지 알 수 없습니다. 수정·삭제하지 않았습니다."
+        : "이 댓글이 어느 계약의 히스토리인지 확인하지 못했습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.",
+    );
+  }
+
+  async function writeThenRefresh(ownerId: string, method: string, payload: Record<string, unknown>): Promise<UnifiedComment[]> {
+    const acked = await commentsJson(
+      await fetch(args.commentsPath(ownerId), { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    );
+    // 여기부터 쓰기는 서버에 반영된 것 — 이후 어떤 실패도 거절로 바꾸지 않는다.
+    settle(ownerId, acked, ++clock);
+    try {
+      return await fetchAll();
+    } catch {
+      return view().merged;
+    }
+  }
+
+  // 여러 소유 계약에 새 글을 쓰기 전: 다른 계약의 마지막 확정 목록이 있어야 쓴 뒤 다시 읽기가 실패해도
+  // 합친 목록을 만들 수 있다. 없으면 먼저 읽고, 못 읽은 계약이 있으면 쓰기 전에 멈춘다.
+  async function ensureSnapshot(): Promise<void> {
+    if (args.ownerIds.length < 2 || args.ownerIds.every((id) => lists.has(id))) return;
+    try {
+      await fetchAll();
+    } catch (e) {
+      throw new Error(`다른 계약의 히스토리를 먼저 불러오지 못해 저장하지 않았습니다. (${e instanceof Error ? e.message : "알 수 없는 오류"})`);
+    }
+    if (!args.ownerIds.every((id) => lists.has(id))) {
+      throw new Error("다른 계약의 히스토리를 확인하지 못해 저장하지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.");
+    }
+  }
+
+  return {
+    fetch: async () => ({ comments: await fetchAll() }),
+    create: async ({ text, category }) => {
+      await ensureSnapshot();
+      return writeThenRefresh(args.primaryId, "POST", { text, category });
+    },
+    edit: async ({ commentId, text }) => writeThenRefresh(ownerOf(commentId), "PATCH", { commentId, text }),
+    remove: async ({ commentId }) => writeThenRefresh(ownerOf(commentId), "DELETE", { commentId }),
+  };
 }
 
 /** 앱별 설정을 받아 정부지원금 섹션 패널 컴포넌트를 만든다(sectionPanels 에 주입). */
@@ -182,21 +307,29 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 댓글(히스토리) 작성 가능 = 보기전용 앱이 아니면 허용 — 값 편집(canEditValues)과 분리.
     // 하이브는 editable:false(값 잠금) + commentsReadOnly 미설정(댓글 개방)으로 여기만 열린다.
     const canWriteHistory = config.commentsReadOnly !== true;
+    // 히스토리 소유 계약 분리(선택, config.filterHistoryRows). 히스토리만 이 행들로 오가고, 수수료·미팅 저장
+    // (ensureEntryId/saveOrCreate)은 계속 위 policyRows 의 entryId 로만 간다. 미주입이면 historyOwnerIds=null,
+    // historyEntryId=entryId 라 아래 전부 지금과 100% 동일.
+    const historyRows = config.filterHistoryRows ? config.filterHistoryRows(rows) : null;
+    const historyOwnerIds = historyRows ? Array.from(new Set(historyRows.map((r) => r.entryId).filter(Boolean))) : null;
+    // 히스토리 대표(식별·게이트·pageId·새 글 대상): 훅이 고른 첫 소유자. 훅이 없으면 기존에 고른 계약.
+    const historyEntryId = historyOwnerIds ? (historyOwnerIds[0] ?? "") : entryId;
+    const historyOwnerKey = historyOwnerIds ? historyOwnerIds.join("\n") : "";
     // 히스토리 게이트 — 항목 없어도 편집 가능하면 첫 메모 입력(저장 시 항목 자동생성). 보기 전용은 기존대로 입력 없음.
     // 식별값(사업자번호/연락처)이 없어도 열린다 — 자동생성 항목은 앵커 꼬리표(_anchorRef, 각 앱 prefill 부여)로
     // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
     // 상세창이 분야 행 목록을 못 불러왔나 — 상자가 없는 호출부는 항상 거짓이라 동작 그대로.
     const { rowsLoadFailed } = useDetailLoadState();
-    const historyGate = resolveHistoryGate({ entryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
+    const historyGate = resolveHistoryGate({ entryId: historyEntryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
-      const url = config.commentsPath(entryId);
+      const url = config.commentsPath(historyEntryId);
       const ro = config.commentsReadOnly === true;
       const blocked = async (): Promise<UnifiedComment[]> => {
         throw new Error("이 앱에서는 정부지원금 히스토리를 작성할 수 없습니다. ERP 또는 일루아에서 작성해 주세요.");
       };
-      return {
+      const base: HistoryAdapter = {
         fetch: async () => {
           const res = await fetch(url, { cache: "no-store" });
           return { comments: await commentsJson(res) };
@@ -223,7 +356,17 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           return j.data.url as string;
         },
       };
-    }, [entryId]);
+      if (!historyOwnerIds) return base;
+      // 소유 계약 분리: 읽기·쓰기만 소유 계약 통로로 바꾸고, 보기 전용 차단·이미지 업로드는 위 기존 것을 그대로 쓴다.
+      const owned = createOwnerHistory({ ownerIds: historyOwnerIds, primaryId: historyEntryId, commentsPath: config.commentsPath });
+      return {
+        ...base,
+        fetch: owned.fetch,
+        create: ro ? base.create : owned.create,
+        edit: ro ? base.edit : owned.edit,
+        remove: ro ? base.remove : owned.remove,
+      };
+    }, [historyEntryId, historyOwnerKey]);
 
     async function ensureEntryId(): Promise<string> {
       if (entryId) return entryId;
@@ -400,7 +543,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
             <div className="p-4">
               {historyGate === "panel" ? (
                 <HistoryPanel
-                  pageId={entryId}
+                  pageId={historyEntryId}
                   adapter={historyAdapter}
                   currentUserName={userName}
                   isAdmin={config.editable || canWriteHistory ? isAdmin : false}
@@ -411,7 +554,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   pollingIntervalMs={5000}
                   shareEnabled={false}
                   hideCategories
-                  draftId={entryId}
+                  draftId={historyEntryId}
                 />
               ) : historyGate === "loadFailed" ? (
                 <div className="flex items-start gap-2.5 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-3">
