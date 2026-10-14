@@ -8,6 +8,7 @@
 //
 // 구조(경정청구 상세와 동일): 도메인 탭 아래 하위 탭 5개.
 //   · 히스토리 : 공용 HistoryPanel + 앱별 댓글 경로(config.commentsPath). 보기전용(config.commentsReadOnly)이면 작성 차단.
+//     config.filterHistoryRows 를 넣은 앱만 히스토리 소유 항목을 계약(정책) 행과 따로 고른다 — 값·수수료·미팅 저장은 항상 filterPolicyRows 쪽.
 //   · 계약/정산/환불 : 공용 SettlementInfoTab — 칸 목록·합계카드를 "공용 저장소"에서 읽어 3앱 동일 렌더.
 //   · 미팅 : adapter.components.MeetingsTab (앱별 주입).
 //
@@ -98,6 +99,14 @@ export type GovSubsidyPanelConfig = {
   createContract?: (primaryRow: Record<string, unknown>) => Promise<string>;
   /** 이 그룹 행 중 정책 행만 골라내기(도메인 키 차이 흡수). */
   filterPolicyRows: (rows: SectionPanelProps["rows"]) => SectionPanelProps["rows"];
+  /**
+   * 히스토리를 가진 항목 고르기(선택). 계약 행이 아닌 항목(예: 무료 행)에만 기록이 있는 회사를 위해
+   * 히스토리 소유 항목을 계약 행과 따로 정한다. 미주입이면 지금처럼 고른 계약 하나의 히스토리 — 100% 동일.
+   * 주입하면 돌려준 항목 모두의 댓글을 합쳐 보여 주고, 첫 항목이 히스토리 대표(식별·게이트·pageId·새 글 대상)다.
+   * 수정·삭제는 그 글을 가진 원래 항목으로만 가며, 주인을 못 찾거나 둘 이상이면 쓰지 않고 실패한다.
+   * 값·수수료·미팅 저장은 이 값과 무관하게 filterPolicyRows 쪽 항목에만 쓴다.
+   */
+  filterHistoryRows?: (rows: SectionPanelProps["rows"]) => SectionPanelProps["rows"];
   /** 조건부 수식 기준 칸을 가져올 기본정보 도메인(ERP가 "government-subsidy" 등 주입). */
   conditionBasicDomain?: string;
 };
@@ -125,6 +134,22 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
   if (d && Array.isArray(d.illuaComments)) return d.illuaComments;
   if (d && Array.isArray(d.hiveComments)) return d.hiveComments;
   return [];
+}
+
+/** 댓글 고유 id — 그 글의 소유 항목을 찾는 열쇠. 읽을 수 없으면 빈 문자열(= 주인 불명). */
+function commentIdOf(c: UnifiedComment): string {
+  const id = c.id as unknown;
+  return typeof id === "string" || typeof id === "number" ? String(id) : "";
+}
+
+/** 히스토리 소유 항목 id — 빈 값 제외·중복 제거·순서 유지. 첫 번째가 히스토리 대표. */
+function uniqueEntryIds(rows: SectionPanelProps["rows"]): string[] {
+  const out: string[] = [];
+  for (const r of rows) {
+    const id = r?.entryId;
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
 }
 
 /** 앱별 설정을 받아 정부지원금 섹션 패널 컴포넌트를 만든다(sectionPanels 에 주입). */
@@ -191,6 +216,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     const entryId = entry?.entryId ?? "";
     const data = (entry?.row ?? {}) as Record<string, unknown>;
 
+    // 히스토리 소유 항목 — filterHistoryRows 를 넣은 앱만 계약(정책) 행과 따로 정한다.
+    // 안 넣으면 historyOwnerIds=null, historyEntryId=entryId 라 아래 히스토리 코드는 예전과 똑같다.
+    // 값·수수료·미팅 저장(ensureEntryId·saveOrCreate)은 이 값을 보지 않고 계속 entryId(정책 행)만 쓴다.
+    const historyOwnerIds = config.filterHistoryRows ? uniqueEntryIds(config.filterHistoryRows(rows)) : null;
+    const historyEntryId = historyOwnerIds ? (historyOwnerIds[0] ?? "") : entryId;
+    const historyOwnerKey = historyOwnerIds ? JSON.stringify(historyOwnerIds) : "";
+
     // NO.125 반려 재작업: 수식 평가 바탕 행 — 전체 탭과 동일 문맥(경정청구 행+공통 칸 채움)을
     // 어느 화면에서든 재현한다(대웅글로벌: 일루아 탭·일루아 앱 카드가 전체 탭과 딴 값이던 원인).
     const evalBase = useMemo(
@@ -209,16 +241,16 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
     // 상세창이 분야 행 목록을 못 불러왔나 — 상자가 없는 호출부는 항상 거짓이라 동작 그대로.
     const { rowsLoadFailed } = useDetailLoadState();
-    const historyGate = resolveHistoryGate({ entryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
+    const historyGate = resolveHistoryGate({ entryId: historyEntryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
     const historyAdapter = useMemo<HistoryAdapter>(() => {
-      const url = config.commentsPath(entryId);
+      const url = config.commentsPath(historyEntryId);
       const ro = config.commentsReadOnly === true;
       const blocked = async (): Promise<UnifiedComment[]> => {
         throw new Error("이 앱에서는 정부지원금 히스토리를 작성할 수 없습니다. ERP 또는 일루아에서 작성해 주세요.");
       };
-      return {
+      const legacy: HistoryAdapter = {
         fetch: async () => {
           const res = await fetch(url, { cache: "no-store" });
           return { comments: await commentsJson(res) };
@@ -245,7 +277,81 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           return j.data.url as string;
         },
       };
-    }, [entryId]);
+      if (!historyOwnerIds) return legacy;
+
+      // ── 히스토리 소유 항목 분리(filterHistoryRows 주입 시에만) ──
+      // 가져오기: 소유 항목마다 댓글을 받아 합친다. 하나라도 실패하면 일부만 보여 주지 않고 통째로 실패시킨다.
+      // 만들기: 히스토리 대표(첫 항목)에 쓴다. 수정·삭제: "댓글 id → 소유 항목"으로만 보낸다. 이 대응은 아래 항목별 목록에서 그때그때 만든다.
+      // 주인을 못 찾거나 둘 이상이면 아무것도 쓰지 않고 실패 — 다른 계약에 잘못 쓰는 것을 막는다.
+      // 쓰기가 끝나면 합쳐진 목록을 전부 다시 받아 돌려준다(한 항목의 응답만 쓰면 다른 항목 글이 사라져 보인다).
+      // ★쓰기가 성공한 뒤의 다시 받기 실패는 거절하지 않는다 — HistoryPanel 은 create 가 거절되면 입력 글을 되살리고
+      //  재시도를 권해, 이미 저장된 글이 한 번 더 올라간다. 대신 쓰기 응답(그 항목의 확정 목록) + 다른 항목의 마지막 완전한 목록을 합쳐 돌려준다.
+      const ownerIds = historyOwnerIds;
+      // 항목별로 마지막에 확인한 "완전한" 목록 — 가져오기가 전부 성공했을 때와 쓰기 응답으로만 바뀐다(일부만 받은 결과는 넣지 않는다).
+      const snapshots = new Map<string, UnifiedComment[]>();
+      // 항목별 목록이 바뀐 횟수 — 가져오기가 도는 사이 쓰기 응답이나 다른 가져오기가 먼저 반영됐는지 알아보는 표.
+      const versions = new Map<string, number>();
+      const setSnapshot = (id: string, list: UnifiedComment[]) => {
+        snapshots.set(id, list);
+        versions.set(id, (versions.get(id) ?? 0) + 1);
+      };
+      const mergedSnapshots = (): UnifiedComment[] => ownerIds.flatMap((id) => snapshots.get(id) ?? []);
+      const loadAll = async (): Promise<UnifiedComment[]> => {
+        const started = ownerIds.map((id) => versions.get(id) ?? 0);
+        const lists = await Promise.all(
+          ownerIds.map(async (id) => commentsJson(await fetch(config.commentsPath(id), { cache: "no-store" }))),
+        );
+        // 받는 사이 그 항목이 이미 바뀌었으면(쓰기 확정 응답·먼저 끝난 가져오기) 이 결과는 낡았을 수 있어 덮어쓰지 않는다.
+        lists.forEach((list, i) => {
+          if ((versions.get(ownerIds[i]) ?? 0) === started[i]) setSnapshot(ownerIds[i], list);
+        });
+        return mergedSnapshots();
+      };
+      const reloadAfterWrite = async (): Promise<UnifiedComment[]> => {
+        try {
+          return await loadAll();
+        } catch {
+          return mergedSnapshots();
+        }
+      };
+      const ownerOf = (commentId: string): string => {
+        const owners = commentId ? ownerIds.filter((id) => snapshots.get(id)?.some((c) => commentIdOf(c) === commentId)) : [];
+        if (owners.length === 0) {
+          throw new Error("이 글이 어느 계약의 기록인지 확인할 수 없어 수정·삭제를 막았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.");
+        }
+        if (owners.length > 1) {
+          throw new Error("같은 번호의 글이 여러 계약 기록에 있어 어느 쪽인지 확정할 수 없어 수정·삭제를 막았습니다.");
+        }
+        return owners[0];
+      };
+      return {
+        ...legacy,
+        fetch: async () => ({ comments: await loadAll() }),
+        create: ro
+          ? legacy.create
+          : async ({ text, category }) => {
+              // 다른 항목의 목록을 한 번도 못 받았으면 쓰기 전에 받는다 — 쓰고 나서 다시 받기가 실패해도 돌려줄 완전한 목록을 갖추려고.
+              // 여기서 실패하면 아직 아무것도 쓰지 않았으니 그대로 거절한다(재시도해도 중복이 없다).
+              if (ownerIds.some((id) => id !== historyEntryId && !snapshots.has(id))) await loadAll();
+              setSnapshot(historyEntryId, await commentsJson(await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, category }) })));
+              return reloadAfterWrite();
+            },
+        edit: ro
+          ? legacy.edit
+          : async ({ commentId, text }) => {
+              const owner = ownerOf(commentId);
+              setSnapshot(owner, await commentsJson(await fetch(config.commentsPath(owner), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentId, text }) })));
+              return reloadAfterWrite();
+            },
+        remove: ro
+          ? legacy.remove
+          : async ({ commentId }) => {
+              const owner = ownerOf(commentId);
+              setSnapshot(owner, await commentsJson(await fetch(config.commentsPath(owner), { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentId }) })));
+              return reloadAfterWrite();
+            },
+      };
+    }, [historyEntryId, historyOwnerKey]);
 
     async function ensureEntryId(): Promise<string> {
       if (entryId) return entryId;
@@ -368,7 +474,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         )}
 
         {/* 계약이 여러 건일 때만 선택바 */}
-        {policyRows.length > 1 && (
+        {policyRows.length > 1 && !(historyOnly && historyOwnerIds) && (
           <div className="flex items-center gap-1 overflow-x-auto px-4 pt-3">
             {policyRows.map((r, i) => (
               <button
@@ -415,7 +521,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
         )}
 
         <div className="flex-1">
-          {historyOnly && policyRows.length > 1 && (
+          {historyOnly && policyRows.length > 1 && !historyOwnerIds && (
             <div className="px-4 pt-3 text-[11px] font-semibold text-wedly-t2 break-keep">
               「계약 {idx + 1}」의 기록 — 위 알약으로 다른 계약의 기록을 볼 수 있어요
             </div>
@@ -424,7 +530,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
             <div className="p-4">
               {historyGate === "panel" ? (
                 <HistoryPanel
-                  pageId={entryId}
+                  pageId={historyEntryId}
                   adapter={historyAdapter}
                   currentUserName={userName}
                   isAdmin={config.editable || canWriteHistory ? isAdmin : false}
@@ -435,7 +541,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   pollingIntervalMs={5000}
                   shareEnabled={false}
                   hideCategories
-                  draftId={entryId}
+                  draftId={historyEntryId}
                 />
               ) : historyGate === "loadFailed" ? (
                 <div className="flex items-start gap-2.5 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-3">
