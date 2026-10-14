@@ -295,6 +295,140 @@ async function commentsJson(res: Response): Promise<UnifiedComment[]> {
   return [];
 }
 
+// 댓글 한 건의 id(문자열/숫자). 없으면 빈 문자열 = 어느 계약 댓글인지 기억할 수 없는 댓글.
+function commentIdOf(c: UnifiedComment): string {
+  const id = (c as unknown as { id?: unknown }).id;
+  return typeof id === "string" || typeof id === "number" ? String(id) : "";
+}
+
+/**
+ * 현재 이력 소유 계약들의 댓글 통로. 수수료 저장 소유자와 별개로 유지한다.
+ *  · fetch  : 소유 계약마다 읽어 한 목록으로 합친다. 한 곳이라도 실패하면 통째로 실패 — 일부만 보여 주지 않는다.
+ *  · create : 대표 계약(primaryId)에만 쓴다. 소유 계약이 둘 이상인데 확정된 목록이 아직 전부 없으면
+ *    쓰기 전에 먼저 전부 읽고, 하나라도 못 읽으면 아무것도 쓰지 않고 실패한다.
+ *  · edit/remove : 그 댓글을 읽어 온 **원래 계약**으로만 보낸다. 소유 계약을 모르거나(미확인) 둘 이상이면(모호)
+ *    다른 계약에 잘못 쓰지 않도록 쓰기 전에 실패시킨다.
+ *  · 쓰기가 성공하면 쓴 계약의 응답 목록을 확정하고, 모든 소유 계약을 다시 읽어 합친 목록을 돌려준다.
+ *    다시 읽기만 실패하면 거절하지 않고 「쓴 계약의 응답 목록 + 다른 계약의 마지막 확정 목록」을 합쳐 돌려준다 —
+ *    쓰기는 이미 서버에 반영됐는데 거절하면 HistoryPanel 이 입력 초안을 되살려 같은 글을 다시 등록하게 만든다(중복 저장).
+ *  · 확정 목록은 계약별로 「읽기 성공 | 쓰기 응답」일 때만 갈아 끼운다. 합친 목록과 댓글 소유 계약은 늘 이 목록에서
+ *    다시 만든다. 읽기는 시작할 때, 쓰기 응답은 받을 때 시각표를 찍어, 더 늦게 확정된 것을 오래된 읽기 응답
+ *    (5초 폴링이 쓰기 응답보다 늦게 도착하는 경우)이 덮지 못하게 한다.
+ */
+function createOwnerHistory(args: {
+  ownerIds: string[];
+  primaryId: string;
+  commentsPath: (entryId: string) => string;
+}): Pick<HistoryAdapter, "fetch" | "create" | "edit" | "remove"> & { ownerOf: (commentId: string) => string } {
+  // 소유 계약별 마지막 확정 목록. 없으면 그 계약은 아직 한 번도 확정된 적이 없다.
+  const lists = new Map<string, UnifiedComment[]>();
+  // 계약별로 마지막 확정 시각표(단조 증가). 이보다 이르게 시작한 읽기 결과는 버린다.
+  const settledAt = new Map<string, number>();
+  let clock = 0;
+
+  function settle(ownerId: string, comments: UnifiedComment[], at: number): void {
+    if (at <= (settledAt.get(ownerId) ?? 0)) return;
+    settledAt.set(ownerId, at);
+    lists.set(ownerId, comments);
+  }
+
+  // 확정 목록에서 합친 목록과 소유 계약을 함께 다시 만든다(소유 계약 순서대로).
+  // owners: 댓글 id → 그 댓글이 든 계약 entryId. null = 같은 id 가 둘 이상의 계약에 있음(소유자 모호).
+  function view(): { merged: UnifiedComment[]; owners: Map<string, string | null> } {
+    const owners = new Map<string, string | null>();
+    const merged: UnifiedComment[] = [];
+    for (const ownerId of args.ownerIds) {
+      for (const c of lists.get(ownerId) ?? []) {
+        const id = commentIdOf(c);
+        // ERP는 같은 댓글을 한 번만 표시하되, 중복 소유자는 계속 모호한 것으로 기록한다.
+        if (!id || !owners.has(id)) merged.push(c);
+        if (!id) continue;
+        owners.set(id, owners.has(id) && owners.get(id) !== ownerId ? null : ownerId);
+      }
+    }
+    // 기존 ERP의 오래된 댓글부터 표시하는 순서를 유지한다.
+    merged.sort((a, b) => Date.parse(a?.createdAt ?? "") - Date.parse(b?.createdAt ?? ""));
+    return { merged, owners };
+  }
+
+  async function fetchAll(): Promise<UnifiedComment[]> {
+    const results = await Promise.allSettled(
+      args.ownerIds.map(async (ownerId) => {
+        const at = ++clock;
+        return { ownerId, at, comments: await commentsJson(await fetch(args.commentsPath(ownerId), { cache: "no-store" })) };
+      }),
+    );
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failed) throw failed.reason;
+    // 전부 성공했을 때만 확정한다(실패한 읽기가 이전 확정 목록을 지우거나 일부만 갈아 끼우지 않게).
+    for (const r of results) {
+      if (r.status === "fulfilled") settle(r.value.ownerId, r.value.comments, r.value.at);
+    }
+    return view().merged;
+  }
+
+  function ownerOf(commentId: string): string {
+    const { owners } = view();
+    const owner = owners.get(String(commentId));
+    if (owner) return owner;
+    throw new Error(
+      owners.has(String(commentId))
+        ? "같은 댓글 번호가 여러 계약에 있어 어느 계약의 댓글인지 알 수 없습니다. 요청을 처리하지 않았습니다."
+        : "이 댓글이 어느 계약의 히스토리인지 확인하지 못했습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.",
+    );
+  }
+
+  let writeTail: Promise<void> = Promise.resolve();
+  function writeThenRefresh(ownerId: string, method: string, payload: Record<string, unknown>): Promise<UnifiedComment[]> {
+    // 작성·수정·삭제 버튼은 서로 겹쳐 눌릴 수 있다. 같은 어댑터의 쓰기 응답 순서를 지킨다.
+    const pending = writeTail.then(async () => {
+      const acked = await commentsJson(
+        await fetch(args.commentsPath(ownerId), { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+      );
+      // ERP 쓰기 응답은 옛 일루아 글·진행 정책 기록을 생략한다. 기존 읽기 목록과 합치고,
+      // 직접 삭제한 글만 뺀다. 전체 목록 교체는 뒤의 성공한 GET이 맡는다.
+      const deletedId = method === "DELETE" ? String(payload.commentId) : null;
+      const retained = (lists.get(ownerId) ?? []).filter(c => deletedId === null || commentIdOf(c) !== deletedId);
+      for (const comment of acked) {
+        const id = commentIdOf(comment);
+        const index = id ? retained.findIndex(c => commentIdOf(c) === id) : -1;
+        if (index < 0) retained.push(comment); else retained[index] = comment;
+      }
+      // 여기부터 쓰기는 서버에 반영된 것 — 이후 조회 실패를 저장 실패로 바꾸지 않는다.
+      settle(ownerId, retained, ++clock);
+      try {
+        return await fetchAll();
+      } catch {
+        return view().merged;
+      }
+    });
+    writeTail = pending.then(() => undefined, () => undefined);
+    return pending;
+  }
+
+  // 여러 소유 계약에 새 글을 쓰기 전: 다른 계약의 마지막 확정 목록이 있어야 쓴 뒤 다시 읽기가 실패해도
+  // 합친 목록을 만들 수 있다. 없으면 먼저 읽고, 못 읽은 계약이 있으면 쓰기 전에 멈춘다.
+  async function ensureSnapshot(): Promise<void> {
+    if (args.ownerIds.length < 2 || args.ownerIds.every((id) => lists.has(id))) return;
+    // 인증·통신 실패 종류를 보존해야 HistoryPanel이 올바른 복구 방법을 안내한다.
+    await fetchAll();
+    if (!args.ownerIds.every((id) => lists.has(id))) {
+      throw new Error("다른 계약의 히스토리를 확인하지 못해 저장하지 않았습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.");
+    }
+  }
+
+  return {
+    ownerOf,
+    fetch: async () => ({ comments: await fetchAll() }),
+    create: async ({ text, category }) => {
+      await ensureSnapshot();
+      return writeThenRefresh(args.primaryId, "POST", { text, category });
+    },
+    edit: async ({ commentId, text }) => writeThenRefresh(ownerOf(commentId), "PATCH", { commentId, text }),
+    remove: async ({ commentId }) => writeThenRefresh(ownerOf(commentId), "DELETE", { commentId }),
+  };
+}
+
 /** 앱별 설정을 받아 정부지원금 섹션 패널 컴포넌트를 만든다(sectionPanels 에 주입). */
 export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
   // 바깥 도메인 탭이 패널을 없애도 같은 고객·소유자 순서·컨테이너의 미확인 저장은 유지한다.
@@ -615,64 +749,25 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     //   쓰기: 새 글은 대표 줄에, 고치기·지우기는 **그 글이 실제로 있는 줄**에 보낸다(아래 지도).
     //   실패: 한 줄이라도 못 읽으면 조용히 「기록 없음」으로 만들지 않고 오류를 그대로 올린다
     //        (빈 목록 성공으로 바꾸면 글이 사라진 것처럼 보인다 — commentsJson 주석과 같은 이유).
-    const commentOwnerRef = useRef<Map<string, string>>(new Map());
     // 필터가 매 렌더 새 배열을 돌려줘도 소유자 id와 순서가 같으면 이력 어댑터·새로고침 타이머를 유지한다.
     const historyKey = JSON.stringify(historyRows.map((r) => r.entryId));
     const historyEntryIds = useMemo(
       () => JSON.parse(historyKey) as string[],
       [historyKey],
     );
-    const historyAdapter = useMemo<HistoryAdapter>(() => {
+    const historyAdapter = useMemo<HistoryAdapter & { ownerOf: (commentId: string) => string }>(() => {
       const ids = historyEntryIds;
       const primary = ids[0] ?? historyEntryId;
       const ro = config.commentsReadOnly === true;
       const blocked = async (): Promise<UnifiedComment[]> => {
         throw new Error("이 앱에서는 정부지원금 히스토리를 작성할 수 없습니다. ERP 또는 일루아에서 작성해 주세요.");
       };
-      const ownerOf = (commentId: string) => commentOwnerRef.current.get(commentId) || primary;
-      const readAll = async (): Promise<UnifiedComment[]> => {
-        const lists = await Promise.all(
-          ids.map(async (id) => {
-            const res = await fetch(config.commentsPath(id), { cache: "no-store" });
-            const rows = await commentsJson(res);
-            for (const c of rows) if (c?.id) commentOwnerRef.current.set(String(c.id), id);
-            return rows;
-          }),
-        );
-        const merged = lists.flat();
-        // 같은 글이 두 번 실리지 않게 id 로 한 번만(줄 사이에 같은 글이 얹혀 오는 경우 방어).
-        const seen = new Set<string>();
-        const out: UnifiedComment[] = [];
-        for (const c of merged) {
-          const key = String(c?.id ?? "");
-          if (key && seen.has(key)) continue;
-          if (key) seen.add(key);
-          out.push(c);
-        }
-        // 시간순(오래된 것부터) — 화면이 그대로 그린다.
-        out.sort((a, b) => Date.parse(a?.createdAt ?? "") - Date.parse(b?.createdAt ?? ""));
-        return out;
-      };
+      const owned = createOwnerHistory({ ownerIds: ids, primaryId: primary, commentsPath: config.commentsPath });
       return {
-        fetch: async () => ({ comments: await readAll() }),
-        create: ro
-          ? (async () => blocked())
-          : async ({ text, category }) => {
-              await commentsJson(await fetch(config.commentsPath(primary), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, category }) }));
-              return readAll();
-            },
-        edit: ro
-          ? (async () => blocked())
-          : async ({ commentId, text }) => {
-              await commentsJson(await fetch(config.commentsPath(ownerOf(commentId)), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentId, text }) }));
-              return readAll();
-            },
-        remove: ro
-          ? (async () => blocked())
-          : async ({ commentId }) => {
-              await commentsJson(await fetch(config.commentsPath(ownerOf(commentId)), { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ commentId }) }));
-              return readAll();
-            },
+        ...owned,
+        create: ro ? blocked : owned.create,
+        edit: ro ? blocked : owned.edit,
+        remove: ro ? blocked : owned.remove,
         uploadImage: async (file: File) => {
           const fd = new FormData();
           const ext = file.name.split(".").pop() || "png";
@@ -1129,7 +1224,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   adapter={historyAdapter}
                   buildKakaoReport={
                     config.buildKakaoReport
-                      ? (c) => config.buildKakaoReport!(commentOwnerRef.current.get(String(c.id)) || historyEntryId, c.id).then((t) => t ?? "")
+                      ? async (c) => (await config.buildKakaoReport!(historyAdapter.ownerOf(String(c.id)), c.id)) ?? ""
                       : undefined
                   }
                   currentUserName={userName}
