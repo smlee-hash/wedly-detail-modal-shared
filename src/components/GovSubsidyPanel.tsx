@@ -373,7 +373,7 @@ function createOwnerHistory(args: {
     if (owner) return owner;
     throw new Error(
       owners.has(String(commentId))
-        ? "같은 댓글 번호가 여러 계약에 있어 어느 계약의 댓글인지 알 수 없습니다. 요청을 처리하지 않았습니다."
+        ? "여러 계약에 함께 표시된 기록의 원본을 확인하지 못했습니다. 원본 기록 화면에서 확인해 주세요."
         : "이 댓글이 어느 계약의 히스토리인지 확인하지 못했습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.",
     );
   }
