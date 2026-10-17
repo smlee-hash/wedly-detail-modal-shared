@@ -52,6 +52,8 @@ import CustomSelect from "./CustomSelect";
 import DateFormulaEditor from "./DateFormulaEditor";
 import SelectDropdownBody from "./SelectDropdown";
 import type { SelectDropdownColorFamily } from "./SelectDropdown";
+import MultiSelectDropdownBody from "./MultiSelectDropdown";
+import { splitPersonListSafe } from "../lib/person-helpers";
 import { buildCondTargets } from "./cond-targets-helpers";
 import { typeChangeNeedsSave } from "./type-change-save";
 import { appendFieldOption, setFieldOptionColorDef } from "./field-option-append";
@@ -238,6 +240,7 @@ export default function SettlementInfoTab({
   enableConditionalFormula,
   renderTierBadge,
   colorFamilies,
+  multiPersonSelectKeys,
 }: {
   rawValue: unknown;
   row?: RowData | null;
@@ -325,6 +328,11 @@ export default function SettlementInfoTab({
   renderTierBadge?: (index: number, tierId: string, tierIdDuplicated?: boolean) => ReactNode;
   // 선택 칸 보기 색 고르는 판. 내려주면 드롭다운에 「색상 변경」이 뜬다(호스트 앱이 팔레트 주입).
   colorFamilies?: SelectDropdownColorFamily[];
+  /**
+   * 여러 명을 고르는 선택 칸의 키(NO.197). 여기 든 선택 칸만 체크 목록으로 열고 「이름1, 이름2」 한 줄로 저장한다
+   * — 맨 앞 사람이 정산을 받는다. 미주입이면 지금과 100% 동일(한 개 고르기). ERP 정부지원금 계약정보만 켠다.
+   */
+  multiPersonSelectKeys?: readonly string[];
 }) {
   const readOnly = readOnlyProp || saveInProgress;
   // 현재 경로에서 한 번이라도 성공한 칸 정의만 저장에 쓴다. 같은 경로의 갱신 실패는 기존 정의를 유지한다.
@@ -2239,6 +2247,7 @@ export default function SettlementInfoTab({
             onAddFieldOption={canEditColumns ? addOptionToField : undefined}
             onSetFieldOptionColor={canEditColumns ? setFieldOptionColor : undefined}
             colorFamilies={colorFamilies}
+            multiPersonSelectKeys={multiPersonSelectKeys}
           />
         );
 
@@ -3026,7 +3035,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, feeContext = LEGACY_FEE_CONTEXT, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, onSetFieldOptionColor, colorFamilies, savedBasisVersion,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, feeContext = LEGACY_FEE_CONTEXT, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, onSetFieldOptionColor, colorFamilies, savedBasisVersion, multiPersonSelectKeys,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -3062,6 +3071,8 @@ function TierCard({
   /** 선택 칸 보기의 색({bg, text})을 칸 정의에 영구 저장. 없으면 색상 변경 단추를 안 그린다. */
   onSetFieldOptionColor?: (fieldKey: string, opt: string, color: { bg: string; text: string }) => void;
   colorFamilies?: SelectDropdownColorFamily[];
+  /** 여러 명 고르기 선택 칸의 키 — SettlementInfoTab 의 같은 이름 prop 을 그대로 받는다 */
+  multiPersonSelectKeys?: readonly string[];
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -3207,6 +3218,7 @@ function TierCard({
                     <FieldRow
                       key={JSON.stringify([tier.id, f.key, f.type, f.formulaResult])}
                       label={f.label}
+                      multiPerson={!!multiPersonSelectKeys?.includes(f.key)}
                       description={(f as { description?: string }).description}
                       type={f.type}
                       value={shownValue}
@@ -3538,9 +3550,11 @@ function FormulaTermsEditor({
 }
 
 function FieldRow({
-  label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, onSetFieldOptionColor, colorFamilies, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, unresolvedReason, guardUnchanged = false, savedBasisVersion,
+  label, description, multiPerson: multiPersonField = false, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, onSetFieldOptionColor, colorFamilies, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, unresolvedReason, guardUnchanged = false, savedBasisVersion,
 }: {
   label: string;
+  /** 여러 명 고르기 칸(NO.197) — 선택 칸일 때만 쓴다. 값은 「이름1, 이름2」 한 줄로 저장하고, 맨 앞 사람이 정산을 받는다. */
+  multiPerson?: boolean;
   /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
   description?: string;
   type: FieldType;
@@ -3611,19 +3625,39 @@ function FieldRow({
     if (override) onOverrideChange?.(raw === "" || !Number.isFinite(n) ? null : n);
     else onChange(raw === "" ? null : n);
   };
+  const multiPerson = type === "select" && multiPersonField;
+  // 같은 이름이 두 번 저장돼 있어도 칩·체크는 한 번만 — 처음 나온 자리(순서)를 지킨다.
+  const personNames = useMemo(
+    () => (multiPerson ? [...new Set(splitPersonListSafe(value == null ? "" : String(value)))] : []),
+    [multiPerson, value],
+  );
+  const triggerRef = useRef<HTMLDivElement>(null);
+  // 창이 열린 채 칸을 누르면: mousedown(창 밖 → 저장하고 닫음) 다음의 click 이 창을 다시 열지 않게 한 번 건너뛴다.
+  const skipTriggerClickRef = useRef(false);
   // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
   const anchorRef = useRef<HTMLDivElement>(null);
-  const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
+  const [dropPos, setDropPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight?: number } | null>(null);
   useEffect(() => {
     if (!editing || type !== "select") { setDropPos(null); return; }
     const rect = anchorRef.current?.getBoundingClientRect();
     if (!rect) return;
+    if (multiPerson) {
+      // 여러 명 고르기 창은 폭 264(좁은 화면은 양옆을 남긴다). 아래가 좁고 위가 더 넓으면 위로 펼치고, 남은 높이 안에서 목록이 줄어든다.
+      const width = Math.min(264, window.innerWidth - 64);
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      setDropPos(below >= 360 || below >= above
+        ? { top: rect.bottom + 4, left, maxHeight: below }
+        : { bottom: window.innerHeight - rect.top + 4, left, maxHeight: above });
+      return;
+    }
     const dropH = 320;
     const spaceBelow = window.innerHeight - rect.bottom - 8;
     const top = spaceBelow >= dropH ? rect.bottom + 4 : Math.max(8, rect.top - dropH - 4);
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - 224 - 8));
     setDropPos({ top, left });
-  }, [editing, type]);
+  }, [editing, type, multiPerson]);
 
   const display = useMemo(() => {
     // 빈 칸 표시 — 풀리지 않은 서버 칸이면 이유를 title·화면낭독 글자로 덧붙인다(없으면 기존 '-' 와 동일).
@@ -3664,6 +3698,24 @@ function FieldRow({
       return blank;
     }
     if (type === "select") {
+      if (multiPerson) {
+        // 한 사람에 칩 하나, 저장 순서 그대로. 맨 앞 사람(정산)은 따로 표시하지 않는다(이아영 10/02 「대표 표시는 없애주세요」).
+        if (personNames.length === 0) return blank;
+        return (
+          <span className="inline-flex flex-wrap gap-1">
+            {personNames.map((n) => {
+              const c = optionColors?.[n];
+              return (
+                <span
+                  key={n}
+                  className="inline-block rounded-md px-2 py-0.5 text-[12px] font-medium bg-wedly-bg-gray text-wedly-t1"
+                  style={c ? { backgroundColor: c.bg, color: c.text } : undefined}
+                >{n}</span>
+              );
+            })}
+          </span>
+        );
+      }
       const c = optionColors?.[String(value)];
       return (
         <span
@@ -3695,7 +3747,7 @@ function FieldRow({
       );
     }
     return <span>{String(value)}</span>;
-  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue, unresolvedReason]);
+  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue, unresolvedReason, multiPerson, personNames]);
 
   // 수식 컬럼은 사람이 입력하지 않음(자동 계산 읽기전용) — 단 관리자 수동 수정이 허용된 곳은 예외.
   const isEditable = !readOnly && !isAuto && (type !== "formula" || (canOverride && !!onOverrideChange));
@@ -3709,7 +3761,50 @@ function FieldRow({
         {lockedNote && <span className="ml-1 text-[10px] text-wedly-muted">({lockedNote})</span>}
       </div>
       <div ref={anchorRef} className="text-[15px] sm:text-[13px] text-wedly-t1 min-w-0 relative">
-        {editing && isEditable ? (
+        {multiPerson ? (
+          <>
+            {/* 칸 자체가 여닫는 단추 — 열린 동안에도 그대로 두어 Esc·취소 뒤 초점이 돌아올 자리가 된다. */}
+            <div
+              ref={triggerRef}
+              role={isEditable ? "button" : undefined}
+              tabIndex={isEditable ? 0 : undefined}
+              aria-haspopup={isEditable ? "listbox" : undefined}
+              aria-expanded={isEditable ? editing : undefined}
+              onMouseDown={isEditable ? () => { skipTriggerClickRef.current = editing; } : undefined}
+              onClick={isEditable ? () => {
+                if (skipTriggerClickRef.current) { skipTriggerClickRef.current = false; return; }
+                if (!editing) startEditing();
+              } : undefined}
+              onKeyDown={isEditable ? (e) => {
+                if (editing || (e.key !== "Enter" && e.key !== " ")) return;
+                e.preventDefault();
+                startEditing();
+              } : undefined}
+              className={`rounded-md px-1 py-0.5 -mx-1 min-h-[26px] flex items-center ${isEditable ? "cursor-pointer hover:bg-wedly-bg-gray transition-colors" : ""} ${editing && isEditable ? "bg-wedly-bg-gray" : ""}`}
+            >
+              {display}
+            </div>
+            {editing && isEditable && dropPos && createPortal(
+              <div
+                className="fixed z-[9999] flex flex-col rounded-xl border border-wedly-bd bg-white shadow-lg"
+                style={{ top: dropPos.top, bottom: dropPos.bottom, left: dropPos.left, width: "min(264px, calc(100vw - 64px))", maxHeight: dropPos.maxHeight }}
+              >
+                <MultiSelectDropdownBody
+                  value={personNames}
+                  options={options ?? []}
+                  optionColors={optionColors}
+                  onAddOption={onAddFieldOption}
+                  onSetColor={onSetFieldOptionColor}
+                  colorFamilies={colorFamilies}
+                  // 연 사이 저장 기준이 바뀌었으면 저장하지 않고 다시 고르라고 알린다(숫자 칸과 같은 편집 세션 검사).
+                  onSave={(next) => { if (!takeNumericSession()) return; onChange(next.join(", ")); }}
+                  onClose={(outside) => { cancelNumericEdit(); if (!outside) triggerRef.current?.focus(); }}
+                />
+              </div>,
+              document.body,
+            )}
+          </>
+        ) : editing && isEditable ? (
           (type === "select") ? (
             <>
               {display}
