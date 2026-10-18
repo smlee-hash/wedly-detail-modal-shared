@@ -3601,7 +3601,8 @@ function FieldRow({
   const [editInitialValue, setEditInitialValue] = useState("");
   const [refreshNotice, setRefreshNotice] = useState(false);
   // 편집을 연 순간의 값은 서버 갱신으로 바뀌지 않는다. 취소·확정 뒤에는 같은 편집으로 다시 저장하지 않는다.
-  const editSessionRef = useRef<{ initial: string; guardUnchanged: boolean; savedBasisVersion?: string; invalidated?: boolean } | null>(null);
+  //   dateIncomplete·dateTouched 는 날짜 칸만 쓴다 — 칸에 머무는 동안 마지막으로 본 「덜 넣음」과 실제로 값을 고쳤는지.
+  const editSessionRef = useRef<{ initial: string; guardUnchanged: boolean; savedBasisVersion?: string; invalidated?: boolean; dateIncomplete?: boolean; dateTouched?: boolean } | null>(null);
   useEffect(() => {
     const session = editSessionRef.current;
     // 저장 기준이 돌아와도 한 번 바뀐 편집은 새 관측으로 다시 제출하지 않는다.
@@ -3634,6 +3635,22 @@ function FieldRow({
     const n = Number(raw);
     if (override) onOverrideChange?.(raw === "" || !Number.isFinite(n) ? null : n);
     else onChange(raw === "" ? null : n);
+  };
+  // 날짜 칸(NO.177) — 연·월·일을 넣는 동안·달력을 옮기는 동안에는 저장하지 않고 칸 상태만 본다.
+  //   크롬은 칸 밖을 누르면 덜 넣은 일 "0"을 "01"로 채운 뒤 떠나므로, 「덜 넣음」은 칸에 머무는 동안 본 상태로 판단한다.
+  //   연·월·일을 차례로 지우면 값이 빈 글자 그대로라 input 이 오지 않으므로 키를 뗄 때도 다시 본다.
+  const trackDateInput = (input: HTMLInputElement, changed: boolean) => {
+    const session = editSessionRef.current;
+    if (!session) return;
+    if (changed) session.dateTouched = true;
+    if (input.ownerDocument.activeElement === input) session.dateIncomplete = input.validity.badInput;
+  };
+  // Enter·칸 밖 이동 때 한 번만 저장한다. 덜 넣었거나 바뀐 것이 없으면 원래 값 그대로, 연·월·일을 모두 지웠으면 빈 값.
+  const commitDateEdit = (input: HTMLInputElement) => {
+    const session = takeNumericSession();
+    if (!session || session.dateIncomplete || input.validity.badInput) return;
+    if (!session.dateTouched || input.value === session.initial) return;
+    onChange(input.value);
   };
   const multiPerson = type === "select" && multiPersonField;
   // 같은 이름이 두 번 저장돼 있어도 칩·체크는 한 번만 — 처음 나온 자리(순서)를 지킨다.
@@ -3894,12 +3911,13 @@ function FieldRow({
                 if (el) { try { el.showPicker?.(); } catch { /* unsupported */ } }
               }}
               defaultValue={typeof value === "string" ? value : ""}
-              onBlur={(e) => { onChange(e.target.value || ""); setEditing(false); }}
-              onChange={(e) => {
-                onChange(e.target.value || "");
-                setEditing(false);
+              onBlur={(e) => commitDateEdit(e.currentTarget)}
+              onChange={(e) => trackDateInput(e.currentTarget, true)}
+              onKeyUp={(e) => trackDateInput(e.currentTarget, false)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitDateEdit(e.currentTarget); }
+                if (e.key === "Escape") { e.preventDefault(); cancelNumericEdit(); }
               }}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(false); }}
               className="w-full px-2.5 sm:px-2 py-2 sm:py-1 text-[15px] sm:text-[13px] border border-wedly-accent/40 rounded-md outline-none focus:ring-2 focus:ring-wedly-accent/20 bg-white"
             />
           ) : (
