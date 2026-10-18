@@ -6,7 +6,7 @@
 //   - 정책자금: 07계약금 / 13컨설턴트수수료 비율
 //   - 경정청구: 10총환급금 / 20확정수수료 비율 (없으면 자동 OFF)
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { tierFieldsEqual } from "./tier-fields-equal";
 import { filledFieldCount } from "./gov-merged-tiers";
@@ -3642,6 +3642,7 @@ function FieldRow({
     [multiPerson, value],
   );
   const triggerRef = useRef<HTMLDivElement>(null);
+  const multiPersonDialogId = useId();
   // 창이 열린 채 칸을 누르면: mousedown(창 밖 → 저장하고 닫음) 다음의 click 이 창을 다시 열지 않게 한 번 건너뛴다.
   const skipTriggerClickRef = useRef(false);
   // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
@@ -3778,8 +3779,9 @@ function FieldRow({
               ref={triggerRef}
               role={isEditable ? "button" : undefined}
               tabIndex={isEditable ? 0 : undefined}
-              aria-haspopup={isEditable ? "listbox" : undefined}
+              aria-haspopup={isEditable ? "dialog" : undefined}
               aria-expanded={isEditable ? editing : undefined}
+              aria-controls={isEditable && editing && dropPos ? multiPersonDialogId : undefined}
               onMouseDown={isEditable ? () => { skipTriggerClickRef.current = editing; } : undefined}
               onClick={isEditable ? () => {
                 if (skipTriggerClickRef.current) { skipTriggerClickRef.current = false; return; }
@@ -3796,6 +3798,9 @@ function FieldRow({
             </div>
             {editing && isEditable && dropPos && createPortal(
               <div
+                id={multiPersonDialogId}
+                role="dialog"
+                aria-label={label}
                 className="fixed z-[9999] flex flex-col rounded-xl border border-wedly-bd bg-white shadow-lg"
                 style={{ top: dropPos.top, bottom: dropPos.bottom, left: dropPos.left, width: "min(264px, calc(100vw - 64px))", maxHeight: dropPos.maxHeight }}
               >

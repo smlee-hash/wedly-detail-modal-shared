@@ -195,7 +195,7 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
     await render("담당자 1");
     const trigger = fieldBox("담당 컨설턴트").querySelector<HTMLElement>('[role="button"]');
     expect(trigger?.getAttribute("tabindex")).toBe("0");
-    expect(trigger?.getAttribute("aria-haspopup")).toBe("listbox");
+    expect(trigger?.getAttribute("aria-haspopup")).toBe("dialog");
     expect(trigger?.getAttribute("aria-expanded")).toBe("false");
     await key(trigger, "Enter");
     expect(search()).not.toBeNull();
@@ -491,6 +491,38 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
     expect(fieldBox("담당 컨설턴트").querySelector(".cursor-pointer")).toBeNull();
     const chips = [...fieldBox("담당 컨설턴트").querySelectorAll("span.rounded-md")];
     expect(chips.map(c => c.textContent)).toEqual(["담당자 1", "담당자 2"]);
+    expect(fieldBox("담당 컨설턴트").querySelector('[role="button"], [aria-haspopup], [aria-expanded], [aria-controls]')).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("열린 비모달 대화상자를 필드명과 고유 id로 연결하고 닫으면 연결을 지운다", async () => {
+    await render("담당자 1", { multiKeys: ["담당컨설턴트", "컨설팅담당"] });
+    const first = fieldBox("담당 컨설턴트").querySelector<HTMLElement>('[role="button"]')!;
+    const second = fieldBox("컨설팅 담당").querySelector<HTMLElement>('[role="button"]')!;
+    expect(first.hasAttribute("aria-controls")).toBe(false);
+    await key(first, "Enter");
+    const firstId = first.getAttribute("aria-controls");
+    expect(firstId).toBeTruthy();
+    const popup = document.getElementById(firstId!);
+    expect(popup?.getAttribute("role")).toBe("dialog");
+    expect(popup?.getAttribute("aria-label")).toBe("담당 컨설턴트");
+    expect(popup?.getAttribute("aria-modal")).not.toBe("true");
+    expect(document.activeElement).toBe(search());
+    expect(pressed("담당자 1")).toBe("true");
+    await click(button("취소"));
+    expect(first.getAttribute("aria-expanded")).toBe("false");
+    expect(first.hasAttribute("aria-controls")).toBe(false);
+    expect(document.getElementById(firstId!)).toBeNull();
+    expect(document.activeElement).toBe(first);
+    await key(second, " ");
+    const secondId = second.getAttribute("aria-controls");
+    expect(secondId).toBeTruthy();
+    expect(secondId).not.toBe(firstId);
+    expect(document.getElementById(secondId!)?.getAttribute("aria-label")).toBe("컨설팅 담당");
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    await click(button("취소"));
+    expect(saves).toHaveLength(0);
+    expect(document.activeElement).toBe(second);
   });
 
   it("다른 선택 칸은 지금처럼 하나만 고르고 바로 저장한다", async () => {
@@ -506,7 +538,7 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
 
   it("여러 명 고르기를 켜지 않은 곳(다른 분야 카드·하이브·일루아)은 같은 칸도 지금처럼 한 개 고르기다", async () => {
     await render("담당자 1, 담당자 2", { single: true });
-    expect(fieldBox("담당 컨설턴트").querySelector('[aria-haspopup="listbox"]')).toBeNull();
+    expect(fieldBox("담당 컨설턴트").querySelector('[aria-haspopup="dialog"]')).toBeNull();
     await openConsultant();
     expect(search()).toBeNull();
     expect(document.querySelector("button[aria-pressed]")).toBeNull();
