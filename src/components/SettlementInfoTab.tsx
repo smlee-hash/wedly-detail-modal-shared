@@ -1040,6 +1040,15 @@ export default function SettlementInfoTab({
   const confirmFieldEdit = useCallback(() => {
     if (!fieldEditModal) return;
     const cleanedOptions = draftOptions.map((o) => o.trim()).filter((o) => o !== "");
+    // 여러 명을 쉼표로 이어 저장하는 칸만 검사한다. 보기 추가·수정·타입 변경·새 칸도 같은 경계를 쓴다.
+    const selectKey = fieldEditModal.mode === "add"
+      ? generateFieldKey(draftLabel.trim(), fields)
+      : fieldEditModal.mode === "changeType" ? fieldEditModal.key : null;
+    if (draftType === "select" && selectKey !== null && multiPersonSelectKeys?.includes(selectKey)
+      && cleanedOptions.some((name) => name.includes(","))) {
+      setFormulaError("이름에는 쉼표를 넣을 수 없습니다. 한 칸에 한 사람 이름만 입력해 주세요.");
+      return;
+    }
     if (fieldEditModal.mode === "add") {
       const label = draftLabel.trim();
       if (!label) return;
@@ -1147,7 +1156,7 @@ export default function SettlementInfoTab({
       persist(updated);
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope, replaceTiers]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope, replaceTiers, multiPersonSelectKeys]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
@@ -2522,6 +2531,7 @@ export default function SettlementInfoTab({
                     onClick={() => setDraftOptions((prev) => [...prev, ""])}
                     className="text-[12px] font-semibold text-wedly-accent hover:underline"
                   >+ 보기 추가</button>
+                  {formulaError && <p role="alert" className="text-[11px] text-wedly-red px-1">{formulaError}</p>}
                 </div>
               )}
 

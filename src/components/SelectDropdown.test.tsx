@@ -103,6 +103,17 @@ describe("SelectDropdownBody — 한 개 고르기", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it.each(["단추", "Enter"])("한 개 고르기의 쉼표 옵션 추가는 %s에서 그대로 저장한다", async (path) => {
+    const onAddOption = vi.fn();
+    await render({ onAddOption });
+    await type("이름, 설명");
+    if (path === "Enter") await key(container.querySelector("input"), "Enter");
+    else await click(button("“이름, 설명” 추가"));
+    expect(onAddOption).toHaveBeenCalledWith("이름, 설명");
+    expect(onSave).toHaveBeenCalledWith("이름, 설명");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("색 판은 드롭다운 바깥에 뜨고, 판 안 누름은 바깥 감시로 새지 않으며, 색을 고르면 판만 닫힌다", async () => {
     const onSetColor = vi.fn();
     const outside = vi.fn();

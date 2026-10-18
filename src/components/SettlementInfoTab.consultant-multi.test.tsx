@@ -28,12 +28,12 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
   const settle = () => new Promise<void>(resolve => setTimeout(resolve, 5));
 
   // single — 여러 명 고르기를 켜지 않은 호출(다른 분야 카드·하이브·일루아)
-  type RenderOptions = { isAdmin?: boolean; readOnly?: boolean; colorFamilies?: SelectDropdownColorFamily[]; savedBasisVersion?: string; single?: boolean };
+  type RenderOptions = { isAdmin?: boolean; readOnly?: boolean; colorFamilies?: SelectDropdownColorFamily[]; savedBasisVersion?: string; single?: boolean; showEditor?: boolean; multiKeys?: readonly string[] };
   async function render(value: string | undefined, options: RenderOptions = {}) {
     const row = { id: "one", label: "1차 계약", ...(value === undefined ? {} : { 담당컨설턴트: value }) };
     await act(async () => {
       root.render(<StrictMode><SettlementInfoTab {...props} rawValue={JSON.stringify([row])} isAdmin={!!options.isAdmin} allowColumnEdit={!!options.isAdmin}
-        multiPersonSelectKeys={options.single ? undefined : ["담당컨설턴트"]}
+        multiPersonSelectKeys={options.single ? undefined : options.multiKeys ?? ["담당컨설턴트"]} hideSummaryCards={!options.showEditor}
         readOnly={!!options.readOnly} colorFamilies={options.colorFamilies} savedBasisVersion={options.savedBasisVersion}
         onSave={(raw, intent?: Intent) => saves.push({ raw, intent })} /></StrictMode>);
       await settle();
@@ -68,6 +68,20 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
   const pressed = (name: string) => row(name)?.getAttribute("aria-pressed");
   const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === text);
   const savedValue = (i = 0) => JSON.parse(saves[i].raw)[0].담당컨설턴트;
+  async function refreshFields() {
+    await act(async () => { window.dispatchEvent(new Event("focus")); await settle(); });
+  }
+  async function openTypeEditor(label: string) {
+    await click(button("편집"));
+    const definition = [...container.querySelectorAll('[draggable="true"]')].find(el =>
+      [...el.querySelectorAll("span")].some(span => span.textContent === label));
+    await click([...definition!.querySelectorAll("button")].find(b => b.textContent === "타입"));
+  }
+  async function chooseSelectType() {
+    const label = [...document.querySelectorAll("label")].find(el => el.textContent?.includes("컬럼 타입"));
+    await click(label?.querySelector("button"));
+    await click([...document.querySelectorAll('button[role="option"]')].find(el => el.textContent === "드롭다운"));
+  }
 
   beforeEach(() => {
     container = document.createElement("div"); document.body.append(container); root = createRoot(container);
@@ -197,6 +211,29 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
     expect(search()).not.toBeNull();
   });
 
+  it("키보드로 칩을 지운 뒤 현재 초점에서 Esc → 바깥 클릭을 해도 저장은 0회다", async () => {
+    await render("담당자 1, 담당자 2");
+    await openConsultant();
+    const remove = document.querySelector<HTMLButtonElement>('button[aria-label="담당자 1 빼기"]')!;
+    remove.focus();
+    await key(remove, "Enter");
+    // jsdom 은 Enter의 기본 click을 만들지 않으므로 브라우저가 만드는 활성화를 이어 보낸다.
+    await click(remove);
+    expect(document.querySelector('button[aria-label="담당자 1 빼기"]')).toBeNull();
+    const modalEscape = vi.fn();
+    document.addEventListener("keydown", modalEscape);
+    try {
+      await key(document.activeElement, "Escape");
+      await mousedown(document.body);
+      expect(saves).toEqual([]);
+      expect(search()).toBeNull();
+      expect(modalEscape).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(fieldBox("담당 컨설턴트").querySelector('[role="button"]'));
+      expect([...fieldBox("담당 컨설턴트").querySelectorAll(".cursor-pointer span.rounded-md")].map(c => c.textContent))
+        .toEqual(["담당자 1", "담당자 2"]);
+    } finally { document.removeEventListener("keydown", modalEscape); }
+  });
+
   it("바뀐 것이 없으면 「완료」·창 밖 누름 모두 저장하지 않는다", async () => {
     await render("담당자 1, 담당자 2");
     await openConsultant();
@@ -245,6 +282,104 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
     expect(rows().map(b => b.textContent?.trim())).toEqual(["담당자 2"]);
   });
 
+  it("목록 밖 기존 이름은 해제 후에도 후보에 남고 재선택하면 고른 순서의 끝에 저장된다", async () => {
+    await render("외부 담당, 담당자 1");
+    await openConsultant();
+    await click(row("외부 담당"));
+    expect(pressed("외부 담당")).toBe("false");
+    await click(row("담당자 2"));
+    await click(row("외부 담당"));
+    await click(button("완료 (3)"));
+    expect(saves).toHaveLength(1);
+    expect(savedValue()).toBe("담당자 1, 담당자 2, 외부 담당");
+  });
+
+  it("서버에서 지운 미선택 이름은 열린 창에서도 사라지고 새 명단만 선택해 저장한다", async () => {
+    await render("담당자 1");
+    await openConsultant();
+    fields = fields.map(f => f.key === "담당컨설턴트" ? { ...f, options: ["담당자 1", "담당자 3", "담당자 6"] } : f);
+    await refreshFields();
+    expect(rows().map(b => b.textContent?.trim())).toEqual(["담당자 1", "담당자 3", "담당자 6"]);
+    await click(row("담당자 6"));
+    await click(button("완료 (2)"));
+    expect(saves).toHaveLength(1);
+    expect(savedValue()).toBe("담당자 1, 담당자 6");
+  });
+
+  it("이 창에서 추가한 이름과 열 때 배정된 이름은 서버 조회에 없어도 재선택할 수 있다", async () => {
+    await render("담당자 1, 외부 담당", { isAdmin: true });
+    await openConsultant();
+    await type(search(), "담당자 4");
+    await key(search(), "Enter");
+    expect(puts).toHaveLength(1);
+    await click(row("담당자 4"));
+    await click(row("외부 담당"));
+    // 새 이름은 아직 조회에 나타나지 않고, 원래 미선택이던 2번은 서버에서 삭제됐다.
+    fields = fields.map(f => f.key === "담당컨설턴트" ? { ...f, options: ["담당자 1", "담당자 3"] } : f);
+    await refreshFields();
+    expect(rows().map(b => b.textContent?.trim())).toEqual(["담당자 1", "담당자 3", "담당자 4", "외부 담당"]);
+    expect(pressed("담당자 4")).toBe("false");
+    expect(pressed("외부 담당")).toBe("false");
+    await click(row("외부 담당"));
+    await click(row("담당자 4"));
+    await click(button("완료 (3)"));
+    expect(saves).toHaveLength(1);
+    expect(savedValue()).toBe("담당자 1, 외부 담당, 담당자 4");
+  });
+
+  it("열 때 배정된 이름은 서버 명단에서 지워져도 해제·재선택할 수 있다", async () => {
+    await render("담당자 2, 담당자 1");
+    await openConsultant();
+    fields = fields.map(f => f.key === "담당컨설턴트" ? { ...f, options: ["담당자 1", "담당자 3"] } : f);
+    await refreshFields();
+    await click(row("담당자 2"));
+    expect(pressed("담당자 2")).toBe("false");
+    await click(row("담당자 2"));
+    await click(button("완료 (2)"));
+    expect(saves).toHaveLength(1);
+    expect(savedValue()).toBe("담당자 1, 담당자 2");
+  });
+
+  it.each(["보기 추가", "기존 보기 수정", "텍스트에서 선택으로 변경", "새 opt-in 칸"])("관리자 타입 편집의 %s 경로도 쉼표 이름을 저장하지 않는다", async (path) => {
+    if (path === "텍스트에서 선택으로 변경") fields[0] = { key: "담당컨설턴트", label: "담당 컨설턴트", type: "text" };
+    await render("담당자 1", { isAdmin: true, showEditor: true, multiKeys: ["담당컨설턴트", "새담당"] });
+    if (path === "새 opt-in 칸") {
+      await click(button("편집"));
+      await click(button("+ 컬럼 추가"));
+      await type(document.querySelector('input[placeholder="예: 비고"]'), "새담당");
+      await chooseSelectType();
+    } else {
+      await openTypeEditor("담당 컨설턴트");
+      if (path === "텍스트에서 선택으로 변경") await chooseSelectType();
+    }
+    if (path !== "기존 보기 수정") await click(button("+ 보기 추가"));
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[placeholder="예: 진행"]');
+    await type(inputs[path === "기존 보기 수정" ? 0 : inputs.length - 1], "홍길동, 담당");
+    await click(button("확인"));
+    expect(puts).toEqual([]);
+    expect(saves).toEqual([]);
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("쉼표");
+    // 같은 창에서 이름만 고치면 정상 저장된다. 거부가 편집기를 망가뜨리지 않아야 한다.
+    await type(inputs[path === "기존 보기 수정" ? 0 : inputs.length - 1], "홍길동");
+    await click(button("확인"));
+    expect(puts).toHaveLength(1);
+    const key = path === "새 opt-in 칸" ? "새담당" : "담당컨설턴트";
+    expect(puts[0].body.fields.find(f => f.key === key)?.options).toContain("홍길동");
+    expect(puts[0].body.fields.find(f => f.key === key)?.options).not.toContain("홍길동, 담당");
+  });
+
+  it.each(["opt-in 없는 같은 칸", "다른 선택 칸"])("%s의 관리자 보기 편집에는 쉼표 제한을 적용하지 않는다", async (path) => {
+    await render("담당자 1", { isAdmin: true, showEditor: true, single: path === "opt-in 없는 같은 칸" });
+    await openTypeEditor(path === "다른 선택 칸" ? "컨설팅 담당" : "담당 컨설턴트");
+    await click(button("+ 보기 추가"));
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[placeholder="예: 진행"]');
+    await type(inputs[inputs.length - 1], "이름, 설명");
+    await click(button("확인"));
+    expect(puts).toHaveLength(1);
+    const key = path === "다른 선택 칸" ? "컨설팅담당" : "담당컨설턴트";
+    expect(puts[0].body.fields.find(f => f.key === key)?.options).toContain("이름, 설명");
+  });
+
   it("관리자는 새 이름을 추가하면 칸 정의에 저장되고 바로 체크된 채 창이 열려 있다", async () => {
     await render("담당자 1", { isAdmin: true });
     await openConsultant();
@@ -269,8 +404,12 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
     expect(button("“가, 나” 추가")).toBeUndefined();
     await key(search(), "Enter");
     expect(row("가, 나")).toBeUndefined();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("쉼표");
+    await click(button("새 옵션 추가"));
+    expect(row("가, 나")).toBeUndefined();
     expect(puts).toHaveLength(2);
     await type(search(), "");
+    expect(document.querySelector('[role="alert"]')).toBeNull();
 
     await click(button("완료 (3)"));
     expect(saves).toHaveLength(1);
@@ -312,6 +451,28 @@ describe("차수 카드 담당 컨설턴트 — 여러 명 고르기", () => {
     await key(search(), "Enter");
     expect(row("담당자 9")).toBeUndefined();
     expect(puts).toEqual([]);
+  });
+
+  it("색상 판의 Esc도 고르기 창만 취소하고 뒤의 바깥 클릭에서 저장하지 않는다", async () => {
+    await render("담당자 1", { isAdmin: true, colorFamilies: FAMILIES });
+    await openConsultant();
+    await click(row("담당자 2"));
+    await click(document.querySelector('button[title="색상 변경"]'));
+    const swatch = document.querySelector<HTMLButtonElement>('button[title="파랑 · 연"]')!;
+    swatch.focus();
+    const modalEscape = vi.fn();
+    document.addEventListener("keydown", modalEscape);
+    try {
+      await key(swatch, "Escape", { isComposing: true });
+      expect(search()).not.toBeNull();
+      await key(swatch, "Escape");
+      await mousedown(document.body);
+      expect(search()).toBeNull();
+      expect(document.querySelector('button[title="파랑 · 연"]')).toBeNull();
+      expect(saves).toEqual([]);
+      expect(puts).toEqual([]);
+      expect(modalEscape.mock.calls.filter(([e]) => !(e as KeyboardEvent).isComposing)).toEqual([]);
+    } finally { document.removeEventListener("keydown", modalEscape); }
   });
 
   it("창이 열린 사이 저장 기준이 바뀌면 고른 값을 저장하지 않고 다시 고르라고 알린다", async () => {

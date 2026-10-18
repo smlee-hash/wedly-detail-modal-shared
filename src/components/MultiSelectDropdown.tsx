@@ -5,7 +5,7 @@
 // 「완료」나 창 밖 누름에서 한 번 저장한다. 「취소」·Esc 는 저장하지 않는다.
 // 고른 순서가 곧 저장 순서다 — 맨 앞 사람이 정산을 받으므로 순서를 바꾸지 않는다.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import type { SelectDropdownColor, SelectDropdownColorFamily } from "./SelectDropdown";
 import { OptionColorButton, OptionColorPanel, useOptionColorPicker } from "./option-color-picker";
@@ -45,28 +45,43 @@ export default function MultiSelectDropdownBody({
   const [initial] = useState<string[]>(() => [...value]);
   const [draft, setDraft] = useState<string[]>(initial);
   const [search, setSearch] = useState("");
-  const [options, setOptions] = useState(initialOptions);
+  const [optionError, setOptionError] = useState("");
+  const [addedOptions, setAddedOptions] = useState<string[]>([]);
+  // 과거 서버 후보 전체를 누적하지 않고 이 창에서 직접 만든 이름만 따로 보존한다.
+  const options = useMemo(() => [...new Set([...initialOptions, ...addedOptions])], [initialOptions, addedOptions]);
   const picker = useOptionColorPicker();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const closedRef = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // 부모 보기 갱신 — 이 창에서 막 추가한 이름은 보존하면서 합치기(SelectDropdownBody 와 같다)
+  const cancel = useCallback(() => {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    onClose();
+  }, [onClose]);
+
+  // 칩 삭제로 초점이 BODY로 빠져도 취소한다. 색 판(portal)의 Esc도 같은 처리에 들어온다.
   useEffect(() => {
-    setOptions((prev) => {
-      const parentSet = new Set(initialOptions);
-      if (prev.every((o) => parentSet.has(o))) return initialOptions;
-      return [...initialOptions, ...prev.filter((o) => !parentSet.has(o))];
-    });
-  }, [initialOptions]);
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      e.stopPropagation();
+      cancel();
+    };
+    document.addEventListener("keydown", onEscape, true);
+    return () => document.removeEventListener("keydown", onEscape, true);
+  }, [cancel]);
 
   // 창 밖을 누르면 고른 대로 저장하고 닫는다. 색 판 안 누름은 판이 mousedown 을 멈춰 여기까지 오지 않는다.
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
+      if (closedRef.current) return;
       if (e.target instanceof Node && rootRef.current?.contains(e.target)) return;
+      closedRef.current = true;
       if (!sameNames(draft, initial)) onSave(draft);
       onClose(true);
     };
@@ -74,10 +89,11 @@ export default function MultiSelectDropdownBody({
     return () => document.removeEventListener("mousedown", onDown);
   }, [draft, initial, onSave, onClose]);
 
-  // 보기 목록 + 목록에 없는데 고른 이름(예전에 손으로 넣은 이름 등)은 맨 뒤에 체크된 채
+  // 최신 보기 + 이번 창에서 만든 이름 + 열 때 배정된 이름. 현재 선택도 목록 갱신으로 잃지 않는다.
+  // 열 때 배정된 외부 이름은 해제해도 남겨 두어 다시 고를 수 있다.
   const candidates = useMemo(
-    () => [...options, ...draft.filter((n) => !options.includes(n))],
-    [options, draft],
+    () => [...new Set([...options, ...initial, ...draft])],
+    [options, initial, draft],
   );
   const filtered = useMemo(
     () => candidates.filter((n) => n.toLowerCase().includes(search.toLowerCase())),
@@ -91,18 +107,25 @@ export default function MultiSelectDropdownBody({
   const addNew = () => {
     if (!onAddOption) return;
     const trimmed = search.trim();
-    if (!addable(trimmed, options)) {
+    if (trimmed.includes(",")) {
+      setOptionError("이름에는 쉼표를 넣을 수 없습니다. 한 사람 이름만 입력해 주세요.");
+      inputRef.current?.focus();
+      return;
+    }
+    if (!addable(trimmed, candidates)) {
       inputRef.current?.focus();
       return;
     }
     onAddOption(trimmed);
-    setOptions((prev) => [...prev, trimmed]);
+    setAddedOptions((prev) => [...prev, trimmed]);
     setDraft((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
     setSearch("");
     inputRef.current?.focus();
   };
 
   const finish = () => {
+    if (closedRef.current) return;
+    closedRef.current = true;
     if (!sameNames(draft, initial)) onSave(draft);
     onClose();
   };
@@ -113,7 +136,7 @@ export default function MultiSelectDropdownBody({
   };
 
   const canShowColorPicker = !!colorFamilies && colorFamilies.length > 0 && !!onSetColor;
-  const canAdd = addable(search.trim(), options);
+  const canAdd = addable(search.trim(), candidates);
 
   const chip = (n: string) => {
     const c = optionColors?.[n];
@@ -134,13 +157,6 @@ export default function MultiSelectDropdownBody({
     <div
       ref={rootRef}
       className="flex min-h-0 flex-col"
-      onKeyDown={(e) => {
-        if (e.key !== "Escape" || e.nativeEvent.isComposing || e.keyCode === 229) return;
-        // 정부지원금 상세창은 문서 전체에서 Esc 를 받아 창을 닫는다 — 고르기 창만 닫히게 여기서 멈춘다.
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }}
       onClick={(e) => {
         // 색 판이 열린 채 창 안 다른 곳을 누르면 판만 닫는다(누른 동작은 그대로 된다).
         if (picker.openFor && e.target instanceof Node && rootRef.current?.contains(e.target)) picker.close();
@@ -155,12 +171,13 @@ export default function MultiSelectDropdownBody({
           autoComplete="off"
           className="w-full rounded-lg border border-wedly-bd bg-wedly-bg-gray px-3 py-1.5 text-[13px] text-wedly-t1 placeholder:text-wedly-t2 outline-none focus:border-wedly-accent focus:bg-white focus:ring-2 focus:ring-wedly-accent/20 transition"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setOptionError(""); }}
           onKeyDown={(e) => {
             if (e.key !== "Enter" || e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (filtered.length === 0 && search.trim()) addNew();
           }}
         />
+        {optionError && <p role="alert" className="mt-1 text-[11px] text-wedly-red">{optionError}</p>}
         {draft.length > 0 && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
             {draft.map((n) => (
@@ -185,7 +202,12 @@ export default function MultiSelectDropdownBody({
         <button
           type="button"
           className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-wedly-t2 hover:bg-wedly-bg-gray transition"
-          onClick={() => { if (initial.length > 0) onSave([]); onClose(); }}
+          onClick={() => {
+            if (closedRef.current) return;
+            closedRef.current = true;
+            if (initial.length > 0) onSave([]);
+            onClose();
+          }}
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
             <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -257,7 +279,7 @@ export default function MultiSelectDropdownBody({
         <button
           type="button"
           className="min-h-[30px] rounded border border-wedly-bd bg-white px-3 text-[12px] text-wedly-t2 transition hover:bg-wedly-bg-gray"
-          onClick={() => onClose()}
+          onClick={cancel}
         >
           취소
         </button>
