@@ -130,6 +130,11 @@ export type GovSubsidyPanelConfig = {
   conditionBasicDomain?: string;
   /** 선택 칸 보기 색 고르는 판. 내려주면 차수 카드 드롭다운에 「색상 변경」이 뜬다. */
   colorFamilies?: SelectDropdownColorFamily[];
+  /**
+   * 계약정보 차수 카드에서 여러 명을 고르는 선택 칸의 키(NO.197 — ERP 가 「담당컨설턴트」를 넣는다).
+   * 미주입이면 지금과 100% 동일(한 개 고르기) — 다른 앱과 정산·환불 탭에는 영향이 없다.
+   */
+  contractMultiPersonSelectKeys?: readonly string[];
 };
 
 type SubTab = GovSubTab;
@@ -1283,7 +1288,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {shownSubTab === "contract" && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "contract", entryId })}
-              <SettlementInfoTab key={tierSaveScopeFor("계약정보_차수")} {...settlementCommon} {...tierSavePropsFor("계약정보_차수")} rawValue={mergedTiers["계약정보_차수"] ?? null} onSave={onSaveTiersFor("계약정보_차수")} feeTargetForTier={feeTargetFor("계약정보_차수")} storagePrefix="contract" ensureFirstTier addButtonSuffixOverride="계약" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "contract", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab key={tierSaveScopeFor("계약정보_차수")} {...settlementCommon} {...tierSavePropsFor("계약정보_차수")} rawValue={mergedTiers["계약정보_차수"] ?? null} onSave={onSaveTiersFor("계약정보_차수")} feeTargetForTier={feeTargetFor("계약정보_차수")} storagePrefix="contract" ensureFirstTier addButtonSuffixOverride="계약" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "contract", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" colorFamilies={config.colorFamilies} multiPersonSelectKeys={config.contractMultiPersonSelectKeys} />
             </div>
           )}
 
