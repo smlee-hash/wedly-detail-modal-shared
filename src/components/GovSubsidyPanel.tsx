@@ -505,7 +505,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     };
 
     const lockDroppedMessage = contractLocked && lockDropped ? CONTRACT_LOCK_DROPPED_NOTICE : undefined;
-    const shownError = [err, lockDroppedMessage].filter(Boolean).join(" ");
+    const shownError = err;
 
     return (
       <div className="flex flex-col">
@@ -562,6 +562,13 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           </div>
         )}
 
+        {/* 승인 시안(2026-10-17)대로 입력하던 중 끊김 안내는 하위 탭 줄 바로 아래·내용 위에 한 번만 띄운다(다른 오류 줄과 따로). */}
+        {lockDroppedMessage && (
+          <div role="alert" className="mx-4 mt-4 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red-ink">
+            {lockDroppedMessage}
+          </div>
+        )}
+
         {/* 계약정보·정산정보·환불정보·미팅정보 탭에서 글자를 치는 중인지만 본다 — 치는 중에 목록 받기가 끊기면 값을 저장하지 않고 안내한다.
             칸을 떠나면(저장이 시작되면) 치는 중이 아니다. 히스토리 탭은 따로 본다. */}
         <div
@@ -570,7 +577,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           onBlur={() => { typingRef.current = false; }}
         >
           {contractLocked && shownSubTab !== "history" && (
-            <div className="p-4">
+            <div className={lockDroppedMessage ? "px-4 pb-4 pt-3" : "p-4"}>
               <ContractLoadFailedBox body={CONTRACT_LOCK_BODY} />
             </div>
           )}
