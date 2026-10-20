@@ -36,6 +36,10 @@ import {
 import SettlementInfoTabBase from "./SettlementInfoTab";
 import { GOV_SUB_TABS, resolveGovSubTab, type GovSubTab } from "./gov-subtab";
 import { resolveHistoryGate } from "./gov-history-gate";
+import {
+  CONTRACT_LOAD_FAILED_TITLE, CONTRACT_LOCK_BODY, CONTRACT_LOCK_DROPPED_NOTICE, HISTORY_LOCK_BODY,
+  ContractLockedError, resolveContractLock,
+} from "./gov-contract-lock";
 import { buildGovEvalBase } from "./gov-eval-context";
 
 // dms 두 갈래 핀의 prop 차이를 흡수(느슨한 타입). 런타임은 각 갈래 컴포넌트가 자기 prop 만 사용.
@@ -205,7 +209,14 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       adapter.api.currentUser().then((u) => setUserName(u?.name ?? "")).catch(() => {});
     }, [adapter]);
 
-    const anchorKey = String(primaryRow["15사업자번호"] ?? primaryRow["04사업자번호"] ?? primaryRow["_id"] ?? "");
+    // 회사 행의 _id 가 있으면 그것만으로 회사를 구분한다. 새 업체를 등록하는 중에 연락처·사업자번호(조회 기준)가
+    // 바뀌어도 만드는 중이거나 방금 만든 계약 줄 기억을 지우지 않아, 다음 저장이 계약을 한 번 더 만들지 않는다(10/15 계약 2 중복 생성).
+    // _id 가 아직 없는 행만 예전처럼 사업자번호로 구분한다.
+    const companyId = primaryRow["_id"];
+    const hasCompanyId = companyId !== undefined && companyId !== null && companyId !== "";
+    const anchorKey = hasCompanyId
+      ? String(companyId)
+      : String(primaryRow["15사업자번호"] ?? primaryRow["04사업자번호"] ?? "");
     useEffect(() => {
       createdIdRef.current = "";
       createPromiseRef.current = null;
@@ -241,6 +252,27 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     // 원래 회사와 묶여 고아가 되지 않는다(재작업 2026-07-15, 노션 반려 지적 반영).
     // 상세창이 분야 행 목록을 못 불러왔나 — 상자가 없는 호출부는 항상 거짓이라 동작 그대로.
     const { rowsLoadFailed } = useDetailLoadState();
+    // 계약 목록을 못 불러와 계약이 하나도 안 보이면 4개 탭(계약·정산·환불·미팅) 입력을 잠근다 — 히스토리 탭과 같은 조건.
+    // 거기 저장하면 새 계약 줄이 만들어진다(10/15 계약 중복 생성). 이미 계약이 보이면 잠그지 않는다.
+    const contractLocked = resolveContractLock({ rowsLoadFailed, policyRowCount: policyRows.length });
+    // 잠기기 전에 받아 둔 저장 함수(옛 렌더의 클로저)가 잠긴 뒤에 불려도 막을 수 있게 가장 최근 판정을 ref 에 둔다.
+    // 그려지는 즉시 갱신한다 — 효과로 미루면 입력칸이 사라지는 그 커밋 안에서 불리는 저장이 낡은 값을 본다.
+    const lockedRef = useRef(contractLocked);
+    lockedRef.current = contractLocked;
+    // 입력하던 중에 잠겼거나 잠긴 뒤 저장이 들어와 값을 버렸다 — 위쪽 빨간 줄에 안내를 한 번만 띄운다.
+    const [lockDropped, setLockDropped] = useState(false);
+    // 4개 탭 안에서 글자를 치는 중인가(아직 칸을 떠나 저장하기 전).
+    const typingRef = useRef(false);
+    useEffect(() => {
+      if (!contractLocked) {
+        setLockDropped(false);
+        return;
+      }
+      if (typingRef.current) {
+        typingRef.current = false;
+        setLockDropped(true);
+      }
+    }, [contractLocked]);
     const historyGate = resolveHistoryGate({ entryId: historyEntryId, canEditValues, canWriteHistory, hasCreateContract: Boolean(config.createContract), rowsLoadFailed });
     const MeetingsTab = adapter.components.MeetingsTab as ComponentType<{ rawValue: unknown; onSave: (json: string) => void; readOnly?: boolean }>;
 
@@ -356,6 +388,8 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     async function ensureEntryId(): Promise<string> {
       if (entryId) return entryId;
       if (createdIdRef.current) return createdIdRef.current;
+      // 계약 목록을 못 불러와 줄이 없어 보이는 중에는 새 줄을 만들지 않는다(잠기기 전에 받아 둔 저장이 늦게 불린 경우).
+      if (lockedRef.current) throw new ContractLockedError();
       if (!config.createContract) throw new Error("이 앱에서는 새 계약을 만들 수 없습니다.");
       if (!createPromiseRef.current) {
         createPromiseRef.current = config
@@ -374,6 +408,11 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
 
     async function saveOrCreate(key: string, value: string | number | boolean | null) {
       if (!config.savePolicyField) return;
+      // 잠긴 뒤에 늦게 들어온 저장 — 값은 저장하지 않고 안내 한 줄만(오류 문구·재시도 없음).
+      if (!entryId && !createdIdRef.current && lockedRef.current) {
+        setLockDropped(true);
+        return;
+      }
       setErr(null);
       try {
         const id = await ensureEntryId();
@@ -465,11 +504,14 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
       conditionFieldOptions: condOpts,
     };
 
+    const lockDroppedMessage = contractLocked && lockDropped ? CONTRACT_LOCK_DROPPED_NOTICE : undefined;
+    const shownError = [err, lockDroppedMessage].filter(Boolean).join(" ");
+
     return (
       <div className="flex flex-col">
-        {err && (
+        {shownError && (
           <div role="alert" className="mx-4 mt-3 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-2 text-[13px] text-wedly-red-ink">
-            {err}
+            {shownError}
           </div>
         )}
 
@@ -520,7 +562,18 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           </div>
         )}
 
-        <div className="flex-1">
+        {/* 계약정보·정산정보·환불정보·미팅정보 탭에서 글자를 치는 중인지만 본다 — 치는 중에 목록 받기가 끊기면 값을 저장하지 않고 안내한다.
+            칸을 떠나면(저장이 시작되면) 치는 중이 아니다. 히스토리 탭은 따로 본다. */}
+        <div
+          className="flex-1"
+          onInput={() => { if (shownSubTab !== "history") typingRef.current = true; }}
+          onBlur={() => { typingRef.current = false; }}
+        >
+          {contractLocked && shownSubTab !== "history" && (
+            <div className="p-4">
+              <ContractLoadFailedBox body={CONTRACT_LOCK_BODY} />
+            </div>
+          )}
           {historyOnly && policyRows.length > 1 && !historyOwnerIds && (
             <div className="px-4 pt-3 text-[11px] font-semibold text-wedly-t2 break-keep">
               「계약 {idx + 1}」의 기록 — 위 알약으로 다른 계약의 기록을 볼 수 있어요
@@ -544,22 +597,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
                   draftId={historyEntryId}
                 />
               ) : historyGate === "loadFailed" ? (
-                <div className="flex items-start gap-2.5 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-3">
-                  <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-wedly-red">
-                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                      <path d="M12 9v4" />
-                      <path d="M12 17h.01" />
-                    </svg>
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-semibold text-wedly-red-ink break-keep">계약 정보를 불러오지 못했어요</p>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-wedly-t2 break-keep">
-                      지금 글을 남기면 이 회사에 계약 줄이 새로 생길 수 있어 입력을 잠갔습니다.
-                      화면을 새로 고친 뒤 다시 열어 주세요.
-                    </p>
-                  </div>
-                </div>
+                <ContractLoadFailedBox body={HISTORY_LOCK_BODY} />
               ) : historyGate === "composer" ? (
                 <FirstHistoryComposer
                   onAdd={async (text) => {
@@ -579,25 +617,25 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
             </div>
           )}
 
-          {shownSubTab === "contract" && (
+          {shownSubTab === "contract" && !contractLocked && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["계약정보_차수"] ?? null} onSave={onSaveFor("계약정보_차수")} storagePrefix="contract" addButtonSuffixOverride="계약" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "contract", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.contractFieldsPath} sectionTitle="계약정보" />
             </div>
           )}
 
-          {shownSubTab === "settlement" && (
+          {shownSubTab === "settlement" && !contractLocked && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["정산정보"] ?? null} onSave={onSaveFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "settlement", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" />
             </div>
           )}
 
-          {shownSubTab === "refund" && (
+          {shownSubTab === "refund" && !contractLocked && (
             <div className="p-4">
               <SettlementInfoTab {...settlementCommon} rawValue={data["환불정보_차수"] ?? null} onSave={onSaveFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => config.renderTierBadge!({ entryId, kind: "refund", index: i, tierId: tid, tierIdDuplicated: dup }) : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" />
             </div>
           )}
 
-          {shownSubTab === "meetings" && (
+          {shownSubTab === "meetings" && !contractLocked && (
             <div className="p-4">
               {/* 미팅 부품은 앱이 주입한다 — 안 넣은 앱에서 그대로 그리면 상세창이 통째로 흰 화면이 된다. */}
               {MeetingsTab ? (
@@ -612,6 +650,25 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
     );
   }
   return GovSubsidyPanel;
+}
+
+/** 계약 목록을 못 불러왔을 때 입력 자리를 대신하는 빨간 상자 — 히스토리 탭과 나머지 4개 탭이 같은 모양을 쓴다(본문만 다르다). */
+function ContractLoadFailedBox({ body }: { body: string }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border border-wedly-bd-red bg-wedly-bg-red px-3 py-3">
+      <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-wedly-red">
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+          <path d="M12 9v4" />
+          <path d="M12 17h.01" />
+        </svg>
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-semibold text-wedly-red-ink break-keep">{CONTRACT_LOAD_FAILED_TITLE}</p>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-wedly-t2 break-keep">{body}</p>
+      </div>
+    </div>
+  );
 }
 
 /** 항목이 없을 때 첫 히스토리 메모 입력칸 — 저장하면 정부지원금 항목이 자동생성된다. */
