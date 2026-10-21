@@ -8,6 +8,7 @@ import {
   loadSettlementTiers,
   afterLastTierRemoved,
   lastTierDeleteWarning,
+  isSameTierValue,
 } from "./settlement-first-tier";
 
 const fields: FieldDef[] = [
@@ -166,5 +167,26 @@ describe("lastTierDeleteWarning — 마지막 차수 문구", () => {
     expect(lastTierDeleteWarning()).toBe(
       "이 회사의 마지막 차수입니다. 지워도 회사 자료는 남고 아래 「추가」로 다시 만들 수 있습니다. ",
     );
+  });
+});
+
+describe("isSameTierValue — 값이 실제로 바뀌었는지", () => {
+  it("빈 값(null·undefined·빈 글자)끼리는 같다", () => {
+    expect(isSameTierValue(null, "")).toBe(true);
+    expect(isSameTierValue(undefined, null)).toBe(true);
+    expect(isSameTierValue("", undefined)).toBe(true);
+  });
+  it("같은 값은 글자·숫자 어느 쪽이든 같다", () => {
+    expect(isSameTierValue(300, 300)).toBe(true);
+    expect(isSameTierValue("300", 300)).toBe(true);
+    expect(isSameTierValue("메모", "메모")).toBe(true);
+  });
+  it("빈 값에서 값을 넣거나 값을 지우면 다르고, 0 은 빈 값이 아니다", () => {
+    expect(isSameTierValue(null, 300)).toBe(false);
+    expect(isSameTierValue("", "메모")).toBe(false);
+    expect(isSameTierValue(300, null)).toBe(false);
+    expect(isSameTierValue(0, null)).toBe(false);
+    expect(isSameTierValue(null, 0)).toBe(false);
+    expect(isSameTierValue("300", "301")).toBe(false);
   });
 });

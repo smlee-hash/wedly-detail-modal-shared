@@ -19,14 +19,20 @@ type Row = { domain: string; entryId: string; domainLabel: string; row: Record<s
 let root: Root;
 let host: HTMLDivElement;
 let fieldDefs: unknown[];
+/** 칸 정의(컬럼 정의) 저장 요청 — 정산·계약 저장 콜백과 따로 센다. */
+let fieldPuts: { url: string; body: { fields: Array<{ key: string; label: string }> } }[];
 
 beforeEach(() => {
   fieldDefs = FIELDS;
+  fieldPuts = [];
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
-    ok: true,
-    json: async () => ({ success: true, data: String(url).includes("fields") ? fieldDefs : {} }),
-  })));
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") {
+      fieldPuts.push({ url: String(url), body: JSON.parse(String(init.body)) });
+      return { ok: true, json: async () => ({ success: true, data: null }) };
+    }
+    return { ok: true, json: async () => ({ success: true, data: String(url).includes("fields") ? fieldDefs : {} }) };
+  }));
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -92,6 +98,42 @@ const deleteButton = (cardIndex: number) => cards()[cardIndex].querySelector<HTM
 
 async function mount(Panel: ReturnType<typeof panelFor>, props: ReturnType<typeof panelProps>) {
   await act(async () => root.render(<Panel {...props} />));
+  await settle();
+}
+
+/** 칸 이름표로 그 칸 상자를 찾는다. */
+function fieldBox(cardIndex: number, label: string) {
+  return cards()[cardIndex].querySelector(`[title="${label}"]`)!.parentElement!;
+}
+/** 값은 넣지 않고 칸을 열었다가 초점만 옮긴다(숫자·글자·날짜 칸 모두 입력창의 focusout). */
+async function openAndBlurWithoutTyping(cardIndex: number, label: string) {
+  const field = fieldBox(cardIndex, label);
+  await act(async () => field.querySelector<HTMLElement>(".cursor-pointer")!.click());
+  const input = field.querySelector<HTMLInputElement>("input")!;
+  expect(input).toBeTruthy();
+  await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+}
+async function typeAndBlur(cardIndex: number, label: string, value: string) {
+  const field = fieldBox(cardIndex, label);
+  await act(async () => field.querySelector<HTMLElement>(".cursor-pointer")!.click());
+  const input = field.querySelector<HTMLInputElement>("input")!;
+  expect(input).toBeTruthy();
+  input.value = value;
+  await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+}
+const buttonText = (text: string) =>
+  Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent?.trim() === text);
+async function typeInto(input: HTMLInputElement | null, text: string) {
+  if (!input) throw new Error("Missing input");
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  await act(async () => { setter?.call(input, text); input.dispatchEvent(new Event("input", { bubbles: true })); });
+}
+/** 구조 편집 패널에서 「+ 컬럼 추가」 → 이름 → 확인. */
+async function addColumnThroughPanel(label: string) {
+  await click(buttonText("편집"));
+  await click(buttonText("+ 컬럼 추가"));
+  await typeInto(document.querySelector<HTMLInputElement>('input[placeholder="예: 비고"]'), label);
+  await click(buttonText("확인"));
   await settle();
 }
 
@@ -289,5 +331,176 @@ describe("정산정보 탭 — 서버 수수료 표시가 있는 회사", () => 
     expect(host.textContent).toContain("새로 만든 차수라 수수료 기준을 아직 찾을 수 없어요");
     expect(save).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+// ── P2 후속(리뷰 review-f31885045bc44181a30daae8f3df2031) ──
+// 저장 안 한 1차 초안은 사람이 값을 실제로 넣기 전에는 저장도, 계약 줄 만들기도 하지 않는다.
+const BLUR_FIELDS = [
+  { key: "정산금액", label: "정산금액", type: "number" },
+  { key: "메모", label: "메모", type: "text" },
+  { key: "정산일", label: "정산일", type: "date" },
+];
+const DRAFT_ROW = ownerRow("first", { 정산정보: "[]" });
+
+describe("정산정보 탭 — 저장 안 한 1차 초안에서 값을 넣지 않고 초점만 옮길 때", () => {
+  for (const [name, label] of [["숫자", "정산금액"], ["글자", "메모"], ["날짜", "정산일"]] as const) {
+    it(`${name} 칸: 계약 줄이 있는 회사도 저장 0번이고 초안이 그대로 남는다`, async () => {
+      fieldDefs = BLUR_FIELDS;
+      const save = newSave(); const create = newCreate();
+      await mount(panelFor(save, create), panelProps([DRAFT_ROW]));
+      await openAndBlurWithoutTyping(0, label);
+      await settle();
+      expect(save).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(cards()).toHaveLength(1);
+      expect(deleteButton(0)).toBeNull();
+      expect(buttonEndingWith("2차 정산 추가")).toBeTruthy();
+    });
+
+    it(`${name} 칸: 계약 줄이 없는 회사도 계약 줄 만들기 0번·저장 0번이다`, async () => {
+      fieldDefs = BLUR_FIELDS;
+      const save = newSave(); const create = newCreate();
+      await mount(panelFor(save, create), panelProps([]));
+      await openAndBlurWithoutTyping(0, label);
+      await settle();
+      expect(create).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    });
+  }
+
+  it("값을 넣지 않은 초점 이동을 여러 칸에서 거듭해도 저장·계약 줄 만들기는 계속 0번이고, 그 뒤 값을 실제로 넣으면 그때 처음 한 번 저장한다", async () => {
+    fieldDefs = BLUR_FIELDS;
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create), panelProps([]));
+    for (const label of ["정산금액", "메모", "정산일"]) {
+      await openAndBlurWithoutTyping(0, label);
+      await settle();
+      expect(save).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    }
+    await typeAndBlur(0, "메모", "첫 메모");
+    await settle();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0]).toBe("created-first");
+    expect(save.mock.calls[0][1]).toBe("정산정보");
+    const tiers = JSON.parse(String(save.mock.calls[0][2]));
+    expect(tiers).toHaveLength(1);
+    expect(tiers[0].메모).toBe("첫 메모");
+  });
+
+  it("글자·날짜 칸도 값을 실제로 넣으면 그 줄에 한 번 처음 저장한다", async () => {
+    fieldDefs = BLUR_FIELDS;
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create), panelProps([DRAFT_ROW]));
+    await typeAndBlur(0, "정산일", "2026-10-21");
+    await settle();
+    expect(create).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 2)).toEqual(["first", "정산정보"]);
+    expect(JSON.parse(String(save.mock.calls[0][2]))[0].정산일).toBe("2026-10-21");
+  });
+
+  it("계약정보 탭의 빈 초안도 같은 수정으로 값을 넣지 않은 초점 이동은 저장·계약 줄 만들기 0번이다", async () => {
+    fieldDefs = BLUR_FIELDS;
+    for (const rows of [[] as Row[], [ownerRow("first", { 계약정보: "[]" })]]) {
+      const save = newSave(); const create = newCreate();
+      await mount(panelFor(save, create), panelProps(rows, "contract"));
+      expect(cards()).toHaveLength(1);
+      expect(cardLabel(0)).toBe("1차계약");
+      for (const label of ["정산금액", "메모", "정산일"]) {
+        await openAndBlurWithoutTyping(0, label);
+        await settle();
+        expect(save).not.toHaveBeenCalled();
+        expect(create).not.toHaveBeenCalled();
+      }
+    }
+  });
+});
+
+describe("정산정보 탭 — 저장 안 한 1차 초안이 있는 회사에서 컬럼 정의만 바꿀 때", () => {
+  const structurePanel = (save: Save, create: () => Promise<string>) => panelFor(save, create, { allowStructureEdit: true });
+
+  for (const [name, rows] of [
+    ["계약 줄이 있는 회사", [DRAFT_ROW]],
+    ["계약 줄이 없는 회사", [] as Row[]],
+  ] as const) {
+    it(`${name}: 컬럼을 추가하면 칸 정의는 한 번 저장하고 정산 저장·계약 줄 만들기는 0번이다`, async () => {
+      const save = newSave(); const create = newCreate();
+      await mount(structurePanel(save, create), panelProps([...rows]));
+      await addColumnThroughPanel("비고");
+      expect(fieldPuts).toHaveLength(1);
+      expect(fieldPuts[0].url).toBe("/first-fields-settlement");
+      expect(fieldPuts[0].body.fields.map((f) => f.label)).toContain("비고");
+      expect(save).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(cards()).toHaveLength(1);
+      expect(deleteButton(0)).toBeNull();
+    });
+  }
+
+  it("컬럼을 추가한 뒤 값을 실제로 넣으면 그때 처음 한 번 저장한다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(structurePanel(save, create), panelProps([DRAFT_ROW]));
+    await addColumnThroughPanel("비고");
+    expect(save).not.toHaveBeenCalled();
+    await click(buttonText("편집 종료"));
+    await typeAndBlur(0, "정산금액", "300");
+    await settle();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 2)).toEqual(["first", "정산정보"]);
+    expect(JSON.parse(String(save.mock.calls[0][2]))[0].정산금액).toBe(300);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  /** 컬럼 정의 목록에서 이름이 label 인 줄의 단추. */
+  function definitionButton(label: string, text: string) {
+    const row = Array.from(host.querySelectorAll('[draggable="true"]')).find((el) =>
+      Array.from(el.querySelectorAll("span")).some((span) => span.textContent === label));
+    return Array.from(row?.querySelectorAll("button") ?? []).find((b) => b.textContent === text);
+  }
+
+  it("컬럼 종류를 바꿔도 칸 정의는 한 번 저장하고 정산 저장·계약 줄 만들기는 0번이다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(structurePanel(save, create), panelProps([]));
+    await click(buttonText("편집"));
+    await click(definitionButton("메모", "타입"));
+    await click(Array.from(document.querySelectorAll("label")).find((el) => el.textContent?.includes("컬럼 타입"))?.querySelector("button"));
+    await click(Array.from(document.querySelectorAll('button[role="option"]')).find((el) => el.textContent === "숫자"));
+    await click(buttonText("확인"));
+    await settle();
+    expect(fieldPuts).toHaveLength(1);
+    expect(fieldPuts[0].body.fields.find((f) => f.key === "메모")).toMatchObject({ type: "number" });
+    expect(save).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("컬럼을 지워도 칸 정의는 한 번 저장하고 정산 저장·계약 줄 만들기는 0번이다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(structurePanel(save, create), panelProps([DRAFT_ROW]));
+    await click(buttonText("편집"));
+    await click(definitionButton("메모", "삭제"));
+    await click(document.querySelector('button.bg-wedly-red'));
+    await settle();
+    expect(fieldPuts).toHaveLength(1);
+    expect(fieldPuts[0].body.fields.map((f) => f.key)).not.toContain("메모");
+    expect(save).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("이미 저장된 차수가 있는 회사는 컬럼을 추가하면 지금처럼 차수에 새 칸을 한 번 저장한다", async () => {
+    const save = newSave();
+    const rows = [ownerRow("first", { 정산정보: JSON.stringify([settlementTier("one", 100)]) })];
+    await mount(structurePanel(save, newCreate()), panelProps(rows));
+    await addColumnThroughPanel("비고");
+    expect(fieldPuts).toHaveLength(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 2)).toEqual(["first", "정산정보"]);
+    const tiers = JSON.parse(String(save.mock.calls[0][2]));
+    expect(tiers).toHaveLength(1);
+    expect(tiers[0].id).toBe("one");
+    expect(tiers[0].정산금액).toBe(100);
+    expect(Object.keys(tiers[0])).toContain("비고");
   });
 });

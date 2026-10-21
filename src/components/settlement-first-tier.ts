@@ -113,3 +113,14 @@ export function lastTierDeleteWarning(ensureFirstTier = false): string {
   }
   return "이 회사의 마지막 차수입니다. 지워도 회사 자료는 남고 아래 「추가」로 다시 만들 수 있습니다. ";
 }
+
+/**
+ * 칸에 들어 있던 값과 새로 확정된 값이 같은가. 빈 값(null·undefined·빈 글자)끼리는 같고,
+ * 그 밖에는 글자로 같으면 같다(0 과 빈 값은 다르다).
+ * 저장 안 한 첫 칸 초안에서 값 없이 초점만 옮긴 확정이 저장·계약 줄 만들기를 부르지 않게 가르는 데 쓴다.
+ */
+export function isSameTierValue(before: unknown, after: unknown): boolean {
+  const blank = (v: unknown) => v === null || v === undefined || v === "";
+  if (blank(before) || blank(after)) return blank(before) && blank(after);
+  return String(before) === String(after);
+}
