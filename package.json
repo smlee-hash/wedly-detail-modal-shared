@@ -15,21 +15,27 @@
     "README.md"
   ],
   "scripts": {
-    "lint": "echo 'lint pending'",
-    "test": "vitest run",
+    "lint": "eslint --pass-on-unpruned-suppressions --quiet",
+    "lint:prune": "eslint --prune-suppressions",
+    "test": "npm run lint && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
+    "@wedly/ui-shared": "*",
     "next": ">=15.0.0",
     "react": ">=18.0.0",
-    "react-dom": ">=18.0.0",
-    "@wedly/ui-shared": "*"
+    "react-dom": ">=18.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "eslint": "9.39.4",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "14.0.0",
     "jsdom": "^26.1.0",
     "typescript": "^5.0.0",
+    "typescript-eslint": "8.57.1",
     "vitest": "^2.1.9"
   },
   "publishConfig": {
