@@ -3286,7 +3286,7 @@ function FieldRow({
   const [editing, setEditing] = useState(false);
   // 날짜 칸(NO.177) 편집 — 편집을 연 순간의 값, 칸에 머무는 동안 마지막으로 본 「덜 넣음」, 실제로 값을 고쳤는지.
   //   취소·확정 뒤에는 비워서 같은 편집으로 다시 저장하지 않는다.
-  const dateEditRef = useRef<{ initial: string; incomplete?: boolean; touched?: boolean } | null>(null);
+  const dateEditRef = useRef<{ initial: string; incomplete?: boolean; touched?: boolean; filledUnfocused?: boolean } | null>(null);
   const startEditing = () => {
     dateEditRef.current = { initial: value === null || value === undefined ? "" : String(value) };
     setEditing(true);
@@ -3299,18 +3299,25 @@ function FieldRow({
   //   크롬은 칸 밖을 누르면 덜 넣은 일 "0"을 "01"로 채운 뒤 떠나므로, 「덜 넣음」은 칸에 머무는 동안 본 상태로 판단한다.
   //   다른 앱·탭으로 넘어갈 때는 칸이 활성 요소로 남은 채 같은 채움이 오므로, 페이지가 초점을 가진 동안만 본다.
   //   연·월·일을 차례로 지우면 값이 빈 글자 그대로라 input 이 오지 않으므로 키를 뗄 때도 다시 본다.
+  //   달력 팝업이 떠 있는 동안도 페이지 초점이 꺼지므로, 초점 없이 온 input 은 값을 믿지 않고 표시만 해 둔다(filledUnfocused) — 이동·Enter 때 정한다.
   const trackDateInput = (input: HTMLInputElement, changed: boolean) => {
     const edit = dateEditRef.current;
     if (!edit) return;
     if (changed) edit.touched = true;
     const doc = input.ownerDocument;
-    if (doc.activeElement === input && doc.hasFocus()) edit.incomplete = input.validity.badInput;
+    if (doc.activeElement !== input) return;
+    if (doc.hasFocus()) { edit.incomplete = input.validity.badInput; edit.filledUnfocused = false; }
+    else if (changed) edit.filledUnfocused = true;
   };
   // Enter·칸 밖 이동 때 한 번만 저장한다. 덜 넣었거나 바뀐 것이 없으면 원래 값 그대로, 연·월·일을 모두 지웠으면 빈 값.
+  //   초점 없이 채워진 값은 이때 초점이 돌아와 있으면(팝업이 닫힌 뒤) 고른 값이고, 초점이 꺼진 채 오는 blur(다른 앱으로 떠남)면 브라우저의 채움이다.
   const commitDateEdit = (input: HTMLInputElement) => {
     const edit = dateEditRef.current;
     cancelDateEdit();
-    if (!edit || edit.incomplete || input.validity.badInput) return;
+    if (!edit) return;
+    const cleared = input.value === "" && !input.validity.badInput; // 팝업의 지우기 단추는 키·변경 알림 없이 다 비운다 — 브라우저의 채움은 빈 값을 만들지 않는다
+    const incomplete = edit.incomplete && !cleared && !(edit.filledUnfocused && input.ownerDocument.hasFocus());
+    if (incomplete || input.validity.badInput) return;
     if (!edit.touched || input.value === edit.initial) return;
     onChange(input.value);
   };
