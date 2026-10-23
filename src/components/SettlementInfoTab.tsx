@@ -3272,6 +3272,12 @@ function FormulaTermsEditor({
   );
 }
 
+// 날짜 칸을 열 때 달력을 한 번만 띄운다. 칸에 함수를 새로 만들어 넘기면 부모가 다시 그릴 때마다(1분 설정 갱신·창 초점 등)
+// React 가 ref 를 다시 불러 입력 도중 달력이 다시 열린다(NO.177).
+function openDatePickerOnMount(el: HTMLInputElement | null) {
+  if (el) { try { el.showPicker?.(); } catch { /* unsupported */ } }
+}
+
 function FieldRow({
   label, description, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, overridden = false, formulaValue = null, canOverride = false, onOverrideChange,
 }: {
@@ -3301,6 +3307,36 @@ function FieldRow({
   onOverrideChange?: (v: number | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  // 날짜 칸(NO.177) 편집 — 편집을 연 순간의 값, 칸에 머무는 동안 마지막으로 본 「덜 넣음」, 실제로 값을 고쳤는지.
+  //   취소·확정 뒤에는 비워서 같은 편집으로 다시 저장하지 않는다.
+  const dateEditRef = useRef<{ initial: string; incomplete?: boolean; touched?: boolean } | null>(null);
+  const startEditing = () => {
+    dateEditRef.current = { initial: value === null || value === undefined ? "" : String(value) };
+    setEditing(true);
+  };
+  const cancelDateEdit = () => {
+    dateEditRef.current = null;
+    setEditing(false);
+  };
+  // 연·월·일을 넣는 동안·달력을 옮기는 동안에는 저장하지 않고 칸 상태만 본다.
+  //   크롬은 칸 밖을 누르면 덜 넣은 일 "0"을 "01"로 채운 뒤 떠나므로, 「덜 넣음」은 칸에 머무는 동안 본 상태로 판단한다.
+  //   다른 앱·탭으로 넘어갈 때는 칸이 활성 요소로 남은 채 같은 채움이 오므로, 페이지가 초점을 가진 동안만 본다.
+  //   연·월·일을 차례로 지우면 값이 빈 글자 그대로라 input 이 오지 않으므로 키를 뗄 때도 다시 본다.
+  const trackDateInput = (input: HTMLInputElement, changed: boolean) => {
+    const edit = dateEditRef.current;
+    if (!edit) return;
+    if (changed) edit.touched = true;
+    const doc = input.ownerDocument;
+    if (doc.activeElement === input && doc.hasFocus()) edit.incomplete = input.validity.badInput;
+  };
+  // Enter·칸 밖 이동 때 한 번만 저장한다. 덜 넣었거나 바뀐 것이 없으면 원래 값 그대로, 연·월·일을 모두 지웠으면 빈 값.
+  const commitDateEdit = (input: HTMLInputElement) => {
+    const edit = dateEditRef.current;
+    cancelDateEdit();
+    if (!edit || edit.incomplete || input.validity.badInput) return;
+    if (!edit.touched || input.value === edit.initial) return;
+    onChange(input.value);
+  };
   // select 드롭다운을 카드 밖(화면 위)에 띄우기 위한 앵커·좌표 — 차수카드 overflow-hidden 에 잘리지 않게.
   const anchorRef = useRef<HTMLDivElement>(null);
   const [dropPos, setDropPos] = useState<{ top: number; left: number } | null>(null);
@@ -3440,16 +3476,15 @@ function FieldRow({
             <input
               type="date"
               autoFocus
-              ref={(el) => {
-                if (el) { try { el.showPicker?.(); } catch { /* unsupported */ } }
-              }}
+              ref={openDatePickerOnMount}
               defaultValue={typeof value === "string" ? value : ""}
-              onBlur={(e) => { onChange(e.target.value || ""); setEditing(false); }}
-              onChange={(e) => {
-                onChange(e.target.value || "");
-                setEditing(false);
+              onBlur={(e) => commitDateEdit(e.currentTarget)}
+              onChange={(e) => trackDateInput(e.currentTarget, true)}
+              onKeyUp={(e) => trackDateInput(e.currentTarget, false)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitDateEdit(e.currentTarget); }
+                if (e.key === "Escape") { e.preventDefault(); cancelDateEdit(); }
               }}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditing(false); }}
               className="w-full px-2.5 sm:px-2 py-2 sm:py-1 text-[15px] sm:text-[13px] border border-wedly-accent/40 rounded-md outline-none focus:ring-2 focus:ring-wedly-accent/20 bg-white"
             />
           ) : (
@@ -3464,7 +3499,7 @@ function FieldRow({
           )
         ) : (
           <div
-            onClick={isEditable ? () => setEditing(true) : undefined}
+            onClick={isEditable ? startEditing : undefined}
             className={`rounded-md px-1 py-0.5 -mx-1 min-h-[26px] flex items-center ${isEditable ? "cursor-pointer hover:bg-wedly-bg-gray transition-colors" : ""}`}
           >
             {display}
