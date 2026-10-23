@@ -3,7 +3,7 @@
  *
  * 공용 `parseTiers`(@wedly/ui-shared)는 빈 배열을 빈 차수 1개로 만든다.
  * 기본(ensureFirstTier=false)은 명시적 빈 목록을 그대로 두어, 마지막 차수 삭제(`[]`)가
- * 빈 카드로 되살아나지 않게 한다. 정부 계약 탭만 ensureFirstTier 로 빈 목록도 첫 칸을 보여 준다.
+ * 빈 카드로 되살아나지 않게 한다. 정부 계약·정산 탭만 ensureFirstTier 로 빈 목록도 첫 칸을 보여 준다.
  * 그 첫 칸은 저장하지 않은 초안이다 — 열기·칸 불러오기·새로고침에서는 쓰지 않는다.
  */
 import { parseTiers, type FieldDef, type TierData } from "@wedly/ui-shared";
@@ -112,4 +112,15 @@ export function lastTierDeleteWarning(ensureFirstTier = false): string {
     return "이 회사의 마지막 차수입니다. 지워도 회사 자료는 남고 빈 첫 입력칸이 다시 나타납니다. ";
   }
   return "이 회사의 마지막 차수입니다. 지워도 회사 자료는 남고 아래 「추가」로 다시 만들 수 있습니다. ";
+}
+
+/**
+ * 칸에 들어 있던 값과 새로 확정된 값이 같은가. 빈 값(null·undefined·빈 글자)끼리는 같고,
+ * 그 밖에는 글자로 같으면 같다(0 과 빈 값은 다르다).
+ * 저장 안 한 첫 칸 초안에서 값 없이 초점만 옮긴 확정이 저장·계약 줄 만들기를 부르지 않게 가르는 데 쓴다.
+ */
+export function isSameTierValue(before: unknown, after: unknown): boolean {
+  const blank = (v: unknown) => v === null || v === undefined || v === "";
+  if (blank(before) || blank(after)) return blank(before) && blank(after);
+  return String(before) === String(after);
 }

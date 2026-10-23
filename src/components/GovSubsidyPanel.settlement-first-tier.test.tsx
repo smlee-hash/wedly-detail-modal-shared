@@ -1,0 +1,506 @@
+// @vitest-environment jsdom
+// 정부지원금 정산정보 탭 — 비어 있는 회사도 계약정보 탭처럼 「1차 정산」 첫 입력란을 처음부터 보여 준다.
+// 그 첫 칸은 저장하지 않은 초안이다(열기만 해서는 저장 0번). 노션 3df7b6a9-b239-801e-a8b8-e80abaa6df02.
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { FeePublicViewV1, SectionPanelProps } from "@wedly/ui-shared";
+import { createGovSubsidyPanel } from "./GovSubsidyPanel";
+
+const FIELDS = [
+  { key: "정산금액", label: "정산금액", type: "number" },
+  { key: "메모", label: "메모", type: "text" },
+];
+const DRAFT_NOTE = "이 회사의 마지막 차수입니다. 지워도 회사 자료는 남고 빈 첫 입력칸이 다시 나타납니다.";
+
+type Save = (...args: unknown[]) => Promise<void>;
+type Row = { domain: string; entryId: string; domainLabel: string; row: Record<string, unknown>; feeView?: FeePublicViewV1 };
+
+let root: Root;
+let host: HTMLDivElement;
+let fieldDefs: unknown[];
+/** 칸 정의(컬럼 정의) 저장 요청 — 정산·계약 저장 콜백과 따로 센다. */
+let fieldPuts: { url: string; body: { fields: Array<{ key: string; label: string }> } }[];
+
+beforeEach(() => {
+  fieldDefs = FIELDS;
+  fieldPuts = [];
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") {
+      fieldPuts.push({ url: String(url), body: JSON.parse(String(init.body)) });
+      return { ok: true, json: async () => ({ success: true, data: null }) };
+    }
+    return { ok: true, json: async () => ({ success: true, data: String(url).includes("fields") ? fieldDefs : {} }) };
+  }));
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  host.remove();
+  vi.unstubAllGlobals();
+});
+
+function ownerRow(entryId: string, row: Record<string, unknown> = {}, feeView?: FeePublicViewV1): Row {
+  return { domain: "government-subsidy", entryId, domainLabel: "정부지원금", row, ...(feeView ? { feeView } : {}) };
+}
+function settlementTier(id: string, 정산금액: number) {
+  return { id, label: "1차 정산", 정산금액 };
+}
+function panelFor(save: Save, create: () => Promise<string>, extra: Record<string, unknown> = {}) {
+  return createGovSubsidyPanel({
+    editable: true, allowStructureEdit: false, ownSource: "illua",
+    commentsPath: (id: string) => `/comments/${id}`,
+    contractFieldsPath: "/first-fields-contract", settlementFieldsPath: "/first-fields-settlement",
+    refundFieldsPath: "/first-fields-refund", configPath: "/first-config",
+    savePolicyField: save, createContract: create, filterPolicyRows: (rows: unknown[]) => rows,
+    ...extra,
+  } as Parameters<typeof createGovSubsidyPanel>[0]);
+}
+function panelProps(rows: Row[], subTab = "settlement") {
+  return {
+    rows: rows as unknown as SectionPanelProps["rows"], primaryRow: { _id: "customer-one" },
+    isAdmin: true, hideSubTabBar: true, subTab, onSubTabChange: vi.fn(), onSaved: vi.fn(),
+    adapter: { api: { currentUser: async () => ({ name: "검사" }) }, components: { MeetingsTab: () => null } } as unknown as SectionPanelProps["adapter"],
+  };
+}
+const newSave = () => vi.fn<Save>().mockResolvedValue(undefined);
+const newCreate = () => vi.fn(async () => "created-first");
+
+function cards() {
+  return Array.from(host.querySelectorAll<HTMLDivElement>("div.rounded-2xl.shadow-sm")).filter((card) => card.querySelector("h4"));
+}
+function cardLabel(index: number) {
+  return (cards()[index].querySelector("h4")?.textContent ?? "").replace(/\s/g, "");
+}
+function buttonEndingWith(text: string) {
+  const normalized = text.replace(/\s/g, "");
+  return Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent?.replace(/\s/g, "").endsWith(normalized));
+}
+async function click(target: Element | null | undefined) {
+  if (!target) throw new Error("Missing click target");
+  await act(async () => { target.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+}
+async function settle() {
+  await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 5)); });
+}
+async function editAmount(cardIndex: number, value: string) {
+  const field = cards()[cardIndex].querySelector(`[title="정산금액"]`)!.parentElement!;
+  await act(async () => field.querySelector<HTMLElement>(".cursor-pointer")!.click());
+  const input = field.querySelector<HTMLInputElement>("input")!;
+  expect(input).toBeTruthy();
+  input.value = value;
+  await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+}
+const deleteButton = (cardIndex: number) => cards()[cardIndex].querySelector<HTMLButtonElement>('button[title*="삭제"]');
+
+async function mount(Panel: ReturnType<typeof panelFor>, props: ReturnType<typeof panelProps>) {
+  await act(async () => root.render(<Panel {...props} />));
+  await settle();
+}
+
+/** 칸 이름표로 그 칸 상자를 찾는다. */
+function fieldBox(cardIndex: number, label: string) {
+  return cards()[cardIndex].querySelector(`[title="${label}"]`)!.parentElement!;
+}
+/** 값은 넣지 않고 칸을 열었다가 초점만 옮긴다(숫자·글자·날짜 칸 모두 입력창의 focusout). */
+async function openAndBlurWithoutTyping(cardIndex: number, label: string) {
+  const field = fieldBox(cardIndex, label);
+  await act(async () => field.querySelector<HTMLElement>(".cursor-pointer")!.click());
+  const input = field.querySelector<HTMLInputElement>("input")!;
+  expect(input).toBeTruthy();
+  await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+}
+async function typeAndBlur(cardIndex: number, label: string, value: string) {
+  const field = fieldBox(cardIndex, label);
+  await act(async () => field.querySelector<HTMLElement>(".cursor-pointer")!.click());
+  const input = field.querySelector<HTMLInputElement>("input")!;
+  expect(input).toBeTruthy();
+  input.value = value;
+  await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+}
+const buttonText = (text: string) =>
+  Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent?.trim() === text);
+async function typeInto(input: HTMLInputElement | null, text: string) {
+  if (!input) throw new Error("Missing input");
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  await act(async () => { setter?.call(input, text); input.dispatchEvent(new Event("input", { bubbles: true })); });
+}
+/** 구조 편집 패널에서 「+ 컬럼 추가」 → 이름 → 확인. */
+async function addColumnThroughPanel(label: string) {
+  await click(buttonText("편집"));
+  await click(buttonText("+ 컬럼 추가"));
+  await typeInto(document.querySelector<HTMLInputElement>('input[placeholder="예: 비고"]'), label);
+  await click(buttonText("확인"));
+  await settle();
+}
+
+describe("정산정보 탭 — 비어 있는 회사의 첫 입력란", () => {
+  it("계약 줄이 아직 없는 회사도 1차 정산 초안 한 장을 보여 주고 열기만 해서는 아무것도 저장하지 않는다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create), panelProps([]));
+    expect(cards()).toHaveLength(1);
+    expect(cardLabel(0)).toBe("1차정산");
+    expect(save).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  for (const [name, row] of [
+    ["정산정보 칸이 아예 없음", {}],
+    ["정산정보가 빈 배열 글자", { 정산정보: "[]" }],
+    ["정산정보가 빈 글자", { 정산정보: "" }],
+    ["정산정보가 null", { 정산정보: null }],
+  ] as const) {
+    it(`계약 줄은 있으나 정산 차수가 없는 회사(${name})도 초안 한 장이고 열기만 해서는 저장 0번이다`, async () => {
+      const save = newSave(); const create = newCreate();
+      await mount(panelFor(save, create), panelProps([ownerRow("first", { ...row })]));
+      expect(cards()).toHaveLength(1);
+      expect(cardLabel(0)).toBe("1차정산");
+      expect(save).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    });
+  }
+
+  it("추가 버튼은 2차부터 「+ 2차 정산 추가」이고 「1차 정산 추가」는 나오지 않는다", async () => {
+    await mount(panelFor(newSave(), newCreate()), panelProps([ownerRow("first", { 정산정보: "[]" })]));
+    expect(buttonEndingWith("2차 정산 추가")).toBeTruthy();
+    expect(buttonEndingWith("1차 정산 추가")).toBeUndefined();
+  });
+
+  it("초안 카드에는 휴지통이 없다", async () => {
+    await mount(panelFor(newSave(), newCreate()), panelProps([ownerRow("first", { 정산정보: "[]" })]));
+    expect(cards()).toHaveLength(1);
+    expect(deleteButton(0)).toBeNull();
+  });
+
+  it("초안의 금액을 고치면 그 계약 줄의 정산정보에 차수 하나로 한 번 저장한다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create), panelProps([ownerRow("first", { 정산정보: "[]" })]));
+    await editAmount(0, "300");
+    expect(create).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledTimes(1);
+    const [entryId, key, raw, options] = save.mock.calls[0];
+    expect(entryId).toBe("first");
+    expect(key).toBe("정산정보");
+    const tiers = JSON.parse(String(raw));
+    expect(tiers).toHaveLength(1);
+    expect(tiers[0].정산금액).toBe(300);
+    expect(options).toBeUndefined();
+  });
+
+  it("계약 줄이 없을 때 초안의 금액을 고치면 그때서야 계약 줄을 한 번 만들어 거기에 저장한다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create), panelProps([]));
+    expect(create).not.toHaveBeenCalled();
+    await editAmount(0, "300");
+    await settle();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0]).toBe("created-first");
+    expect(save.mock.calls[0][1]).toBe("정산정보");
+    expect(JSON.parse(String(save.mock.calls[0][2]))).toHaveLength(1);
+  });
+
+  it("초안이 보이는 동안 「+ 2차 정산 추가」를 누르면 초안과 2차 두 장을 한 번 저장한다", async () => {
+    const save = newSave();
+    await mount(panelFor(save, newCreate()), panelProps([ownerRow("first", { 정산정보: "[]" })]));
+    await click(buttonEndingWith("2차 정산 추가"));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][1]).toBe("정산정보");
+    expect(JSON.parse(String(save.mock.calls[0][2]))).toHaveLength(2);
+  });
+
+  it("보기만 가능한 화면(editable 아님)에서도 초안은 보이지만 저장·계약 줄 만들기·추가 버튼은 없다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create, { editable: false }), panelProps([ownerRow("first", { 정산정보: "[]" })]));
+    expect(cards()).toHaveLength(1);
+    expect(buttonEndingWith("2차 정산 추가")).toBeUndefined();
+    expect(save).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("정산정보 탭 — 마지막 차수를 지운 뒤", () => {
+  it("저장된 차수가 하나뿐일 때 지우면 빈 배열 한 번만 저장하고 안내문에 빈 첫 입력칸이 다시 나타난다고 적고 새 초안을 보여 준다", async () => {
+    const save = newSave();
+    const rows = [ownerRow("first", { 정산정보: JSON.stringify([settlementTier("one", 100)]) })];
+    await mount(panelFor(save, newCreate()), panelProps(rows));
+    expect(cards()).toHaveLength(1);
+    expect(save).not.toHaveBeenCalled();
+    await click(deleteButton(0));
+    expect(save).not.toHaveBeenCalled();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain(DRAFT_NOTE);
+    await click(document.querySelector('[role="dialog"] button.bg-wedly-red'));
+    await settle();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 3)).toEqual(["first", "정산정보", "[]"]);
+    // 저장이 끝났다고 부모가 비어 있는 새 자료를 다시 내려 주면(실제 흐름) 같은 초안 한 장이 남는다.
+    const Panel = panelFor(save, newCreate());
+    await act(async () => root.render(<Panel {...panelProps([ownerRow("first", { 정산정보: "[]" })])} />));
+    await settle();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(cards()).toHaveLength(1);
+    expect(cardLabel(0)).toBe("1차정산");
+    expect(deleteButton(0)).toBeNull();
+    expect(buttonEndingWith("2차 정산 추가")).toBeTruthy();
+  });
+});
+
+describe("정산정보 탭 — 여러 계약 줄을 합쳐 보는 회사", () => {
+  it("모든 줄이 비어 있으면 초안 한 장만 보이고, 고치면 대표(첫) 줄에만 저장한다", async () => {
+    const save = newSave(); const create = newCreate();
+    const rows = [ownerRow("first", { 정산정보: "[]" }), ownerRow("second", {})];
+    await mount(panelFor(save, create), panelProps(rows));
+    expect(cards()).toHaveLength(1);
+    expect(save).not.toHaveBeenCalled();
+    await editAmount(0, "300");
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0]).toBe("first");
+    expect(save.mock.calls[0][1]).toBe("정산정보");
+    expect(JSON.parse(String(save.mock.calls[0][2]))).toHaveLength(1);
+    expect(save.mock.calls.some((call) => call[0] === "second")).toBe(false);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("다른 줄에 저장된 정산 차수가 있으면 초안을 더 만들지 않고 그 차수 한 장만 보이며 열기만 해서는 저장하지 않는다", async () => {
+    const save = newSave();
+    const rows = [ownerRow("first", { 정산정보: "[]" }), ownerRow("second", { 정산정보: JSON.stringify([settlementTier("two-a", 700)]) })];
+    await mount(panelFor(save, newCreate()), panelProps(rows));
+    expect(cards()).toHaveLength(1);
+    expect(deleteButton(0)).not.toBeNull();
+    expect(buttonEndingWith("2차 정산 추가")).toBeTruthy();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("다른 줄의 마지막 차수를 지우면 그 줄에만 빈 배열을 저장하고 대표 줄은 건드리지 않는다", async () => {
+    const save = newSave();
+    const rows = [ownerRow("first", { 정산정보: "[]" }), ownerRow("second", { 정산정보: JSON.stringify([settlementTier("two-a", 700)]) })];
+    await mount(panelFor(save, newCreate()), panelProps(rows));
+    await click(deleteButton(0));
+    await click(document.querySelector('[role="dialog"] button.bg-wedly-red'));
+    await settle();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 3)).toEqual(["second", "정산정보", "[]"]);
+    expect(cards()).toHaveLength(1);
+    expect(deleteButton(0)).toBeNull();
+  });
+
+  it("정산 완료 표시(renderTierBadge)는 저장된 차수에만 붙고 원래 줄·원래 차수 id 로 불린다 — 초안에는 붙지 않는다", async () => {
+    const badge = vi.fn(() => null);
+    const rows = [ownerRow("first", { 정산정보: "[]" }), ownerRow("second", { 정산정보: JSON.stringify([settlementTier("two-a", 700)]) })];
+    await mount(panelFor(newSave(), newCreate(), { renderTierBadge: badge }), panelProps(rows));
+    const settlementCalls = badge.mock.calls.map((call) => (call as unknown as [Record<string, unknown>])[0]).filter((arg) => arg.kind === "settlement");
+    expect(settlementCalls.length).toBeGreaterThan(0);
+    for (const arg of settlementCalls) {
+      expect(arg.entryId).toBe("second");
+      expect(arg.tierId).toBe("two-a");
+    }
+
+    badge.mockClear();
+    await mount(panelFor(newSave(), newCreate(), { renderTierBadge: badge }), panelProps([ownerRow("first", { 정산정보: "[]" })]));
+    expect(cards()).toHaveLength(1);
+    expect(badge.mock.calls.map((call) => (call as unknown as [Record<string, unknown>])[0]).filter((arg) => arg.kind === "settlement")).toEqual([]);
+  });
+});
+
+describe("정산정보 탭 — 서버 수수료 표시가 있는 회사", () => {
+  function feeView(entryId: string): FeePublicViewV1 {
+    return {
+      version: 1, mode: "standard", owner: { sourceTable: "PolicyFundEntry", entryId }, targets: [],
+    } as unknown as FeePublicViewV1;
+  }
+
+  it("수수료 표시가 있는 계약 줄이어도 초안은 열기만 해서는 저장하지 않고, 일반 칸을 고치면 그 줄에 저장한다", async () => {
+    const save = newSave();
+    await mount(panelFor(save, newCreate()), panelProps([ownerRow("first", { 정산정보: "[]" }, feeView("first"))]));
+    expect(cards()).toHaveLength(1);
+    expect(save).not.toHaveBeenCalled();
+    await editAmount(0, "300");
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 2)).toEqual(["first", "정산정보"]);
+  });
+
+  it("서버가 정하는 칸은 아직 저장되지 않은 초안에서 값 대신 이유를 보여 주고 열기만 해서는 저장하지 않는다", async () => {
+    fieldDefs = [{ key: "정산금액", label: "정산금액", type: "number", feeServerManaged: true }, FIELDS[1]];
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create), panelProps([ownerRow("first", { 정산정보: "[]" }, feeView("first"))]));
+    expect(cards()).toHaveLength(1);
+    expect(host.textContent).toContain("새로 만든 차수라 수수료 기준을 아직 찾을 수 없어요");
+    expect(save).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
+// ── P2 후속(리뷰 review-f31885045bc44181a30daae8f3df2031) ──
+// 저장 안 한 1차 초안은 사람이 값을 실제로 넣기 전에는 저장도, 계약 줄 만들기도 하지 않는다.
+const BLUR_FIELDS = [
+  { key: "정산금액", label: "정산금액", type: "number" },
+  { key: "메모", label: "메모", type: "text" },
+  { key: "정산일", label: "정산일", type: "date" },
+];
+const DRAFT_ROW = ownerRow("first", { 정산정보: "[]" });
+
+describe("정산정보 탭 — 저장 안 한 1차 초안에서 값을 넣지 않고 초점만 옮길 때", () => {
+  for (const [name, label] of [["숫자", "정산금액"], ["글자", "메모"], ["날짜", "정산일"]] as const) {
+    it(`${name} 칸: 계약 줄이 있는 회사도 저장 0번이고 초안이 그대로 남는다`, async () => {
+      fieldDefs = BLUR_FIELDS;
+      const save = newSave(); const create = newCreate();
+      await mount(panelFor(save, create), panelProps([DRAFT_ROW]));
+      await openAndBlurWithoutTyping(0, label);
+      await settle();
+      expect(save).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(cards()).toHaveLength(1);
+      expect(deleteButton(0)).toBeNull();
+      expect(buttonEndingWith("2차 정산 추가")).toBeTruthy();
+    });
+
+    it(`${name} 칸: 계약 줄이 없는 회사도 계약 줄 만들기 0번·저장 0번이다`, async () => {
+      fieldDefs = BLUR_FIELDS;
+      const save = newSave(); const create = newCreate();
+      await mount(panelFor(save, create), panelProps([]));
+      await openAndBlurWithoutTyping(0, label);
+      await settle();
+      expect(create).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    });
+  }
+
+  it("값을 넣지 않은 초점 이동을 여러 칸에서 거듭해도 저장·계약 줄 만들기는 계속 0번이고, 그 뒤 값을 실제로 넣으면 그때 처음 한 번 저장한다", async () => {
+    fieldDefs = BLUR_FIELDS;
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create), panelProps([]));
+    for (const label of ["정산금액", "메모", "정산일"]) {
+      await openAndBlurWithoutTyping(0, label);
+      await settle();
+      expect(save).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    }
+    await typeAndBlur(0, "메모", "첫 메모");
+    await settle();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0]).toBe("created-first");
+    expect(save.mock.calls[0][1]).toBe("정산정보");
+    const tiers = JSON.parse(String(save.mock.calls[0][2]));
+    expect(tiers).toHaveLength(1);
+    expect(tiers[0].메모).toBe("첫 메모");
+  });
+
+  it("글자·날짜 칸도 값을 실제로 넣으면 그 줄에 한 번 처음 저장한다", async () => {
+    fieldDefs = BLUR_FIELDS;
+    const save = newSave(); const create = newCreate();
+    await mount(panelFor(save, create), panelProps([DRAFT_ROW]));
+    await typeAndBlur(0, "정산일", "2026-10-21");
+    await settle();
+    expect(create).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 2)).toEqual(["first", "정산정보"]);
+    expect(JSON.parse(String(save.mock.calls[0][2]))[0].정산일).toBe("2026-10-21");
+  });
+
+  it("계약정보 탭의 빈 초안도 같은 수정으로 값을 넣지 않은 초점 이동은 저장·계약 줄 만들기 0번이다", async () => {
+    fieldDefs = BLUR_FIELDS;
+    for (const rows of [[] as Row[], [ownerRow("first", { 계약정보: "[]" })]]) {
+      const save = newSave(); const create = newCreate();
+      await mount(panelFor(save, create), panelProps(rows, "contract"));
+      expect(cards()).toHaveLength(1);
+      expect(cardLabel(0)).toBe("1차계약");
+      for (const label of ["정산금액", "메모", "정산일"]) {
+        await openAndBlurWithoutTyping(0, label);
+        await settle();
+        expect(save).not.toHaveBeenCalled();
+        expect(create).not.toHaveBeenCalled();
+      }
+    }
+  });
+});
+
+describe("정산정보 탭 — 저장 안 한 1차 초안이 있는 회사에서 컬럼 정의만 바꿀 때", () => {
+  const structurePanel = (save: Save, create: () => Promise<string>) => panelFor(save, create, { allowStructureEdit: true });
+
+  for (const [name, rows] of [
+    ["계약 줄이 있는 회사", [DRAFT_ROW]],
+    ["계약 줄이 없는 회사", [] as Row[]],
+  ] as const) {
+    it(`${name}: 컬럼을 추가하면 칸 정의는 한 번 저장하고 정산 저장·계약 줄 만들기는 0번이다`, async () => {
+      const save = newSave(); const create = newCreate();
+      await mount(structurePanel(save, create), panelProps([...rows]));
+      await addColumnThroughPanel("비고");
+      expect(fieldPuts).toHaveLength(1);
+      expect(fieldPuts[0].url).toBe("/first-fields-settlement");
+      expect(fieldPuts[0].body.fields.map((f) => f.label)).toContain("비고");
+      expect(save).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(cards()).toHaveLength(1);
+      expect(deleteButton(0)).toBeNull();
+    });
+  }
+
+  it("컬럼을 추가한 뒤 값을 실제로 넣으면 그때 처음 한 번 저장한다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(structurePanel(save, create), panelProps([DRAFT_ROW]));
+    await addColumnThroughPanel("비고");
+    expect(save).not.toHaveBeenCalled();
+    await click(buttonText("편집 종료"));
+    await typeAndBlur(0, "정산금액", "300");
+    await settle();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 2)).toEqual(["first", "정산정보"]);
+    expect(JSON.parse(String(save.mock.calls[0][2]))[0].정산금액).toBe(300);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  /** 컬럼 정의 목록에서 이름이 label 인 줄의 단추. */
+  function definitionButton(label: string, text: string) {
+    const row = Array.from(host.querySelectorAll('[draggable="true"]')).find((el) =>
+      Array.from(el.querySelectorAll("span")).some((span) => span.textContent === label));
+    return Array.from(row?.querySelectorAll("button") ?? []).find((b) => b.textContent === text);
+  }
+
+  it("컬럼 종류를 바꿔도 칸 정의는 한 번 저장하고 정산 저장·계약 줄 만들기는 0번이다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(structurePanel(save, create), panelProps([]));
+    await click(buttonText("편집"));
+    await click(definitionButton("메모", "타입"));
+    await click(Array.from(document.querySelectorAll("label")).find((el) => el.textContent?.includes("컬럼 타입"))?.querySelector("button"));
+    await click(Array.from(document.querySelectorAll('button[role="option"]')).find((el) => el.textContent === "숫자"));
+    await click(buttonText("확인"));
+    await settle();
+    expect(fieldPuts).toHaveLength(1);
+    expect(fieldPuts[0].body.fields.find((f) => f.key === "메모")).toMatchObject({ type: "number" });
+    expect(save).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("컬럼을 지워도 칸 정의는 한 번 저장하고 정산 저장·계약 줄 만들기는 0번이다", async () => {
+    const save = newSave(); const create = newCreate();
+    await mount(structurePanel(save, create), panelProps([DRAFT_ROW]));
+    await click(buttonText("편집"));
+    await click(definitionButton("메모", "삭제"));
+    await click(document.querySelector('button.bg-wedly-red'));
+    await settle();
+    expect(fieldPuts).toHaveLength(1);
+    expect(fieldPuts[0].body.fields.map((f) => f.key)).not.toContain("메모");
+    expect(save).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("이미 저장된 차수가 있는 회사는 컬럼을 추가하면 지금처럼 차수에 새 칸을 한 번 저장한다", async () => {
+    const save = newSave();
+    const rows = [ownerRow("first", { 정산정보: JSON.stringify([settlementTier("one", 100)]) })];
+    await mount(structurePanel(save, newCreate()), panelProps(rows));
+    await addColumnThroughPanel("비고");
+    expect(fieldPuts).toHaveLength(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0].slice(0, 2)).toEqual(["first", "정산정보"]);
+    const tiers = JSON.parse(String(save.mock.calls[0][2]));
+    expect(tiers).toHaveLength(1);
+    expect(tiers[0].id).toBe("one");
+    expect(tiers[0].정산금액).toBe(100);
+    expect(Object.keys(tiers[0])).toContain("비고");
+  });
+});

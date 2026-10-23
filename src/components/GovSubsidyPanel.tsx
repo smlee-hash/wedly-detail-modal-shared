@@ -1343,7 +1343,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {shownSubTab === "settlement" && !contractLocked && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "settlement", entryId })}
-              <SettlementInfoTab key={tierSaveScopeFor("정산정보")} {...settlementCommon} {...tierSavePropsFor("정산정보")} rawValue={mergedTiers["정산정보"] ?? null} onSave={onSaveTiersFor("정산정보")} feeTargetForTier={feeTargetFor("정산정보")} storagePrefix="settlement" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "settlement", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab key={tierSaveScopeFor("정산정보")} {...settlementCommon} {...tierSavePropsFor("정산정보")} rawValue={mergedTiers["정산정보"] ?? null} onSave={onSaveTiersFor("정산정보")} feeTargetForTier={feeTargetFor("정산정보")} storagePrefix="settlement" ensureFirstTier renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "settlement", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
