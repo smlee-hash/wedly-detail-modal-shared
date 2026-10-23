@@ -3618,8 +3618,8 @@ function FieldRow({
   const [editInitialValue, setEditInitialValue] = useState("");
   const [refreshNotice, setRefreshNotice] = useState(false);
   // 편집을 연 순간의 값은 서버 갱신으로 바뀌지 않는다. 취소·확정 뒤에는 같은 편집으로 다시 저장하지 않는다.
-  //   dateIncomplete·dateTouched 는 날짜 칸만 쓴다 — 칸에 머무는 동안 마지막으로 본 「덜 넣음」과 실제로 값을 고쳤는지.
-  const editSessionRef = useRef<{ initial: string; guardUnchanged: boolean; savedBasisVersion?: string; invalidated?: boolean; dateIncomplete?: boolean; dateTouched?: boolean } | null>(null);
+  //   dateIncomplete·dateTouched·dateFilledUnfocused 는 날짜 칸만 쓴다 — 칸에 머무는 동안 마지막으로 본 「덜 넣음」, 실제로 값을 고쳤는지, 페이지 초점 없이 온 input 이 있었는지.
+  const editSessionRef = useRef<{ initial: string; guardUnchanged: boolean; savedBasisVersion?: string; invalidated?: boolean; dateIncomplete?: boolean; dateTouched?: boolean; dateFilledUnfocused?: boolean } | null>(null);
   useEffect(() => {
     const session = editSessionRef.current;
     // 저장 기준이 돌아와도 한 번 바뀐 편집은 새 관측으로 다시 제출하지 않는다.
@@ -3657,17 +3657,24 @@ function FieldRow({
   //   크롬은 칸 밖을 누르면 덜 넣은 일 "0"을 "01"로 채운 뒤 떠나므로, 「덜 넣음」은 칸에 머무는 동안 본 상태로 판단한다.
   //   다른 앱·탭으로 넘어갈 때는 칸이 활성 요소로 남은 채 같은 채움이 오므로, 페이지가 초점을 가진 동안만 본다.
   //   연·월·일을 차례로 지우면 값이 빈 글자 그대로라 input 이 오지 않으므로 키를 뗄 때도 다시 본다.
+  //   달력 팝업이 떠 있는 동안도 페이지 초점이 꺼질 수 있으므로, 초점 없이 온 input 은 값을 믿지 않고 표시만 해 둔다(dateFilledUnfocused) — 이동·Enter 때 정한다.
   const trackDateInput = (input: HTMLInputElement, changed: boolean) => {
     const session = editSessionRef.current;
     if (!session) return;
     if (changed) session.dateTouched = true;
     const doc = input.ownerDocument;
-    if (doc.activeElement === input && doc.hasFocus()) session.dateIncomplete = input.validity.badInput;
+    if (doc.activeElement !== input) return;
+    if (doc.hasFocus()) { session.dateIncomplete = input.validity.badInput; session.dateFilledUnfocused = false; }
+    else if (changed) session.dateFilledUnfocused = true;
   };
   // Enter·칸 밖 이동 때 한 번만 저장한다. 덜 넣었거나 바뀐 것이 없으면 원래 값 그대로, 연·월·일을 모두 지웠으면 빈 값.
+  //   초점 없이 채워진 값은 이때 초점이 돌아와 있으면(팝업이 닫힌 뒤) 고른 값이고, 초점이 꺼진 채 오는 blur(다른 앱으로 떠남)면 브라우저의 채움이다.
   const commitDateEdit = (input: HTMLInputElement) => {
     const session = takeNumericSession();
-    if (!session || session.dateIncomplete || input.validity.badInput) return;
+    if (!session) return;
+    const cleared = input.value === "" && !input.validity.badInput; // 팝업의 지우기 단추는 키·변경 알림 없이 다 비운다 — 브라우저의 채움은 빈 값을 만들지 않는다
+    const incomplete = session.dateIncomplete && !cleared && !(session.dateFilledUnfocused && input.ownerDocument.hasFocus());
+    if (incomplete || input.validity.badInput) return;
     if (!session.dateTouched || input.value === session.initial) return;
     onChange(input.value);
   };

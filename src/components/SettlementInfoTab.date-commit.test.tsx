@@ -79,10 +79,28 @@ describe("NO.177 상세 카드 날짜 칸 — 입력 마무리 때 한 번 저�
     expectFocused(input);
     await act(async () => { input.blur(); await settle(); });
   }
+  // 페이지 안에서 다른 곳을 누를 때(팝업이 닫힌 뒤 포함) — 크롬의 blur 는 페이지 초점을 가진 채 온다.
+  // jsdom 은 blur 를 보내기 전에 초점을 지워 hasFocus() 가 거짓으로 오므로, 크롬처럼 초점을 가진 채 보낸다.
+  async function leaveWithPageFocus(input: HTMLInputElement) {
+    const pageFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    try { await leave(input); } finally { pageFocus.mockRestore(); }
+  }
   // 다른 앱·탭으로 넘어가는 동안 — 크롬은 페이지 초점부터 끄고, 칸은 활성 요소로 남긴 채 채움·blur 를 보낸다.
   async function whilePageUnfocused(run: () => Promise<void>) {
     const pageFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
     try { await run(); } finally { pageFocus.mockRestore(); }
+  }
+
+  // 달력 팝업이 떠 있는 동안 — 메인 문서는 초점을 잃은 채 칸이 활성 요소로 남고, 고른 값의 input 만 온다(키를 떼는 일은 없다).
+  // 팝업이 닫히면 페이지 초점이 돌아오므로, 이 도우미가 끝난 뒤의 blur·Enter 는 초점을 가진 채 온다.
+  async function pickInPopup(input: HTMLInputElement, value: string) {
+    await whilePageUnfocused(async () => {
+      await act(async () => {
+        browserState(input, value, false);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await settle();
+      });
+    });
   }
 
   beforeEach(() => {
@@ -177,6 +195,54 @@ describe("NO.177 상세 카드 날짜 칸 — 입력 마무리 때 한 번 저�
     await whilePageUnfocused(() => leave(input));
     expect(saves).toHaveLength(1);
     expect(JSON.parse(saves[0].raw)[0].계약일).toBe("2026-11-20");
+  });
+
+  // 일부만 넣은 뒤(키를 뗄 때 덜 넣음으로 보임) 달력 팝업에서 고르는 값은 페이지 초점이 꺼진 채 온다 — 팝업이 닫힌 뒤의 이동·Enter 에서 저장해야 한다.
+  it.each([
+    ["날짜 고르기", "2026-10-15"],
+    ["오늘 단추", "2026-10-23"],
+    ["지우기 단추", ""],
+  ])("일부만 넣은 뒤 달력 팝업의 %s 로 바꾸면(페이지 초점이 꺼진 채 input 이 와도) 팝업이 닫힌 뒤 칸 밖 이동 때 한 번 저장한다", async (_name, picked) => {
+    await render({ id: "one", 계약일: "2026-10-01" });
+    const input = await open("계약일");
+    await type(input, "", true); // 일 자리에 1 만 쳐서 덜 넣은 상태
+    await pickInPopup(input, picked);
+    expect(saves).toEqual([]);
+    expect(dateInput("계약일")).toBe(input);
+    await leaveWithPageFocus(input);
+    expect(saves).toHaveLength(1);
+    expect(JSON.parse(saves[0].raw)[0].계약일).toBe(picked);
+  });
+
+  it("일부만 넣은 뒤 달력 팝업에서 날짜를 고르고 Enter 를 눌러도 한 번 저장하고 뒤따르는 blur 에는 다시 저장하지 않는다", async () => {
+    await render({ id: "one", 계약일: "2026-10-01" });
+    const input = await open("계약일");
+    await type(input, "", true);
+    await pickInPopup(input, "2026-10-15");
+    await key(input, "Enter", true);
+    expect(saves).toHaveLength(1);
+    expect(JSON.parse(saves[0].raw)[0].계약일).toBe("2026-10-15");
+  });
+
+  it("팝업에서 고른 뒤 다시 일부만 넣고 칸 밖을 누르면(브라우저가 01 로 채워도) 저장하지 않는다", async () => {
+    await render({ id: "one", 계약일: "2026-10-20" });
+    const input = await open("계약일");
+    await type(input, "", true);
+    await pickInPopup(input, "2026-10-15");
+    await type(input, "", true); // 팝업이 닫힌 뒤 일을 다시 지우고 0 만 침 — 키를 뗄 때 덜 넣음으로 다시 보인다
+    Object.defineProperty(document, "activeElement", { configurable: true, get: () => document.body });
+    try {
+      await act(async () => {
+        browserState(input, "2026-10-01", false);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await settle();
+      });
+    } finally {
+      Reflect.deleteProperty(document, "activeElement");
+    }
+    await leaveWithPageFocus(input);
+    expect(saves).toEqual([]);
+    expect(shown("계약일")).toBe("2026-10-20");
   });
 
   it("연·월·일을 모두 지우고 나가면 빈 값을 한 번 저장한다 — 하나만 지운 동안은 저장하지 않는다", async () => {
