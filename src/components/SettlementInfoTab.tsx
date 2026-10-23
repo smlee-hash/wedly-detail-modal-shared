@@ -63,6 +63,7 @@ import {
   isUnsavedFirstTierDraft,
   afterLastTierRemoved,
   lastTierDeleteWarning,
+  isSameTierValue,
 } from "./settlement-first-tier";
 import {
   createTierFieldEditIntent,
@@ -687,6 +688,13 @@ export default function SettlementInfoTab({
     else onSave(json);
   }, [onSave, ensureFirstTier, readOnly, canStartSave, resetTiersFromSaved, saveResetRevision, fieldsLoaded, fieldsApiPath]);
 
+  // 칸 정의(컬럼 추가·종류 변경·삭제)를 바꾼 뒤 차수에도 칸 모양을 맞춰 저장한다.
+  //   저장 안 한 첫 칸 초안은 사람이 값을 넣은 적이 없으니 화면만 맞추고, 정산 저장·계약 줄 만들기는 부르지 않는다.
+  const persistAfterFieldDefChange = useCallback((next: TierData[]) => {
+    if (unsavedFirstTierDraft) return;
+    persist(next);
+  }, [persist, unsavedFirstTierDraft]);
+
   // 어드민 — 세부 섹션 삭제. 그 영역에 속한 차수는 첫 번째 영역으로 자동 이동(데이터 보호).
   const commitSubSectionDelete = useCallback(() => {
     if (!fieldsLoaded || readOnly || !subSectionDeleteConfirm || !onUpdateSubSections) return;
@@ -800,6 +808,9 @@ export default function SettlementInfoTab({
     if (!fieldsLoaded) { resetTiersFromSaved(); return; }
     if (canStartSave && !canStartSave()) return;
     if (readOnly) return;
+    // 저장 안 한 첫 칸 초안에서 값이 그대로인 확정(빈 칸을 열었다 초점만 옮김)은 저장도 계약 줄 만들기도 하지 않는다.
+    //   값을 실제로 바꾼 첫 입력부터 지금처럼 저장한다.
+    if (unsavedFirstTierDraft && isSameTierValue(tiersRef.current[idx]?.[key], value)) return;
     // 사용자가 이 칸을 직접 고친 확정 한 번 — 의도는 값을 바꾸기 전 저장본에서 읽는다.
     const editIntent = createTierFieldEditIntent({
       kind: "field", tiers: tiersRef.current, index: idx, fieldKey: key, shapes: tierShapesRef.current,
@@ -853,7 +864,7 @@ export default function SettlementInfoTab({
 
     replaceTiers(next);
     persist(next, editIntent);
-  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, feeContextFor, replaceTiers, readOnly, canStartSave, fieldsLoaded, resetTiersFromSaved]);
+  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, feeContextFor, replaceTiers, readOnly, canStartSave, fieldsLoaded, resetTiersFromSaved, unsavedFirstTierDraft]);
 
   const updateTierLabel = useCallback((idx: number, newLabel: string) => {
     if (!fieldsLoaded || readOnly) { resetTiersFromSaved(); return; }
@@ -1082,7 +1093,7 @@ export default function SettlementInfoTab({
       const empty = (draftType === "number" || draftType === "percent" || draftType === "formula") ? null : "";
       const updated = tiersRef.current.map((t) => ({ ...t, [key]: empty }));
       replaceTiers(updated);
-      persist(updated);
+      persistAfterFieldDefChange(updated);
     } else if (fieldEditModal.mode === "rename") {
       const label = draftLabel.trim();
       if (!label || label === fieldEditModal.label) { setFieldEditModal(null); return; }
@@ -1153,10 +1164,10 @@ export default function SettlementInfoTab({
         return { ...t, [key]: conv };
       });
       replaceTiers(updated);
-      persist(updated);
+      persistAfterFieldDefChange(updated);
     }
     setFieldEditModal(null);
-  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persist, columnScopeMode, draftScope, replaceTiers, multiPersonSelectKeys]);
+  }, [fieldEditModal, draftLabel, draftType, draftFormula, draftFormulaResult, draftDateFormula, draftOptions, validateDraftFormula, validateDraftConditional, fields, persistFields, persistAfterFieldDefChange, columnScopeMode, draftScope, replaceTiers, multiPersonSelectKeys]);
 
   // ── 수식 빌더 도우미 ──
   // 수식 항에서 고를 수 있는 컬럼 목록 (숫자·퍼센트·수식만, 편집 중인 자기 자신은 제외)
@@ -1196,9 +1207,9 @@ export default function SettlementInfoTab({
       return copy;
     });
     replaceTiers(updated);
-    persist(updated);
+    persistAfterFieldDefChange(updated);
     setPendingDeleteFieldKey(null);
-  }, [pendingDeleteFieldKey, fields, persistFields, persist, replaceTiers]);
+  }, [pendingDeleteFieldKey, fields, persistFields, persistAfterFieldDefChange, replaceTiers]);
 
   // ── 칸 범위(공통↔커스텀) 변경 — 삭제 후 재생성 없이 그 자리에서 토글(ERP 편집기 전용) ──
   // 저장 시 서버가 공통/커스텀 보관함을 다시 가르므로 칸이 알맞은 보관함으로 옮겨진다. 입력값은 그대로 유지.
