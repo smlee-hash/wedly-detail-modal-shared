@@ -63,15 +63,26 @@ describe("NO.177 상세 카드 날짜 칸 — 입력 마무리 때 한 번 저�
       await settle();
     });
   }
+  // 뒤따르는 blur 는 칸이 아직 붙어 초점을 가진 채 와야 실제로 시험된다 — 떨어진 칸의 blur 는 아무 일도 하지 않는다.
+  function expectFocused(input: HTMLInputElement) {
+    expect(input.isConnected).toBe(true);
+    expect(document.activeElement).toBe(input);
+  }
   async function key(input: HTMLInputElement, name: string, thenBlur = false) {
     await act(async () => {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true }));
-      if (thenBlur) input.blur();
+      if (thenBlur) { expectFocused(input); input.blur(); }
       await settle();
     });
   }
   async function leave(input: HTMLInputElement) {
+    expectFocused(input);
     await act(async () => { input.blur(); await settle(); });
+  }
+  // 다른 앱·탭으로 넘어가는 동안 — 크롬은 페이지 초점부터 끄고, 칸은 활성 요소로 남긴 채 채움·blur 를 보낸다.
+  async function whilePageUnfocused(run: () => Promise<void>) {
+    const pageFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    try { await run(); } finally { pageFocus.mockRestore(); }
   }
 
   beforeEach(() => {
@@ -95,7 +106,6 @@ describe("NO.177 상세 카드 날짜 칸 — 입력 마무리 때 한 번 저�
     expect(saves[0].intent).toMatchObject({ kind: "field", tierId: "one", fieldKey: "계약일" });
     expect(JSON.parse(saves[0].raw)[0].계약일).toBe("2026-10-15");
     expect(dateInput("계약일")).toBeNull();
-    await leave(input);
     await render({ id: "one", label: "1차 계약", 계약일: "2026-10-15" });
     expect(saves).toHaveLength(1);
     expect(shown("계약일")).toBe("2026-10-15");
@@ -127,14 +137,46 @@ describe("NO.177 상세 카드 날짜 칸 — 입력 마무리 때 한 번 저�
     await render({ id: "one", 계약일: "2026-10-15" });
     const input = await open("계약일");
     await type(input, "", true); // 일에 0 — 예전: 계약일이 빈 값으로 저장
-    await act(async () => {
-      browserState(input, "2026-10-01", false); // 크롬이 칸을 떠나며 덜 넣은 일 0 을 01 로 채운다
-      input.blur();
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      await settle();
+    // 크롬 순서: 활성 요소를 먼저 비우고 → 덜 넣은 일 0 을 01 로 채워 input 을 보낸 뒤 → blur 를 보낸다.
+    Object.defineProperty(document, "activeElement", { configurable: true, get: () => document.body });
+    try {
+      await act(async () => {
+        browserState(input, "2026-10-01", false);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await settle();
+      });
+    } finally {
+      Reflect.deleteProperty(document, "activeElement");
+    }
+    await leave(input);
+    expect(saves).toEqual([]);
+    expect(shown("계약일")).toBe("2026-10-15");
+  });
+
+  it("일에 0 만 넣은 채 다른 앱·탭으로 넘어가면(칸이 활성 요소로 남은 채 01 로 채워져도) 저장하지 않는다", async () => {
+    await render({ id: "one", 계약일: "2026-10-15" });
+    const input = await open("계약일");
+    await type(input, "", true); // 일에 0
+    await whilePageUnfocused(async () => {
+      await act(async () => {
+        browserState(input, "2026-10-01", false); // 예전: 이 채움을 다 넣은 날짜로 보고 2026-10-01 저장
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await settle();
+      });
+      await leave(input);
     });
     expect(saves).toEqual([]);
     expect(shown("계약일")).toBe("2026-10-15");
+  });
+
+  it("날짜를 다 넣은 뒤 다른 앱·탭으로 넘어가면 그 날짜를 한 번 저장한다", async () => {
+    await render({ id: "one", 계약일: "2026-10-15" });
+    const input = await open("계약일");
+    await type(input, "", true); // 연도를 지웠다가
+    await type(input, "2026-11-20"); // 다시 다 넣음
+    await whilePageUnfocused(() => leave(input));
+    expect(saves).toHaveLength(1);
+    expect(JSON.parse(saves[0].raw)[0].계약일).toBe("2026-11-20");
   });
 
   it("연·월·일을 모두 지우고 나가면 빈 값을 한 번 저장한다 — 하나만 지운 동안은 저장하지 않는다", async () => {
@@ -160,6 +202,25 @@ describe("NO.177 상세 카드 날짜 칸 — 입력 마무리 때 한 번 저�
     const again = await open("계약일");
     await key(again, "Escape", true);
     expect(saves).toEqual([]);
+  });
+
+  it("달력은 칸을 열 때만 띄우고, 넣는 동안 화면을 다시 그려도(1분 설정 갱신·창 초점 등) 다시 띄우지 않는다", async () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "showPicker");
+    let pickers = 0;
+    Object.defineProperty(HTMLInputElement.prototype, "showPicker", { configurable: true, writable: true, value() { pickers += 1; } });
+    try {
+      await render({ id: "one", 계약일: "2026-10-15" });
+      const input = await open("계약일");
+      const opened = pickers;
+      expect(opened).toBeGreaterThan(0);
+      await type(input, "2026-10-20");
+      await render({ id: "one", 계약일: "2026-10-15" });
+      expect(dateInput("계약일")).toBe(input);
+      expect(pickers).toBe(opened);
+    } finally {
+      if (original) Object.defineProperty(HTMLInputElement.prototype, "showPicker", original);
+      else Reflect.deleteProperty(HTMLInputElement.prototype, "showPicker");
+    }
   });
 
   it("바꾸지 않고 나가면 저장하지 않는다 — 날짜 칸이 읽지 못하는 옛 형식 값도 지우지 않는다", async () => {

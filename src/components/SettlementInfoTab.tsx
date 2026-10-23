@@ -3559,6 +3559,12 @@ function FormulaTermsEditor({
   );
 }
 
+// 날짜 칸을 열 때 달력을 한 번만 띄운다. 칸에 함수를 새로 만들어 넘기면 부모가 다시 그릴 때마다(1분 설정 갱신·창 초점 등)
+// React 가 ref 를 다시 불러 입력 도중 달력이 다시 열린다(NO.177).
+function openDatePickerOnMount(el: HTMLInputElement | null) {
+  if (el) { try { el.showPicker?.(); } catch { /* unsupported */ } }
+}
+
 function FieldRow({
   label, description, multiPerson: multiPersonField = false, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, onSetFieldOptionColor, colorFamilies, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, unresolvedReason, guardUnchanged = false, savedBasisVersion,
 }: {
@@ -3638,12 +3644,14 @@ function FieldRow({
   };
   // 날짜 칸(NO.177) — 연·월·일을 넣는 동안·달력을 옮기는 동안에는 저장하지 않고 칸 상태만 본다.
   //   크롬은 칸 밖을 누르면 덜 넣은 일 "0"을 "01"로 채운 뒤 떠나므로, 「덜 넣음」은 칸에 머무는 동안 본 상태로 판단한다.
+  //   다른 앱·탭으로 넘어갈 때는 칸이 활성 요소로 남은 채 같은 채움이 오므로, 페이지가 초점을 가진 동안만 본다.
   //   연·월·일을 차례로 지우면 값이 빈 글자 그대로라 input 이 오지 않으므로 키를 뗄 때도 다시 본다.
   const trackDateInput = (input: HTMLInputElement, changed: boolean) => {
     const session = editSessionRef.current;
     if (!session) return;
     if (changed) session.dateTouched = true;
-    if (input.ownerDocument.activeElement === input) session.dateIncomplete = input.validity.badInput;
+    const doc = input.ownerDocument;
+    if (doc.activeElement === input && doc.hasFocus()) session.dateIncomplete = input.validity.badInput;
   };
   // Enter·칸 밖 이동 때 한 번만 저장한다. 덜 넣었거나 바뀐 것이 없으면 원래 값 그대로, 연·월·일을 모두 지웠으면 빈 값.
   const commitDateEdit = (input: HTMLInputElement) => {
@@ -3907,9 +3915,7 @@ function FieldRow({
             <input
               type="date"
               autoFocus
-              ref={(el) => {
-                if (el) { try { el.showPicker?.(); } catch { /* unsupported */ } }
-              }}
+              ref={openDatePickerOnMount}
               defaultValue={typeof value === "string" ? value : ""}
               onBlur={(e) => commitDateEdit(e.currentTarget)}
               onChange={(e) => trackDateInput(e.currentTarget, true)}
