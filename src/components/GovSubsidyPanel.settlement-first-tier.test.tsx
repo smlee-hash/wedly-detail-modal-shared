@@ -118,7 +118,11 @@ async function typeAndBlur(cardIndex: number, label: string, value: string) {
   await act(async () => field.querySelector<HTMLElement>(".cursor-pointer")!.click());
   const input = field.querySelector<HTMLInputElement>("input")!;
   expect(input).toBeTruthy();
-  input.value = value;
+  if (input.type === "date") {
+    // 날짜 칸은 입력 이벤트로 바뀐 값만 마무리 때 저장한다 — 사용자가 고른 것과 같은 순서로 넣는다.
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    await act(async () => { setter?.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  } else input.value = value;
   await act(async () => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
 }
 const buttonText = (text: string) =>
