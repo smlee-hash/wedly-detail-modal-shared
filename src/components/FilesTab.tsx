@@ -11,7 +11,7 @@
 //   - 업로드/프록시 경로는 prop 으로 조정 가능(기본값은 하이브·일루아 공통).
 // 사용 앱은 자체 위들리 디자인 토큰(bg-wedly-accent 등)을 globals.css 에 정의해야 한다.
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { cn } from "../lib/cn";
 import { isFileDrag } from "../lib/files-drag";
 import {
@@ -166,6 +166,9 @@ export function FilesTab({
   onOpenFile,
   maxUploadBytes = DEFAULT_MAX_UPLOAD_BYTES,
   resolveSizes,
+  renderFileNote,
+  renderFileActions,
+  renderFileEditor,
 }: {
   files: FileMeta[];
   pageId: string;
@@ -196,6 +199,13 @@ export function FilesTab({
   // 옛 파일(용량 미기록)의 실제 크기를 저장소에서 불러오는 콜백(선택). 키 = fileSizeKey(f).
   // 없으면 보강 안 함(하위호환). 반환 실패는 무시(용량 칸만 비고 동작 무영향).
   resolveSizes?: (items: FileMeta[]) => Promise<Record<string, number>>;
+  // 파일 행 끼움 자리(선택, NO.567 첨부 파일 이름 정리) — 안 넘기면 행은 지금 그대로다.
+  //   renderFileNote    : 이름 아래 줄, 올린 시각 옆에 붙는 작은 표시(배지 등). 링크 안이라 누르는 요소는 넣지 않는다.
+  //   renderFileActions : 분류 단추 뒤·내려받기 단추 앞의 단추들(이름 바꾸기·파일 정보 등).
+  //   renderFileEditor  : null 이 아니면 그 행을 파일 아이콘 + 이 내용으로 바꿔 그린다(이름 바로 고치기).
+  renderFileNote?: (f: FileMeta) => ReactNode;
+  renderFileActions?: (f: FileMeta) => ReactNode;
+  renderFileEditor?: (f: FileMeta) => ReactNode;
 }) {
   const [uploading, setUploading] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
@@ -542,6 +552,20 @@ export function FilesTab({
               if (f.fileName) dlParams.set("fileName", f.fileName);
               downloadHref = `${downloadApiPath}?${dlParams.toString()}`;
             }
+            const editor = renderFileEditor?.(f);
+            if (editor != null && editor !== false) {
+              return (
+                <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-wedly-bg-gray text-[13px]">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-wedly-muted flex-shrink-0">
+                    <path d="M9 2H4a1 1 0 00-1 1v10a1 1 0 001 1h8a1 1 0 001-1V6L9 2z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    <path d="M9 2v4h4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                  </svg>
+                  <div className="flex-1 min-w-0">{editor}</div>
+                </div>
+              );
+            }
+            const note = renderFileNote?.(f);
+            const hasNote = note != null && note !== false;
             return (
               <div
                 key={i}
@@ -576,6 +600,14 @@ export function FilesTab({
                     </span>
                     {(() => {
                       const ts = formatAttachedAt(f.at);
+                      if (hasNote) {
+                        return (
+                          <span data-file-note="" className="flex flex-wrap items-center gap-1.5 text-[11px] text-wedly-muted min-w-0">
+                            {ts && <span className="tabular-nums">{ts}</span>}
+                            {note}
+                          </span>
+                        );
+                      }
                       return ts ? (
                         <span className="text-[11px] text-wedly-muted truncate tabular-nums">
                           {ts}
@@ -729,6 +761,7 @@ export function FilesTab({
                     </div>
                   );
                 })()}
+                {renderFileActions?.(f)}
                 {downloadApiPath && canDownload && (
                   <a
                     href={downloadHref}
