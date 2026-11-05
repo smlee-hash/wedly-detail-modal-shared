@@ -56,6 +56,7 @@ import MultiSelectDropdownBody from "./MultiSelectDropdown";
 import { splitPersonListSafe } from "../lib/person-helpers";
 import { buildCondTargets } from "./cond-targets-helpers";
 import { typeChangeNeedsSave } from "./type-change-save";
+import { applyFeeInputEdit, feeFieldHint, feeMismatchDiff, feeMismatchMessage, isFeeInputCard, isFeeInputKey, isFeeManual } from "./fee-input-rules";
 import { appendFieldOption, setFieldOptionColorDef } from "./field-option-append";
 import { splitHiddenFields, mergeHiddenFields } from "./hidden-fields-merge";
 import {
@@ -576,6 +577,9 @@ export default function SettlementInfoTab({
     [feeContexts, fields, feeTargetForTier, row],
   );
 
+  // 경정청구 계약 카드의 「수수료·부가세·총 수수료」 입력 칸(수식 아님)이면 입력 규칙을 쓴다. 아니면 기존 동작 그대로.
+  const feeInputActive = useMemo(() => isFeeInputCard(fields), [fields]);
+
   const successField = useMemo(() => {
     return fields.find((f) =>
       f.type === "number" &&
@@ -815,6 +819,13 @@ export default function SettlementInfoTab({
     const editIntent = createTierFieldEditIntent({
       kind: "field", tiers: tiersRef.current, index: idx, fieldKey: key, shapes: tierShapesRef.current,
     });
+    if (feeInputActive && isFeeInputKey(key)) {
+      const edited = tiersRef.current.map((t, i) => i === idx ? applyFeeInputEdit(t, key, value) : t);
+      if (edited[idx] === tiersRef.current[idx]) return;
+      replaceTiers(edited);
+      persist(edited, editIntent);
+      return;
+    }
     const next = tiersRef.current.map((t, i) => i === idx ? { ...t, [key]: value } : t);
     // 서버가 수수료를 정하는 차수는 고친 칸만 바뀐다 — 옛 비율 연쇄 계산을 하지 않는다.
     const current = tiersRef.current[idx];
@@ -864,7 +875,7 @@ export default function SettlementInfoTab({
 
     replaceTiers(next);
     persist(next, editIntent);
-  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, feeContextFor, replaceTiers, readOnly, canStartSave, fieldsLoaded, resetTiersFromSaved, unsavedFirstTierDraft]);
+  }, [persist, successField, consultFeeField, revenueVatField, revenueNetField, rateForTier, feeContextFor, replaceTiers, readOnly, canStartSave, fieldsLoaded, resetTiersFromSaved, unsavedFirstTierDraft, feeInputActive]);
 
   const updateTierLabel = useCallback((idx: number, newLabel: string) => {
     if (!fieldsLoaded || readOnly) { resetTiersFromSaved(); return; }
@@ -3096,6 +3107,8 @@ function TierCard({
   multiPersonSelectKeys?: readonly string[];
 }) {
   const [open, setOpen] = useState(true);
+  // 수수료·부가세·총 수수료 입력 칸이 있는 카드 — 출처 표시와 합계 불일치 경고를 보인다.
+  const feeInput = isFeeInputCard(fields);
   // 공통 꼬리표 inline edit
   const [editingSuffix, setEditingSuffix] = useState(false);
   const [suffixDraft, setSuffixDraft] = useState(tierSuffix || "");
@@ -3261,11 +3274,16 @@ function TierCard({
                       formulaValue={formulaValue}
                       canOverride={canOverride}
                       onOverrideChange={onOverrideChange ? (v) => onOverrideChange(f.key, v) : undefined}
+                      sourceManual={feeInput && isFeeManual(tier, f.key)}
+                      sourceHint={feeInput ? feeFieldHint(tier, f.key) ?? undefined : undefined}
                     />
                   );
                 })}
               </div>
             ))
+          )}
+          {feeInput && feeMismatchDiff(tier) !== null && (
+            <div role="alert" className="text-[11px] text-wedly-red-ink break-keep">{feeMismatchMessage(feeMismatchDiff(tier) as number)}</div>
           )}
         </div>
       )}
@@ -3577,9 +3595,13 @@ function openDatePickerOnMount(el: HTMLInputElement | null) {
 }
 
 function FieldRow({
-  label, description, multiPerson: multiPersonField = false, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, onSetFieldOptionColor, colorFamilies, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, unresolvedReason, guardUnchanged = false, savedBasisVersion,
+  label, description, multiPerson: multiPersonField = false, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, onSetFieldOptionColor, colorFamilies, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, unresolvedReason, guardUnchanged = false, savedBasisVersion, sourceManual = false, sourceHint,
 }: {
   label: string;
+  /** 수수료 입력 칸을 사람이 고친 값이면 true — 기존 「(수정됨)」 배지를 같은 모양으로 보인다. */
+  sourceManual?: boolean;
+  /** 칸 아래 작은 글씨(출처·사유). 없으면 아무것도 그리지 않는다. */
+  sourceHint?: string;
   /** 여러 명 고르기 칸(NO.197) — 선택 칸일 때만 쓴다. 값은 「이름1, 이름2」 한 줄로 저장하고, 맨 앞 사람이 정산을 받는다. */
   multiPerson?: boolean;
   /** 이름표에 마우스를 올리면 뜨는 설명 — 계산 기준처럼 이름만으로 모를 것을 적는다 */
@@ -3796,12 +3818,12 @@ function FieldRow({
           title={overridden ? manualTip(`${fmtCurrency(value)}원`, formulaValue === null || formulaValue === undefined ? null : `${fmtCurrency(formulaValue)}원`) : undefined}
         >
           {fmtCurrency(value)}원
-          {overridden && manualBadge}
+          {(overridden || sourceManual) && manualBadge}
         </span>
       );
     }
     return <span>{String(value)}</span>;
-  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue, unresolvedReason, multiPerson, personNames]);
+  }, [value, dateValue, type, readOnly, isAuto, formulaResult, optionColors, overridden, formulaValue, unresolvedReason, multiPerson, personNames, sourceManual]);
 
   // 수식 컬럼은 사람이 입력하지 않음(자동 계산 읽기전용) — 단 관리자 수동 수정이 허용된 곳은 예외.
   const isEditable = !readOnly && !isAuto && (type !== "formula" || (canOverride && !!onOverrideChange));
@@ -3968,6 +3990,7 @@ function FieldRow({
           저장된 값이 바뀌어 이번 입력을 취소했습니다. 새 값을 확인한 뒤 다시 수정해 주세요.
         </div>
       )}
+      {sourceHint && <div className="text-[11px] text-wedly-muted break-keep">{sourceHint}</div>}
     </div>
   );
 }
