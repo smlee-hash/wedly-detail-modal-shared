@@ -58,6 +58,7 @@ import { buildCondTargets } from "./cond-targets-helpers";
 import { typeChangeNeedsSave } from "./type-change-save";
 import { appendFieldOption, setFieldOptionColorDef } from "./field-option-append";
 import { splitHiddenFields, mergeHiddenFields } from "./hidden-fields-merge";
+import { FeeBasisNote, feeBasisNoteOf, type FeeBasisNoteResult } from "./fee-basis-display";
 import {
   loadSettlementTiers,
   isUnsavedFirstTierDraft,
@@ -3235,6 +3236,8 @@ function TierCard({
                     : sel.state === "selected" ? sel.value
                     : sel.state === "unresolved" || sel.state === "blocked" ? null
                     : (isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null));
+                  // 정산 기준표가 차수에 저장한 비운 이유·적용 기준 글 — 사람이 고쳤거나 확정된 칸은 기준을 숨긴다.
+                  const feeNote = isDateFormula ? undefined : feeBasisNoteOf(tier, f.key, { shown: shownValue, edited: overridden, finalized: serverField?.source === "finalized" });
                   return (
                     <FieldRow
                       key={JSON.stringify([tier.id, f.key, f.type, f.formulaResult])}
@@ -3258,6 +3261,7 @@ function TierCard({
                       onSetFieldOptionColor={onSetFieldOptionColor ? (opt, color) => onSetFieldOptionColor(f.key, opt, color) : undefined}
                       colorFamilies={colorFamilies}
                       overridden={overridden}
+                      feeNote={feeNote}
                       formulaValue={formulaValue}
                       canOverride={canOverride}
                       onOverrideChange={onOverrideChange ? (v) => onOverrideChange(f.key, v) : undefined}
@@ -3577,7 +3581,7 @@ function openDatePickerOnMount(el: HTMLInputElement | null) {
 }
 
 function FieldRow({
-  label, description, multiPerson: multiPersonField = false, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, onSetFieldOptionColor, colorFamilies, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, unresolvedReason, guardUnchanged = false, savedBasisVersion,
+  label, description, multiPerson: multiPersonField = false, type, value, dateValue, onChange, readOnly = false, isAuto = false, formulaResult, options, optionColors, lockedNote, onAddFieldOption, onSetFieldOptionColor, colorFamilies, overridden = false, formulaValue = null, canOverride = false, onOverrideChange, unresolvedReason, guardUnchanged = false, savedBasisVersion, feeNote,
 }: {
   label: string;
   /** 여러 명 고르기 칸(NO.197) — 선택 칸일 때만 쓴다. 값은 「이름1, 이름2」 한 줄로 저장하고, 맨 앞 사람이 정산을 받는다. */
@@ -3613,6 +3617,8 @@ function FieldRow({
   /** 보이는 값이 서버 선택값이라 저장된 값과 다를 수 있는 칸 — 값을 안 바꾸고 초점만 떠나면 아무것도 저장하지 않는다. */
   guardUnchanged?: boolean;
   savedBasisVersion?: string;
+  /** 정산 기준표가 저장한 비운 이유·적용 기준 글 — 값 아래 작은 글로만 붙는다. */
+  feeNote?: FeeBasisNoteResult;
 }) {
   const [editing, setEditing] = useState(false);
   const [editInitialValue, setEditInitialValue] = useState("");
@@ -3963,6 +3969,7 @@ function FieldRow({
           </div>
         )}
       </div>
+      <FeeBasisNote note={feeNote} />
       {refreshNotice && (
         <div role="status" className="text-[11px] text-wedly-muted break-keep">
           저장된 값이 바뀌어 이번 입력을 취소했습니다. 새 값을 확인한 뒤 다시 수정해 주세요.
