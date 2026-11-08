@@ -48,6 +48,7 @@ import {
   bindGovFeeEdit, isSensitiveGovFeeEdit, observedFeeViewMode,
   type GovFeeEditRequestV1, type GovPolicyFieldSaveOptions,
 } from "./gov-fee-edit-binding";
+import { settlementConsultantNotice } from "./settlement-consultant-mismatch";
 import { hasNewFeeEditObservation, hasSavedTierMutation, ownerTierSavedBasis, refundReadProjectionOf, type SavedTierFieldSelection } from "./gov-save-observation";
 import type { FeeTargetForTier, FeeTierView } from "./fee-tier-display";
 import type { TierFieldEditIntentV1 } from "./tier-field-edit-intent";
@@ -139,6 +140,11 @@ export type GovSubsidyPanelConfig = {
    * 미주입이면 지금과 100% 동일(한 개 고르기) — 다른 앱과 정산·환불 탭에는 영향이 없다.
    */
   contractMultiPersonSelectKeys?: readonly string[];
+  /**
+   * true 면 정산 차수 카드의 담당 컨설턴트가 같은 회사의 계약 차수(1개일 때만)와 다를 때 카드에 한 줄 경고를 띄운다.
+   * 표시 전용 — 계산·저장·집계에 쓰지 않는다. 미주입이면 지금과 100% 동일(ERP 만 켠다).
+   */
+  settlementConsultantNotice?: boolean;
 };
 
 type SubTab = GovSubTab;
@@ -1343,7 +1349,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {shownSubTab === "settlement" && !contractLocked && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "settlement", entryId })}
-              <SettlementInfoTab key={tierSaveScopeFor("정산정보")} {...settlementCommon} {...tierSavePropsFor("정산정보")} rawValue={mergedTiers["정산정보"] ?? null} onSave={onSaveTiersFor("정산정보")} feeTargetForTier={feeTargetFor("정산정보")} storagePrefix="settlement" ensureFirstTier renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "settlement", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab key={tierSaveScopeFor("정산정보")} {...settlementCommon} {...tierSavePropsFor("정산정보")} rawValue={mergedTiers["정산정보"] ?? null} onSave={onSaveTiersFor("정산정보")} feeTargetForTier={feeTargetFor("정산정보")} storagePrefix="settlement" ensureFirstTier renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "settlement", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.settlementFieldsPath} sectionTitle="정산정보" colorFamilies={config.colorFamilies} tierNotice={config.settlementConsultantNotice ? (tier: Record<string, unknown>) => settlementConsultantNotice(tier, mergedTiers["계약정보_차수"]) : undefined} />
             </div>
           )}
 
