@@ -97,8 +97,11 @@ export function applyFeeInputEdit(tier: TierData, key: string, value: unknown): 
     delete out[feeSourceKey(key)];
     const fee = toNumber(out[FEE_KEY]);
     if (fee !== null) {
-      if (key === VAT_KEY) setCalc(VAT_KEY, vatOf(fee));
-      else setCalc(TOTAL_KEY, fee + (toNumber(out[VAT_KEY]) ?? vatOf(fee)));
+      if (key === VAT_KEY) {
+        setCalc(VAT_KEY, vatOf(fee));
+        // 총이 계산값이면 되돌린 부가세로 다시 맞춘다 — 안내문·기존·사람이 고친 총은 그대로 둔다.
+        if (readFeeSource(out, TOTAL_KEY) === "calc") setCalc(TOTAL_KEY, fee + vatOf(fee));
+      } else setCalc(TOTAL_KEY, fee + (toNumber(out[VAT_KEY]) ?? vatOf(fee)));
     }
     return out;
   }

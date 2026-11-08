@@ -99,6 +99,28 @@ describe("applyFeeInputEdit — 출처", () => {
     expect(restored[VAT_KEY]).toBe(300000);
     expect(readFeeSource(restored, VAT_KEY)).toBe("calc");
   });
+
+  it("부가세를 비우면 계산값인 총도 되돌린 부가세로 다시 맞춘다 — 안내문·사람이 고친 총은 그대로", () => {
+    // 부가세를 고친 채 수수료를 바꾸면 총(calc) = 새 수수료 + 고친 부가세. 그 뒤 부가세를 비우면 총도 다시 계산해야 한다.
+    const vatEdited = applyFeeInputEdit(applyFeeInputEdit(blank(), FEE_KEY, 3000000), VAT_KEY, 123456);
+    const feeChanged = applyFeeInputEdit(vatEdited, FEE_KEY, 4000000);
+    expect(feeChanged[TOTAL_KEY]).toBe(4123456);
+    const restored = applyFeeInputEdit(feeChanged, VAT_KEY, null);
+    expect(restored[VAT_KEY]).toBe(400000);
+    expect(restored[TOTAL_KEY]).toBe(4400000);
+    expect(readFeeSource(restored, TOTAL_KEY)).toBe("calc");
+    expect(feeMismatchDiff(restored)).toBeNull();
+
+    const totalManual = applyFeeInputEdit(feeChanged, TOTAL_KEY, 4500000);
+    const keptTotal = applyFeeInputEdit(totalManual, VAT_KEY, null);
+    expect(keptTotal[TOTAL_KEY]).toBe(4500000);
+    expect(readFeeSource(keptTotal, TOTAL_KEY)).toBe("manual");
+
+    const notice = { ...blank(), [FEE_KEY]: 4000000, [VAT_KEY]: 123456, [TOTAL_KEY]: 4123456, "_src_수수료_반올림": "notice", "_src_부가세": "manual", "_src_총수수료_부가세포함": "notice" };
+    const keptNotice = applyFeeInputEdit(notice, VAT_KEY, null);
+    expect(keptNotice[TOTAL_KEY]).toBe(4123456);
+    expect(readFeeSource(keptNotice, TOTAL_KEY)).toBe("notice");
+  });
 });
 
 describe("합계 불일치 경고·칸 아래 글", () => {
