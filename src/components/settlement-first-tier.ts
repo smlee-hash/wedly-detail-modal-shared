@@ -7,6 +7,7 @@
  * 그 첫 칸은 저장하지 않은 초안이다 — 열기·칸 불러오기·새로고침에서는 쓰지 않는다.
  */
 import { parseTiers, type FieldDef, type TierData } from "@wedly/ui-shared";
+import { carryFeeInputMeta } from "./fee-input-rules";
 
 /** 명시적 빈 목록인가 — `[]` 또는 JSON `"[]"`. 빈 글자·null 은 여기 넣지 않는다(없는 값). */
 export function isExplicitEmptyTierList(raw: unknown): boolean {
@@ -70,8 +71,9 @@ export function parseSettlementTiers(
   ensureFirstTier = false,
 ): TierData[] {
   if (ensureFirstTier && isExplicitEmptyTierList(raw)) return parseTiers(null, fields);
-  if (ensureFirstTier) return parseTiers(raw, fields);
-  return parseTiersKeepEmpty(raw, fields);
+  // 공용 parseTiers 가 버리는 수수료 출처·사유(_src_*·_nt_*)를 원문에서 되살린다 — 없으면 아무것도 안 바뀐다.
+  if (ensureFirstTier) return carryFeeInputMeta(raw, parseTiers(raw, fields));
+  return carryFeeInputMeta(raw, parseTiersKeepEmpty(raw, fields));
 }
 
 /** 저장된 차수가 없어 화면에만 있는 첫 칸 초안인가. 저장된 빈 차수 객체는 해당하지 않는다. */
