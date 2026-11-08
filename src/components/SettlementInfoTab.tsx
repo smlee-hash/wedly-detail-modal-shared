@@ -210,6 +210,7 @@ export default function SettlementInfoTab({
   conditionFieldOptions,
   enableConditionalFormula,
   renderTierBadge,
+  readOnlyFieldKeys,
 }: {
   rawValue: unknown;
   row?: RowData | null;
@@ -271,6 +272,8 @@ export default function SettlementInfoTab({
    * 미주입이면 지금과 100% 동일 — 주입하는 앱에서만 보인다(ERP 파트너 정산 뱃지용).
    */
   renderTierBadge?: (index: number, tierId: string, tierIdDuplicated?: boolean) => ReactNode;
+  /** 이 앱에서 읽기만 되는 차수 칸의 키(예: 하이브의 수수료 3칸). 카드 전체는 그대로 편집 가능하고 이 칸들만 잠근다. */
+  readOnlyFieldKeys?: readonly string[];
 }) {
   // 단계 A2 + B (구조 개선) — 세부 섹션을 탭 형태로 표시.
   //   subSections 가 비어 있으면 옛 동작 그대로 (탭 줄 안 보임)
@@ -2063,6 +2066,7 @@ export default function SettlementInfoTab({
             rowLayout={rowLayout}
             conditionValues={row ?? undefined}
             onAddFieldOption={canEditColumns ? addOptionToField : undefined}
+            readOnlyFieldKeys={readOnlyFieldKeys}
           />
         );
 
@@ -2795,7 +2799,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, readOnlyFieldKeys,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -2825,6 +2829,8 @@ function TierCard({
   tierIdDuplicated?: boolean;
   /** 선택 칸에 새 보기를 칸 정의에 영구 저장. 없으면 드롭다운에 추가 단추를 안 그린다. */
   onAddFieldOption?: (fieldKey: string, opt: string) => void;
+  /** SettlementInfoTab 의 같은 이름 prop — 이 키의 칸만 읽기 전용으로 그린다. */
+  readOnlyFieldKeys?: readonly string[];
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -2951,7 +2957,7 @@ function TierCard({
                       type={f.type}
                       value={isDateFormula ? null : (isFormula ? evalFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : (tier[f.key] ?? null))}
                       dateValue={isDateFormula ? evalDateFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : undefined}
-                      readOnly={readOnly || lock.locked}
+                      readOnly={readOnly || lock.locked || !!readOnlyFieldKeys?.includes(f.key)}
                       lockedNote={lock.locked ? lock.note : undefined}
                       isAuto={!isFormula && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       formulaResult={f.formulaResult}
