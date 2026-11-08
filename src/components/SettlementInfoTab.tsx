@@ -13,6 +13,7 @@ import { filledFieldCount } from "./gov-merged-tiers";
 import { displayOrderNewestFirst } from "./tier-render-order";
 import { tierFieldLock, carryFieldLock } from "./tier-field-lock";
 import { tierFieldHidden, carryFieldHidden, visibleTierLayout } from "./tier-field-hidden";
+import { tierFieldHiddenByZeroValue, zeroHiddenFieldValue } from "./tier-field-zero-hidden";
 import { roundTermIssue, chainKind, applyTermPatch } from "./round-term-rules";
 import { createPortal } from "react-dom";
 import {
@@ -242,6 +243,7 @@ export default function SettlementInfoTab({
   renderTierBadge,
   colorFamilies,
   multiPersonSelectKeys,
+  tierNotice,
 }: {
   rawValue: unknown;
   row?: RowData | null;
@@ -334,6 +336,8 @@ export default function SettlementInfoTab({
    * — 맨 앞 사람이 정산을 받는다. 미주입이면 지금과 100% 동일(한 개 고르기). ERP 정부지원금 계약정보만 켠다.
    */
   multiPersonSelectKeys?: readonly string[];
+  /** 차수 카드 제목 아래에 한 줄 안내를 띄운다(표시 전용 — 계산·저장에 쓰지 않는다). null 이면 안 띄운다. 미주입이면 지금과 100% 동일. */
+  tierNotice?: (tier: TierData, index: number) => string | null;
 }) {
   const readOnly = readOnlyProp || saveInProgress;
   // 현재 경로에서 한 번이라도 성공한 칸 정의만 저장에 쓴다. 같은 경로의 갱신 실패는 기존 정의를 유지한다.
@@ -2268,6 +2272,7 @@ export default function SettlementInfoTab({
             onSetFieldOptionColor={canEditColumns ? setFieldOptionColor : undefined}
             colorFamilies={colorFamilies}
             multiPersonSelectKeys={multiPersonSelectKeys}
+            notice={tierNotice?.(tier, idx) ?? null}
           />
         );
 
@@ -3056,7 +3061,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, feeContext = LEGACY_FEE_CONTEXT, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, onSetFieldOptionColor, colorFamilies, savedBasisVersion, multiPersonSelectKeys,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, feeContext = LEGACY_FEE_CONTEXT, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, onSetFieldOptionColor, colorFamilies, savedBasisVersion, multiPersonSelectKeys, notice = null,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -3094,6 +3099,8 @@ function TierCard({
   colorFamilies?: SelectDropdownColorFamily[];
   /** 여러 명 고르기 선택 칸의 키 — SettlementInfoTab 의 같은 이름 prop 을 그대로 받는다 */
   multiPersonSelectKeys?: readonly string[];
+  /** 제목 아래에 띄울 한 줄 안내(표시 전용). 없으면 아무것도 안 그린다. */
+  notice?: string | null;
 }) {
   const [open, setOpen] = useState(true);
   // 공통 꼬리표 inline edit
@@ -3125,9 +3132,11 @@ function TierCard({
 
   // 정의는 그대로 두고 그릴 목록·배치만 다시 계산한다. 숨긴 칸을 정의에서 빼면
   // 다음 저장 때 값이 사라지고 수식이 0 으로 틀어진다.
+  // 올카데미 계약금 수수료처럼 "이 차수 값이 0이 아닐 때만" 보이는 칸은 차수마다 따로 거른다(저장·합계는 그대로).
   const visible = useMemo(
-    () => visibleTierLayout(fields, rowLayout, (f) => tierFieldHidden(f)),
-    [fields, rowLayout],
+    () => visibleTierLayout(fields, rowLayout, (f) => tierFieldHidden(f)
+      || tierFieldHiddenByZeroValue(f, zeroHiddenFieldValue(f, tier, fields, feeContext, conditionValues ?? undefined))),
+    [fields, rowLayout, tier, feeContext, conditionValues],
   );
 
   return (
@@ -3183,6 +3192,11 @@ function TierCard({
           )}
         </div>
       </div>
+      {notice && (
+        <p role="note" className="px-4 py-2 text-[12px] text-wedly-t1 bg-wedly-bg-yellow border-b border-wedly-gold/40 leading-relaxed">
+          {notice}
+        </p>
+      )}
       {/* 차수 카드 칸 배치 — 줄별 칸 수(rowLayout)대로 가로 묶음. 위에서부터 채우고, 남는 칸은 한 줄 1칸씩. */}
       {/* 칸이 전부 숨김이면 몸통 자체를 그리지 않는다 — 안 그러면 제목 아래 빈 여백만 남는다.
           (칸이 진짜로 0개인 경우와는 다르다. 그때는 아래 안내를 띄운다.) */}
