@@ -243,6 +243,7 @@ export default function SettlementInfoTab({
   renderTierBadge,
   colorFamilies,
   multiPersonSelectKeys,
+  readOnlyFieldKeys,
 }: {
   rawValue: unknown;
   row?: RowData | null;
@@ -335,6 +336,8 @@ export default function SettlementInfoTab({
    * — 맨 앞 사람이 정산을 받는다. 미주입이면 지금과 100% 동일(한 개 고르기). ERP 정부지원금 계약정보만 켠다.
    */
   multiPersonSelectKeys?: readonly string[];
+  /** 이 앱에서 읽기만 되는 차수 칸의 키(예: 하이브의 수수료 3칸). 카드 전체는 그대로 편집 가능하고 이 칸들만 잠근다. */
+  readOnlyFieldKeys?: readonly string[];
 }) {
   const readOnly = readOnlyProp || saveInProgress;
   // 현재 경로에서 한 번이라도 성공한 칸 정의만 저장에 쓴다. 같은 경로의 갱신 실패는 기존 정의를 유지한다.
@@ -2279,6 +2282,7 @@ export default function SettlementInfoTab({
             onSetFieldOptionColor={canEditColumns ? setFieldOptionColor : undefined}
             colorFamilies={colorFamilies}
             multiPersonSelectKeys={multiPersonSelectKeys}
+            readOnlyFieldKeys={readOnlyFieldKeys}
           />
         );
 
@@ -3067,7 +3071,7 @@ function groupFieldsByRowLayout<T>(items: T[], rowLayout: number[]): { cols: 1 |
 
 function TierCard({
   tier, fields, index, canRemove, readOnly, autoFeeKey, autoRevenueVatKey, autoRevenueNetKey, successKey, onChange, onLabelChange, onRemove,
-  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, feeContext = LEGACY_FEE_CONTEXT, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, onSetFieldOptionColor, colorFamilies, savedBasisVersion, multiPersonSelectKeys,
+  tierSuffix, onTierSuffixChange, rowLayout = [], conditionValues, feeContext = LEGACY_FEE_CONTEXT, allowOverride = false, onOverrideChange, renderTierBadge, tierIdDuplicated, onAddFieldOption, onSetFieldOptionColor, colorFamilies, savedBasisVersion, multiPersonSelectKeys, readOnlyFieldKeys,
 }: {
   tier: TierData;
   fields: FieldDef[];
@@ -3105,6 +3109,8 @@ function TierCard({
   colorFamilies?: SelectDropdownColorFamily[];
   /** 여러 명 고르기 선택 칸의 키 — SettlementInfoTab 의 같은 이름 prop 을 그대로 받는다 */
   multiPersonSelectKeys?: readonly string[];
+  /** SettlementInfoTab 의 같은 이름 prop — 이 키의 칸만 읽기 전용으로 그린다. */
+  readOnlyFieldKeys?: readonly string[];
 }) {
   const [open, setOpen] = useState(true);
   // 수수료·부가세·총 수수료 입력 칸이 있는 카드 — 출처 표시와 합계 불일치 경고를 보인다.
@@ -3257,7 +3263,7 @@ function TierCard({
                       type={f.type}
                       value={shownValue}
                       dateValue={isDateFormula ? evalDateFormulaForTier(f, tier, fields, undefined, conditionValues ?? undefined) : undefined}
-                      readOnly={readOnly || lock.locked}
+                      readOnly={readOnly || lock.locked || !!readOnlyFieldKeys?.includes(f.key)}
                       lockedNote={lock.locked ? lock.note : undefined}
                       isAuto={!isFormula && sel.state === "legacy" && (autoFeeKey === f.key || autoRevenueVatKey === f.key || autoRevenueNetKey === f.key)}
                       unresolvedReason={sel.state === "unresolved" ? sel.message : undefined}
