@@ -1,7 +1,65 @@
 {
+  "src/components/FilesTab.row-slots.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 5
+    }
+  },
   "src/components/FilesTab.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
+    },
+    "wedly/require-disable-reason": {
+      "count": 1
+    }
+  },
+  "src/components/GovSubsidyPanel.anchor-change.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/GovSubsidyPanel.consultant-notice.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/GovSubsidyPanel.contract-lock.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/GovSubsidyPanel.fee-transport.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/GovSubsidyPanel.first-owner-fee.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/GovSubsidyPanel.multi-person-keys.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/GovSubsidyPanel.refund-context-ack.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 3
+    }
+  },
+  "src/components/GovSubsidyPanel.save-ack-port.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 2
+    }
+  },
+  "src/components/GovSubsidyPanel.save-recovery.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 3
+    }
+  },
+  "src/components/GovSubsidyPanel.settlement-first-tier.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 8
     }
   },
   "src/components/GovSubsidyPanel.tsx": {
@@ -10,10 +68,46 @@
     },
     "react-hooks/exhaustive-deps": {
       "count": 1
+    },
+    "wedly/no-double-cast": {
+      "count": 2
+    },
+    "wedly/require-disable-reason": {
+      "count": 4
     }
   },
   "src/components/MultiPersonEditor.tsx": {
     "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    }
+  },
+  "src/components/SelectDropdown.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 4
+    }
+  },
+  "src/components/SettlementInfoTab.blocked-summary.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/SettlementInfoTab.consultant-multi.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 17
+    }
+  },
+  "src/components/SettlementInfoTab.definition-loading.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/SettlementInfoTab.public-fee.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 4
+    }
+  },
+  "src/components/SettlementInfoTab.split-fee-cards.test.tsx": {
+    "wedly/no-weak-assertion": {
       "count": 1
     }
   },
@@ -26,6 +120,27 @@
     },
     "react-hooks/exhaustive-deps": {
       "count": 5
+    },
+    "wedly/no-double-cast": {
+      "count": 14
+    },
+    "wedly/require-disable-reason": {
+      "count": 2
+    }
+  },
+  "src/components/fee-basis-display.test.tsx": {
+    "wedly/no-weak-assertion": {
+      "count": 1
+    }
+  },
+  "src/components/fee-tier-display.ts": {
+    "wedly/no-double-cast": {
+      "count": 6
+    }
+  },
+  "src/components/field-option-append.test.ts": {
+    "wedly/no-weak-assertion": {
+      "count": 3
     }
   }
 }
