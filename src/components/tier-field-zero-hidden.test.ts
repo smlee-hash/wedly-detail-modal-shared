@@ -17,6 +17,15 @@ describe("값이 0이 아닐 때만 보이는 칸 — 칸 고르기", () => {
     expect(tierFieldHiddenWhenZero(OLCADEMY)).toBe(true);
   });
 
+  it("올카데미 환불 수수료 칸도 계약금과 같은 규칙을 받는다", () => {
+    const refund = { key: "[올카데미]_환불_수수료", label: "[올카데미] 환불 수수료", type: "text" } as FieldDef;
+    expect(tierFieldHiddenWhenZero(refund)).toBe(true);
+    expect(tierFieldHiddenByZeroValue(refund, "0")).toBe(true);
+    expect(tierFieldHiddenByZeroValue(refund, null)).toBe(true);
+    expect(tierFieldHiddenByZeroValue(refund, "-200,000")).toBe(false);
+    expect(tierFieldHiddenByZeroValue(refund, -200000)).toBe(false);
+  });
+
   it("다른 칸은 값이 0이어도 이 규칙을 받지 않는다", () => {
     expect(tierFieldHiddenWhenZero(CONSULTANT)).toBe(false);
     expect(tierFieldHiddenWhenZero({ key: "계약금", type: "number" })).toBe(false);
