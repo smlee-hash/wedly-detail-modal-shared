@@ -2,7 +2,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // tier-field-hidden.ts 의 hidden 은 칸을 모든 차수에서 항상 감춘다. 이 파일은 그 옆에서,
 // 같은 칸이라도 그 차수의 값이 0이거나 비었으면 감추고 0이 아니면 보이게 한다.
-// (정부지원금 계약 차수의 [올카데미] 계약금 수수료 — 몫이 있는 차수에서만 보인다.)
+// (정부지원금 계약 차수의 [올카데미] 계약금 수수료, 환불 차수의 [올카데미] 환불 수수료 — 몫이 있는 차수에서만 보인다.)
 //
 // 감춰도 칸 정의·저장값·합계는 그대로다. 그릴 때만 거른다 — 집계와 위들리 몫(나머지) 계산은 이 파일과 무관하다.
 // 규칙을 받는 칸이 아니면 값을 계산하지도 않아 다른 칸의 화면은 한 톨도 달라지지 않는다.
@@ -10,8 +10,9 @@
 import { evalFormulaForTier, type FieldDef, type TierData } from "@wedly/ui-shared";
 import type { FeeTierContext } from "./fee-tier-display";
 
-/** 칸 정의에 표시(hideWhenZero)를 붙이지 않아도 기본으로 이 규칙을 받는 칸. 기준표 재등록이 칸 정의를 새로 써도 유지된다. */
-const ZERO_HIDDEN_FIELD_KEYS: ReadonlySet<string> = new Set(["[올카데미]_계약금_수수료"]);
+/** 칸 정의에 표시(hideWhenZero)를 붙이지 않아도 기본으로 이 규칙을 받는 칸. 기준표 재등록이 칸 정의를 새로 써도 유지된다.
+ *  환불 칸은 계약금 칸과 같은 규칙을 받는다(정산 요청 3 — 환불도 계약금과 같은 규칙으로 답받음). */
+const ZERO_HIDDEN_FIELD_KEYS: ReadonlySet<string> = new Set(["[올카데미]_계약금_수수료", "[올카데미]_환불_수수료"]);
 
 export function tierFieldHiddenWhenZero(field: unknown): boolean {
   if (!field || typeof field !== "object") return false;
