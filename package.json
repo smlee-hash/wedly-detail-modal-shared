@@ -30,7 +30,7 @@
     "@eslint/js": "9.39.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@wedly/eslint-plugin": "github:smlee-hash/wedly-eslint-plugin#a76f722a168c87508439dcc345999e87444426aa",
+    "@wedly/eslint-plugin": "github:smlee-hash/wedly-eslint-plugin#734991d2253cd0d8de5d8bab5d205cc05b74335d",
     "eslint": "9.39.4",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "14.0.0",
