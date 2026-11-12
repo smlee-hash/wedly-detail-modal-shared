@@ -27,7 +27,7 @@ export type { GovFeeEditRequestV1, GovPolicyFieldSaveOptions } from "./component
 export { default as SectionSettlementTab } from "./components/SectionSettlementTab";
 
 export { FilesTab, detectFileTag } from "./components/FilesTab";
-export type { FileMeta } from "./components/FilesTab";
+export type { FileMeta, FileRowExtras } from "./components/FilesTab";
 
 // 파일 용량 표기·키 헬퍼 — 앱 패널이 옛 파일 용량 보강(resolveSizes) 연결에 사용.
 export {
