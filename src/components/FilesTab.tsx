@@ -78,6 +78,18 @@ export interface FileMeta {
   at?: string;
 }
 
+// 파일 행 줄 끝 자리(NO.732 PPT 재생성) — getRowExtras 가 행마다 돌려준다. 모든 필드 선택.
+export interface FileRowExtras {
+  // 이름 아래 줄을 이것으로 바꾼다(올린 시각·renderFileNote 대신). 링크 안이라 누르는 요소는 넣지 않는다.
+  sub?: ReactNode;
+  // 이름 링크 바로 뒤·크기 앞. 감싸지 않으니 폭·줄임은 넘기는 쪽이 정한다.
+  action?: ReactNode;
+  // false 면 「파일 제거」 단추 대신 같은 폭(24px) 빈칸을 둔다(열을 맞추려고).
+  removable?: boolean;
+  // true 면 분류를 누를 수 없는 글로 보인다(분류 이름은 그대로).
+  categoryLocked?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // 파일 태그 (파일명 키워드 → 자동 분류 + 색상 배지)
 // ---------------------------------------------------------------------------
@@ -169,6 +181,7 @@ export function FilesTab({
   renderFileNote,
   renderFileActions,
   renderFileEditor,
+  getRowExtras,
 }: {
   files: FileMeta[];
   pageId: string;
@@ -206,6 +219,9 @@ export function FilesTab({
   renderFileNote?: (f: FileMeta) => ReactNode;
   renderFileActions?: (f: FileMeta) => ReactNode;
   renderFileEditor?: (f: FileMeta) => ReactNode;
+  // 줄 끝 자리(선택, NO.732 PPT 재생성) — 행마다 상태 글(sub)·단추(action)·제거 가능 여부·분류 잠금을 받는다.
+  // 안 넘기거나 null·빈 객체면 그 행은 지금 그대로다. renderFileEditor 가 그리는 행에서는 부르지 않는다.
+  getRowExtras?: (f: FileMeta) => FileRowExtras | null;
 }) {
   const [uploading, setUploading] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
@@ -340,6 +356,8 @@ export function FilesTab({
     const file = pendingRemove;
     setPendingRemove(null);
     if (!file) return;
+    // 확인 창이 열린 사이 그 행이 잠겼으면(예: 재생성 시작) 빼지 않는다 — 「제거」 단추가 사라진 행을 확인 창이 지우면 안 된다.
+    if (getRowExtras?.(file)?.removable === false) return;
     const next = files.filter((f) => f !== file);
     onFilesChange(next);
   };
@@ -566,6 +584,13 @@ export function FilesTab({
             }
             const note = renderFileNote?.(f);
             const hasNote = note != null && note !== false;
+            // 줄 끝 자리 — 에디터 행은 위에서 이미 돌려보냈으니 여기서만 부른다.
+            // 효과는 sub·action 이 있을 때, removable === false·categoryLocked === true 일 때만(그 밖엔 지금 그대로).
+            const extras = getRowExtras?.(f) ?? null;
+            const sub = extras?.sub;
+            const hasSub = sub != null && sub !== false;
+            const categoryLocked = extras?.categoryLocked === true;
+            const removeSpacer = extras?.removable === false;
             return (
               <div
                 key={i}
@@ -599,6 +624,14 @@ export function FilesTab({
                       {f.fileName || "파일"}
                     </span>
                     {(() => {
+                      // sub 가 있으면 이 줄을 통째로 바꾼다(올린 시각·renderFileNote 는 그리지 않음).
+                      if (hasSub) {
+                        return (
+                          <span data-file-sub="" className="flex flex-wrap items-center gap-1.5 text-[11px] text-wedly-muted min-w-0">
+                            {sub}
+                          </span>
+                        );
+                      }
                       const ts = formatAttachedAt(f.at);
                       if (hasNote) {
                         return (
@@ -616,6 +649,7 @@ export function FilesTab({
                     })()}
                   </span>
                 </a>
+                {extras?.action}
                 {(() => {
                   const s = sizeOf(f);
                   return typeof s === "number" && s >= 0 ? (
@@ -635,6 +669,20 @@ export function FilesTab({
                     const raw = (f.category || "").trim();
                     const shown = (raw && raw !== "기타자료") ? raw : "기타";
                     const color = colorForCategory(shown);
+                    // 잠근 행 — 단추·드롭다운 없이 글만(editingCategoryIdx 를 바꿀 길이 없다).
+                    if (categoryLocked) {
+                      return (
+                        <span
+                          data-file-category-locked=""
+                          className={cn(
+                            "flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded font-semibold border whitespace-nowrap",
+                            color.bg, color.text, color.border,
+                          )}
+                        >
+                          {shown}
+                        </span>
+                      );
+                    }
                     // 드롭다운 옵션 = 실제 카테고리 목록 + (현재값이 목록에 없으면 추가) + "기타"
                     const opts = [...categoryOptions!];
                     if (shown && shown !== "기타" && !opts.includes(shown)) opts.unshift(shown);
@@ -707,6 +755,19 @@ export function FilesTab({
                     ? f.category
                     : (detected !== "기타자료" ? detected : "기타자료");
                   const tag = getFileTagDef(tagKey);
+                  if (categoryLocked) {
+                    return (
+                      <span
+                        data-file-category-locked=""
+                        className={cn(
+                          "flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded font-semibold border whitespace-nowrap",
+                          tag.bg, tag.text, tag.border,
+                        )}
+                      >
+                        {tag.label}
+                      </span>
+                    );
+                  }
                   return (
                     <div
                       className="relative flex-shrink-0"
@@ -776,7 +837,10 @@ export function FilesTab({
                     </svg>
                   </a>
                 )}
-                {canRemove && (
+                {removeSpacer ? (
+                  // 제거를 막은 행 — 단추 자리만 비워 다른 행과 열을 맞춘다.
+                  <span data-file-remove-spacer="" aria-hidden="true" className="w-6 h-6 flex-shrink-0" />
+                ) : canRemove && (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setPendingRemove(f); }}
