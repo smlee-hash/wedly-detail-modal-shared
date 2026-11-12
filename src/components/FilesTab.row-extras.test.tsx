@@ -6,9 +6,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilesTab, type FileMeta } from "./FilesTab";
 
+// 올린 때는 UTC 정오 — 실행 시간대가 UTC±11 안이면 날짜가 같게 그려진다.
 const FILES: FileMeta[] = [
-  { fileName: "회사소개.pptx", url: "/api/upload/11111111-1111-1111-1111-111111111111", category: "기타자료", at: "2026-11-12T02:20:00.000Z", size: 2048 },
-  { fileName: "계약서.pdf", url: "/api/upload/22222222-2222-2222-2222-222222222222", category: "계약서", at: "2026-11-11T00:41:00.000Z", size: 1024 },
+  { fileName: "회사소개.pptx", url: "/api/upload/11111111-1111-1111-1111-111111111111", category: "기타자료", at: "2026-11-12T12:00:00.000Z", size: 2048 },
+  { fileName: "계약서.pdf", url: "/api/upload/22222222-2222-2222-2222-222222222222", category: "계약서", at: "2026-11-11T12:00:00.000Z", size: 1024 },
 ];
 
 describe("FilesTab — 줄 끝 자리(getRowExtras)", () => {
@@ -97,6 +98,20 @@ describe("FilesTab — 줄 끝 자리(getRowExtras)", () => {
     expect(spacer.getAttribute("aria-hidden")).toBe("true");
     expect(spacer.className).toContain("w-6");
     expect(pdf.querySelectorAll("button[aria-label='파일 제거']").length).toBe(1);
+  });
+
+  it("제거 확인 창이 열린 뒤 removable:false 로 바뀐 행은 「제거」를 눌러도 목록에서 빠지지 않는다", async () => {
+    let locked = false;
+    const onFilesChange = vi.fn();
+    const extras = (f: FileMeta) => (f.fileName === "회사소개.pptx" && locked ? { removable: false } : null);
+    await render({ onFilesChange, getRowExtras: extras });
+    await act(async () => rows()[0].querySelector<HTMLButtonElement>("button[aria-label='파일 제거']")!.click());
+    locked = true;
+    await render({ onFilesChange, getRowExtras: extras });
+    const confirm = [...container.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "제거")!;
+    await act(async () => confirm.click());
+    expect(onFilesChange).not.toHaveBeenCalled();
+    expect([...container.querySelectorAll("h3")].some((h) => h.textContent === "파일 제거")).toBe(false);
   });
 
   it("categoryLocked 면 분류는 누를 수 없는 글로 보인다(분류 이름은 그대로)", async () => {

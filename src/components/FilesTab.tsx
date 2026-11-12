@@ -356,6 +356,8 @@ export function FilesTab({
     const file = pendingRemove;
     setPendingRemove(null);
     if (!file) return;
+    // 확인 창이 열린 사이 그 행이 잠겼으면(예: 재생성 시작) 빼지 않는다 — 「제거」 단추가 사라진 행을 확인 창이 지우면 안 된다.
+    if (getRowExtras?.(file)?.removable === false) return;
     const next = files.filter((f) => f !== file);
     onFilesChange(next);
   };
