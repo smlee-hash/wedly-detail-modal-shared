@@ -8,6 +8,9 @@
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     },
+    "wedly/require-disable-expiry": {
+      "count": 1
+    },
     "wedly/require-disable-reason": {
       "count": 1
     }
@@ -72,6 +75,9 @@
     "wedly/no-double-cast": {
       "count": 2
     },
+    "wedly/require-disable-expiry": {
+      "count": 4
+    },
     "wedly/require-disable-reason": {
       "count": 4
     }
@@ -123,6 +129,9 @@
     },
     "wedly/no-double-cast": {
       "count": 14
+    },
+    "wedly/require-disable-expiry": {
+      "count": 2
     },
     "wedly/require-disable-reason": {
       "count": 2

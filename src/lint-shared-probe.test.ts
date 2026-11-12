@@ -9,14 +9,14 @@ import { probe } from "@wedly/eslint-plugin/probe";
 const ROOT = decodeURIComponent(new URL("..", import.meta.url).pathname);
 
 describe("공용 린트 꾸러미가 공용 상세창 꾸러미(detail-modal-shared) 린트 설정에 연결돼 있다", () => {
-  it("규칙 다섯 개가 모두 꾸러미의 규칙으로 오류가 된다", async () => {
+  it("규칙 여섯 개가 모두 꾸러미의 규칙으로 오류가 된다", async () => {
     const results = await probe(new ESLint({ cwd: ROOT }), {
       cwd: ROOT,
       code: "src/_lint_probe.ts",
       test: "src/_lint_probe.test.ts",
     });
     expect(results.map((r) => ({ rule: r.rule, caught: r.caught, copy: r.copy, ignored: r.ignored, error: r.error }))).toEqual(
-      ["require-disable-reason", "no-shared-deep-import", "no-double-cast", "no-weak-assertion", "no-console"].map((rule) => ({
+      ["require-disable-reason", "require-disable-expiry", "no-shared-deep-import", "no-double-cast", "no-weak-assertion", "no-console"].map((rule) => ({
         rule,
         caught: true,
         copy: false,
