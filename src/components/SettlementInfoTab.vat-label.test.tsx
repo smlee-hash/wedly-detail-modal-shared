@@ -20,6 +20,7 @@ describe("splitVatLabel — 이름 끝 「(VAT 제외)」만 뗀다", () => {
     expect(splitVatLabel("총 수수료(VAT 포함)")).toEqual({ name: "총 수수료(VAT 포함)", vatExcluded: false });
     expect(splitVatLabel("부가세")).toEqual({ name: "부가세", vatExcluded: false });
     expect(splitVatLabel("(VAT 제외) 메모")).toEqual({ name: "(VAT 제외) 메모", vatExcluded: false });
+    expect(splitVatLabel("(VAT 제외)")).toEqual({ name: "(VAT 제외)", vatExcluded: false }); // 떼면 이름이 비므로 그대로
   });
 });
 
@@ -52,6 +53,7 @@ describe("차수 카드 — 칸 이름의 VAT 표기", () => {
       { key: "수수료_반올림", label: "수수료(VAT 제외)", type: "number" },
       { key: "총수수료_부가세포함", label: "총 수수료(VAT 포함)", type: "number" },
       { key: "부가세", label: "부가세", type: "number" },
+      { key: "합계", label: "합계(VAT 제외)", type: "formula", formula: [{ op: "+", unit: "column", columnKey: "부가세" }] },
     ];
     error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -74,6 +76,7 @@ describe("차수 카드 — 칸 이름의 VAT 표기", () => {
       expect(tags[0].className).toContain("text-wedly-muted");
       expect(tags[0].className).toContain("text-[10px]");
     }
+    expect(labelLine("합계(VAT 제외)").textContent).toBe("합계VAT 제외(수식)"); // 「VAT 제외」는 (수식) 앞
   });
 
   it("「(VAT 포함)」 칸과 표시 없는 칸은 이름을 그대로 두고 「VAT 제외」를 붙이지 않는다", async () => {

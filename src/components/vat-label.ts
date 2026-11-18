@@ -6,5 +6,6 @@ const VAT_EXCLUDED_SUFFIX = /\s*\(VAT\s*제외\)\s*$/;
 
 export function splitVatLabel(label: string): { name: string; vatExcluded: boolean } {
   if (!VAT_EXCLUDED_SUFFIX.test(label)) return { name: label, vatExcluded: false };
-  return { name: label.replace(VAT_EXCLUDED_SUFFIX, ""), vatExcluded: true };
+  const name = label.replace(VAT_EXCLUDED_SUFFIX, "");
+  return name ? { name, vatExcluded: true } : { name: label, vatExcluded: false }; // 떼면 이름이 비면 그대로 둔다
 }
