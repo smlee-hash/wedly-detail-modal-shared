@@ -61,6 +61,7 @@ import { applyFeeInputEdit, feeFieldHint, feeMismatchDiff, feeMismatchMessage, i
 import { appendFieldOption, setFieldOptionColorDef } from "./field-option-append";
 import { splitHiddenFields, mergeHiddenFields } from "./hidden-fields-merge";
 import { FeeBasisNote, feeBasisNoteOf, type FeeBasisNoteResult } from "./fee-basis-display";
+import { splitVatLabel } from "./vat-label";
 import {
   loadSettlementTiers,
   isUnsavedFirstTierDraft,
@@ -3854,10 +3855,13 @@ function FieldRow({
   // 수식 컬럼은 사람이 입력하지 않음(자동 계산 읽기전용) — 단 관리자 수동 수정이 허용된 곳은 예외.
   const isEditable = !readOnly && !isAuto && (type !== "formula" || (canOverride && !!onOverrideChange));
 
+  // NO.771: 이름 끝 「(VAT 제외)」는 떼고 작은 회색 「VAT 제외」로 — title 은 저장된 이름 전체 그대로.
+  const vatLabel = splitVatLabel(label);
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-wedly-bd/40 bg-wedly-bg-gray/20 px-3 py-2 min-h-[58px]">
       <div className="text-[11px] text-wedly-muted truncate" title={description ? `${label} — ${description}` : label}>
-        {label}
+        {vatLabel.name}
+        {vatLabel.vatExcluded && <span className="ml-1 text-[10px] text-wedly-muted">VAT 제외</span>}
         {isAuto && <span className="ml-1 text-[10px] text-wedly-accent">(자동)</span>}
         {type === "formula" && <span className="ml-1 text-[10px] text-wedly-purple">(수식)</span>}
         {lockedNote && <span className="ml-1 text-[10px] text-wedly-muted">({lockedNote})</span>}
