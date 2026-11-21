@@ -27,7 +27,7 @@ function refundOwner({ entryId = "first", flag = true, contractId = "contract-on
 }
 const asRows = (owners: unknown[]) => owners as unknown as SectionPanelProps["rows"];
 const sleep = () => new Promise((resolve) => setTimeout(resolve, 20));
-const addButton = () => [...host.querySelectorAll("button")].find((b) => /^\+ .*정산 추가$/.test(b.textContent ?? ""));
+const addButton = () => [...host.querySelectorAll("button")].find((b) => /^\+ .*환불 추가$/.test(b.textContent ?? ""));
 const saving = () => (host.textContent ?? "").includes("저장 중");
 const sentTiers = (save: Save) => JSON.parse(save.mock.calls[0][2] as string) as Row[];
 
@@ -75,6 +75,14 @@ it("active refund context acknowledges a second new tier while the first keeps i
     { ...added, ...serverRead, _contractTierId: "contract-one" },
   ] })]);
   expect(saving()).toBe(false); expect(addButton()).toBeTruthy();
+});
+
+// 환불 탭 추가 단추는 「+ N차 환불 추가」다(2026-11-19 이아영 재작업 6 — 정산 탭과 같은 「정산 추가」로 보이던 것).
+it("환불 탭 추가 단추는 「+ 2차 환불 추가」이고 「정산 추가」로 보이지 않는다", async () => {
+  await mountRefund([refundOwner({ refund: [persisted] })], saveMock());
+  const labels = [...host.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
+  expect(labels).toContain("+ 2차 환불 추가");
+  expect(labels.some((t) => t.endsWith("정산 추가"))).toBe(false);
 });
 
 const strictCases: Array<[string, boolean, (added: Row) => Row]> = [
