@@ -1356,7 +1356,7 @@ export function createGovSubsidyPanel(config: GovSubsidyPanelConfig) {
           {shownSubTab === "refund" && !contractLocked && (
             <div className="p-4">
               {config.renderSubTabHeader?.({ subTab: "refund", entryId })}
-              <SettlementInfoTab key={tierSaveScopeFor("환불정보_차수")} {...settlementCommon} {...tierSavePropsFor("환불정보_차수")} rawValue={mergedTiers["환불정보_차수"] ?? null} onSave={onSaveTiersFor("환불정보_차수")} storagePrefix="refund" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "refund", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
+              <SettlementInfoTab key={tierSaveScopeFor("환불정보_차수")} {...settlementCommon} {...tierSavePropsFor("환불정보_차수")} rawValue={mergedTiers["환불정보_차수"] ?? null} onSave={onSaveTiersFor("환불정보_차수")} storagePrefix="refund" addButtonSuffixOverride="환불" renderTierBadge={config.renderTierBadge ? (i: number, tid: string, dup?: boolean) => { const o = ownerOfTier(tid); return config.renderTierBadge!({ entryId: o.entryId, kind: "refund", index: i, tierId: o.tierId, tierIdDuplicated: dup }); } : undefined} fieldsApiPath={config.refundFieldsPath} sectionTitle="환불정보" colorFamilies={config.colorFamilies} />
             </div>
           )}
 
